@@ -9,11 +9,14 @@ from typing import Any, Callable
 from pyflayer.models.events import (
     ChatEvent,
     DeathEvent,
+    GoalFailedEvent,
+    GoalReachedEvent,
     HealthChangedEvent,
     KickedEvent,
     SpawnEvent,
     WhisperEvent,
 )
+from pyflayer.models.vec3 import Vec3
 
 
 class EventRelay:
@@ -98,6 +101,24 @@ class EventRelay:
             logged_in = bool(args[1]) if len(args) > 1 else False
             self._post(KickedEvent, KickedEvent(reason=reason, logged_in=logged_in))
 
+        @on_fn(js_bot, "goal_reached")
+        def _on_goal_reached(*_args: Any) -> None:
+            try:
+                pos = js_bot.entity.position
+                event = GoalReachedEvent(
+                    position=Vec3(float(pos.x), float(pos.y), float(pos.z))
+                )
+                self._post(GoalReachedEvent, event)
+            except (AttributeError, TypeError):
+                self._post(
+                    GoalReachedEvent,
+                    GoalReachedEvent(position=Vec3(0.0, 0.0, 0.0)),
+                )
+
+        @on_fn(js_bot, "path_stop")
+        def _on_path_stop(*_args: Any) -> None:
+            self._post(GoalFailedEvent, GoalFailedEvent(reason="path_stop"))
+
         self._js_handler_refs.extend([
             _on_spawn,
             _on_chat,
@@ -105,6 +126,8 @@ class EventRelay:
             _on_health,
             _on_death,
             _on_kicked,
+            _on_goal_reached,
+            _on_path_stop,
         ])
 
     # -- Handler management (called from ObserveAPI) --

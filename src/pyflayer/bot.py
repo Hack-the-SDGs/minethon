@@ -14,8 +14,8 @@ from pyflayer._bridge.runtime import BridgeRuntime
 from pyflayer.config import BotConfig
 from pyflayer.models.block import Block
 from pyflayer.models.entity import Entity, EntityKind
-from pyflayer.models.errors import NotSpawnedError
-from pyflayer.models.events import SpawnEvent
+from pyflayer.models.errors import NavigationError, NotSpawnedError
+from pyflayer.models.events import GoalFailedEvent, GoalReachedEvent, SpawnEvent
 from pyflayer.models.vec3 import Vec3
 
 E = TypeVar("E")
@@ -228,6 +228,8 @@ class Bot:
         self._controller = JSBotController(self._runtime, self._config)
         self._controller.create_bot()
 
+        self._controller.load_pathfinder()
+
         self._relay.register_js_events(
             self._controller.js_bot,
             self._runtime.js_module.On,
@@ -255,6 +257,8 @@ class Bot:
             return
         await self._observe.wait_for(SpawnEvent, timeout=timeout)
         self._spawned = True
+        if self._controller is not None:
+            self._controller.setup_pathfinder_movements()
 
     # -- State properties --
 
@@ -470,37 +474,40 @@ class Bot:
     async def goto(
         self, x: float, y: float, z: float, radius: float = 1.0
     ) -> None:
-        """Move the bot to a position using basic pathfinding.
+        """Move the bot to a position using A* pathfinding.
 
-        This is a simple walk-towards implementation without pathfinder.
-        The bot will walk in a straight line toward the target. For
-        obstacle-aware navigation, use :attr:`navigation` (M2).
+        Uses ``mineflayer-pathfinder`` for obstacle-aware navigation.
+        Resolves when the bot arrives within *radius* of the target,
+        or raises :class:`NavigationError` if no path is found.
 
         Args:
             x: Target X coordinate.
             y: Target Y coordinate.
             z: Target Z coordinate.
             radius: Acceptable distance from the target.
+
+        Raises:
+            NavigationError: If the pathfinder cannot reach the goal.
         """
         ctrl = self._ensure_connected()
-        target = Vec3(x, y, z)
 
-        # Simple approach: look at target and walk forward
-        ctrl.look_at(x, y + 1.6, z)  # eye height offset
-        ctrl.clear_control_states()
-        self._controller._js_bot.setControlState("forward", True)  # type: ignore[union-attr]
+        # Create futures for both possible outcomes
+        reached_fut = self._relay.wait_for(GoalReachedEvent, timeout=300.0)
+        failed_fut = self._relay.wait_for(GoalFailedEvent, timeout=300.0)
 
-        # Poll until within radius or timeout
-        for _ in range(200):  # ~10 seconds at 50ms intervals
-            await asyncio.sleep(0.05)
-            data = ctrl.get_position()
-            current = Vec3(data["x"], data["y"], data["z"])
-            if current.distance_to(target) <= radius:
-                break
-            # Re-orient toward target
-            ctrl.look_at(x, y + 1.6, z)
+        ctrl.set_goal_near(x, y, z, radius)
 
-        ctrl.clear_control_states()
+        done, pending = await asyncio.wait(
+            [asyncio.ensure_future(reached_fut), asyncio.ensure_future(failed_fut)],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+
+        result = done.pop().result()
+        if isinstance(result, GoalFailedEvent):
+            raise NavigationError(f"Navigation failed: {result.reason}")
 
     async def look_at(self, x: float, y: float, z: float) -> None:
         """Rotate the bot to look at a position.
@@ -522,8 +529,9 @@ class Bot:
         self._controller._js_bot.setControlState("jump", False)  # type: ignore[union-attr]
 
     async def stop(self) -> None:
-        """Stop all movement."""
+        """Stop all movement and cancel pathfinding."""
         ctrl = self._ensure_connected()
+        ctrl.stop_pathfinder()
         ctrl.clear_control_states()
 
     # -- Sub-APIs --

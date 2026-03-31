@@ -18,6 +18,8 @@ class JSBotController:
         self._runtime = runtime
         self._config = config
         self._js_bot: Any = None
+        self._pathfinder_goals: Any = None
+        self._pathfinder_loaded = False
 
     def create_bot(self) -> None:
         """Call ``mineflayer.createBot()`` — starts connecting immediately."""
@@ -209,6 +211,33 @@ class JSBotController:
     def use_item(self) -> None:
         """Activate the held item. Blocking."""
         self._js_bot.activateItem()
+
+    # -- Pathfinder --
+
+    def load_pathfinder(self) -> None:
+        """Load the mineflayer-pathfinder plugin. Call once after create_bot()."""
+        if self._pathfinder_loaded:
+            return
+        pf_mod = self._runtime.require("mineflayer-pathfinder")
+        self._js_bot.loadPlugin(pf_mod.pathfinder)
+        self._pathfinder_goals = pf_mod.goals
+        self._pathfinder_loaded = True
+
+    def setup_pathfinder_movements(self) -> None:
+        """Configure default Movements. Call after the bot has spawned."""
+        pf_mod = self._runtime.require("mineflayer-pathfinder")
+        mcdata = self._runtime.require("minecraft-data")(self._js_bot.version)
+        movements = pf_mod.Movements(self._js_bot, mcdata)
+        self._js_bot.pathfinder.setMovements(movements)
+
+    def set_goal_near(self, x: float, y: float, z: float, radius: float) -> None:
+        """Set a GoalNear target. The pathfinder starts navigating immediately."""
+        goal = self._pathfinder_goals.GoalNear(x, y, z, radius)
+        self._js_bot.pathfinder.setGoal(goal)
+
+    def stop_pathfinder(self) -> None:
+        """Clear the current pathfinder goal."""
+        self._js_bot.pathfinder.setGoal(None)
 
     # -- Movement --
 
