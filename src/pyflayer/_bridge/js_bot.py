@@ -191,7 +191,11 @@ class JSBotController:
         face_y: float,
         face_z: float,
     ) -> None:
-        """Place a block against a reference block face. Blocking."""
+        """Place a block against a reference block face. Blocking.
+
+        JSPyBridge blocks until the JS promise returned by
+        ``bot.placeBlock()`` settles.
+        """
         Vec3 = self._runtime.require("vec3").Vec3
         face_vec = Vec3(face_x, face_y, face_z)
         self._js_bot.placeBlock(js_reference_block, face_vec)
