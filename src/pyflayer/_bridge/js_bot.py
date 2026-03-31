@@ -128,8 +128,10 @@ class JSBotController:
         Returns the raw JS Entity proxy or ``None``.
         """
         entities = self._js_bot.entities
-        entity = getattr(entities, str(entity_id), None)
-        return entity
+        try:
+            return entities[str(entity_id)]
+        except (KeyError, TypeError):
+            return None
 
     def get_entity_by_filter(
         self,
