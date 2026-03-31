@@ -258,14 +258,15 @@ class Bot:
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
-        self._connected = True
 
-        # Update internal state when the connection drops remotely
+        # Register internal EndEvent handler *before* setting _connected,
+        # so an immediate "end" event (e.g. connection refused) is caught.
         async def _on_end(_event: EndEvent) -> None:
             self._connected = False
             self._spawned = False
 
         self._relay.add_handler(EndEvent, _on_end)  # type: ignore[arg-type]
+        self._connected = True
 
     async def disconnect(self) -> None:
         """Disconnect from the server and clean up."""
