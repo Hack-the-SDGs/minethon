@@ -101,8 +101,18 @@ class ObserveAPI:
         self._relay.remove_handler(event_type, handler)  # type: ignore[arg-type]
 
     async def wait_for(self, event_type: type[E], *, timeout: float = 30.0) -> E:
-        """Wait for a single event occurrence."""
-        return await self._relay.wait_for(event_type, timeout=timeout)  # type: ignore[return-value]
+        """Wait for a single event occurrence.
+
+        Raises:
+            PyflayerConnectionError: If called before ``Bot.connect()``.
+            asyncio.TimeoutError: If no event arrives within *timeout* seconds.
+        """
+        try:
+            return await self._relay.wait_for(event_type, timeout=timeout)  # type: ignore[return-value]
+        except RuntimeError as exc:
+            raise PyflayerConnectionError(
+                "Bot is not connected; call Bot.connect() before wait_for()."
+            ) from exc
 
     @overload
     def on_raw(
