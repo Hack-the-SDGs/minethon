@@ -201,13 +201,21 @@ class JSBotController:
         self._js_bot.placeBlock(js_reference_block, face_vec)
 
     def equip_item(self, item_name: str) -> None:
-        """Equip an item by name to the hand. Blocking."""
+        """Equip an item by name to the hand. Blocking.
+
+        JSPyBridge blocks until the JS promise returned by
+        ``bot.equip()`` settles.
+
+        Raises:
+            ValueError: If the item is not found in the inventory.
+        """
         inv = self._js_bot.inventory
         items = inv.items()
         for item in items:
             if str(item.name) == item_name:
                 self._js_bot.equip(item, "hand")
                 return
+        raise ValueError(f"Item '{item_name}' not found in inventory")
 
     def attack(self, js_entity: Any) -> None:
         """Attack an entity. Blocking."""
