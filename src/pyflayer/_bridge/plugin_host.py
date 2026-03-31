@@ -37,20 +37,14 @@ class PluginHost:
     def setup_pathfinder_movements(self) -> None:
         """Configure default Movements.  Call after bot has spawned.
 
-        The defaults are conservative: digging and scaffolding are
-        disabled so the bot only walks/jumps around obstacles.  Users
-        who need dig-through or pillar-up behaviour can reconfigure
-        via ``bot.raw``.
+        Uses the pathfinder's built-in defaults which enable digging,
+        scaffolding, parkour and sprinting.  The ``Movements``
+        constructor reads ``bot.registry`` internally so no separate
+        ``minecraft-data`` import is needed.
         """
         try:
             pf_mod = self._runtime.require("mineflayer-pathfinder")
-            mcdata = self._runtime.require("minecraft-data")(
-                self._js_bot.version
-            )
-            movements = pf_mod.Movements(self._js_bot, mcdata)
-            movements.canDig = False
-            movements.allow1by1towers = False
-            movements.scafoldingBlocks = []
+            movements = pf_mod.Movements(self._js_bot)
             self._js_bot.pathfinder.setMovements(movements)
         except Exception as exc:
             raise BridgeError(

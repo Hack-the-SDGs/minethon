@@ -32,31 +32,14 @@ class TestPluginHostPathfinder:
         js_bot.loadPlugin.assert_called_once()
 
     def test_setup_pathfinder_movements(self) -> None:
-        host, runtime, js_bot, pf_mod = self._make_host()
-        mcdata_fn = MagicMock()
-        mcdata = MagicMock()
-        mcdata_fn.return_value = mcdata
+        host, _runtime, js_bot, pf_mod = self._make_host()
         movements = MagicMock()
         pf_mod.Movements.return_value = movements
 
-        def side_effect(module: str) -> MagicMock:
-            if module == "mineflayer-pathfinder":
-                return pf_mod
-            if module == "minecraft-data":
-                return mcdata_fn
-            return MagicMock()
-
-        runtime.require.side_effect = side_effect
-        js_bot.version = "1.20.4"
-
         host.load_pathfinder()
         host.setup_pathfinder_movements()
-        pf_mod.Movements.assert_called_once_with(js_bot, mcdata)
+        pf_mod.Movements.assert_called_once_with(js_bot)
         js_bot.pathfinder.setMovements.assert_called_once_with(movements)
-        # Conservative defaults: no digging, no scaffolding
-        assert movements.canDig is False
-        assert movements.allow1by1towers is False
-        assert movements.scafoldingBlocks == []
 
     def test_set_goal_near(self) -> None:
         host, _rt, js_bot, pf_mod = self._make_host()
