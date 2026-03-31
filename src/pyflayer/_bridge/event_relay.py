@@ -6,7 +6,14 @@ from collections import defaultdict
 from collections.abc import Coroutine
 from typing import Any, Callable
 
-from pyflayer.models.events import ChatEvent, SpawnEvent
+from pyflayer.models.events import (
+    ChatEvent,
+    DeathEvent,
+    HealthChangedEvent,
+    KickedEvent,
+    SpawnEvent,
+    WhisperEvent,
+)
 
 
 class EventRelay:
@@ -20,6 +27,10 @@ class EventRelay:
             defaultdict(list)
         )
         self._waiters: dict[type, list[asyncio.Future[Any]]] = defaultdict(list)
+        # Raw event handlers keyed by JS event name
+        self._raw_handlers: dict[
+            str, list[Callable[..., Coroutine[Any, Any, None]]]
+        ] = defaultdict(list)
         # Strong refs to prevent GC (JSPyBridge uses WeakValueDictionary)
         self._js_handler_refs: list[Any] = []
 
@@ -41,9 +52,6 @@ class EventRelay:
 
         @on_fn(js_bot, "chat")
         def _on_chat(*args: Any) -> None:
-            # When node_emitter_patches is off (Node 16+): args = (username, message, ...)
-            # When on (legacy Node): args = (emitter, username, message, ...)
-            # We accept both by using *args and extracting the first two strings.
             if len(args) < 2:
                 return
             username = str(args[0])
@@ -55,8 +63,49 @@ class EventRelay:
             )
             self._post(ChatEvent, event)
 
-        # CRITICAL: prevent garbage collection of callback references
-        self._js_handler_refs.extend([_on_spawn, _on_chat])
+        @on_fn(js_bot, "whisper")
+        def _on_whisper(*args: Any) -> None:
+            if len(args) < 2:
+                return
+            username = str(args[0])
+            message = str(args[1])
+            event = WhisperEvent(
+                sender=username,
+                message=message,
+                timestamp=time.time(),
+            )
+            self._post(WhisperEvent, event)
+
+        @on_fn(js_bot, "health")
+        def _on_health(*_args: Any) -> None:
+            try:
+                event = HealthChangedEvent(
+                    health=float(js_bot.health),
+                    food=float(js_bot.food),
+                    saturation=float(js_bot.foodSaturation),
+                )
+                self._post(HealthChangedEvent, event)
+            except (AttributeError, TypeError):
+                pass
+
+        @on_fn(js_bot, "death")
+        def _on_death(*_args: Any) -> None:
+            self._post(DeathEvent, DeathEvent(reason=None))
+
+        @on_fn(js_bot, "kicked")
+        def _on_kicked(*args: Any) -> None:
+            reason = str(args[0]) if len(args) > 0 else "unknown"
+            logged_in = bool(args[1]) if len(args) > 1 else False
+            self._post(KickedEvent, KickedEvent(reason=reason, logged_in=logged_in))
+
+        self._js_handler_refs.extend([
+            _on_spawn,
+            _on_chat,
+            _on_whisper,
+            _on_health,
+            _on_death,
+            _on_kicked,
+        ])
 
     # -- Handler management (called from ObserveAPI) --
 
@@ -71,6 +120,36 @@ class EventRelay:
     ) -> None:
         """Unregister an async handler."""
         self._handlers[event_type].remove(handler)
+
+    def add_raw_handler(
+        self, event_name: str, handler: Callable[..., Coroutine[Any, Any, None]]
+    ) -> None:
+        """Register an async handler for a raw JS event name."""
+        self._raw_handlers[event_name].append(handler)
+
+    def remove_raw_handler(
+        self, event_name: str, handler: Callable[..., Coroutine[Any, Any, None]]
+    ) -> None:
+        """Unregister a raw event handler."""
+        self._raw_handlers[event_name].remove(handler)
+
+    def bind_raw_js_event(
+        self, js_bot: Any, on_fn: Any, event_name: str
+    ) -> None:
+        """Dynamically bind a raw JS event for ``on_raw()`` subscribers.
+
+        Args:
+            js_bot: The JS bot proxy.
+            on_fn: The ``On`` decorator from JSPyBridge.
+            event_name: The JS event name to listen for.
+        """
+
+        @on_fn(js_bot, event_name)
+        def _on_raw(*args: Any) -> None:
+            data: dict[str, Any] = {"args": list(args)}
+            self._post_raw(event_name, data)
+
+        self._js_handler_refs.append(_on_raw)
 
     async def wait_for(self, event_type: type, *, timeout: float = 30.0) -> Any:
         """Wait for a single event of the given type."""
@@ -95,13 +174,27 @@ class EventRelay:
             except RuntimeError:
                 pass  # Event loop closed during shutdown
 
+    def _post_raw(self, event_name: str, data: dict[str, Any]) -> None:
+        """Thread-safe post for raw events."""
+        if self._loop is not None and self._loop.is_running():
+            try:
+                self._loop.call_soon_threadsafe(
+                    self._dispatch_raw, event_name, data
+                )
+            except RuntimeError:
+                pass
+
     def _dispatch(self, event_type: type, event: object) -> None:
         """Runs on the asyncio event loop thread."""
-        # Resolve waiters
         for fut in self._waiters.pop(event_type, []):
             if not fut.done():
                 fut.set_result(event)
-        # Call registered handlers
         if self._loop is not None:
             for handler in self._handlers.get(event_type, []):
                 self._loop.create_task(handler(event))
+
+    def _dispatch_raw(self, event_name: str, data: dict[str, Any]) -> None:
+        """Dispatch raw events on the asyncio event loop thread."""
+        if self._loop is not None:
+            for handler in self._raw_handlers.get(event_name, []):
+                self._loop.create_task(handler(data))
