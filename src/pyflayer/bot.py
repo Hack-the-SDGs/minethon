@@ -413,7 +413,7 @@ class Bot:
                 :meth:`block_at` to obtain one.
 
         Raises:
-            NotSpawnedError: If the bot is not connected.
+            PyflayerConnectionError: If the bot is not connected.
         """
         ctrl = self._ensure_connected()
         # We need the JS block proxy, so re-query by position
@@ -442,7 +442,7 @@ class Bot:
             item_name: If provided, equip this item before placing.
 
         Raises:
-            NotSpawnedError: If the bot is not connected.
+            PyflayerConnectionError: If the bot is not connected.
         """
         ctrl = self._ensure_connected()
         if item_name is not None:
