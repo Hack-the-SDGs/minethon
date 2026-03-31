@@ -377,32 +377,33 @@ class Bot:
             InventoryError: If *item_name* is not found in inventory.
             BridgeError: If the JS place operation fails.
         """
-        ctrl = self._ensure_connected()
-        if item_name is not None:
-            if not ctrl.start_equip(item_name):
-                raise InventoryError(
-                    f"Item '{item_name}' not found in inventory"
+        async with self._place_lock:
+            ctrl = self._ensure_connected()
+            if item_name is not None:
+                if not ctrl.start_equip(item_name):
+                    raise InventoryError(
+                        f"Item '{item_name}' not found in inventory"
+                    )
+                equip_event = await self._relay.wait_for(
+                    _EquipDoneEvent, timeout=10.0
                 )
-            equip_event = await self._relay.wait_for(
-                _EquipDoneEvent, timeout=10.0
-            )
-            if equip_event.error is not None:
-                raise InventoryError(f"equip failed: {equip_event.error}")
+                if equip_event.error is not None:
+                    raise InventoryError(f"equip failed: {equip_event.error}")
 
-        js_block = ctrl.block_at(
-            int(reference_block.position.x),
-            int(reference_block.position.y),
-            int(reference_block.position.z),
-        )
-        if js_block is None:
-            raise PyflayerError(
-                f"Block at {reference_block.position} is no longer available "
-                "(chunk unloaded or block changed)"
+            js_block = ctrl.block_at(
+                int(reference_block.position.x),
+                int(reference_block.position.y),
+                int(reference_block.position.z),
             )
-        ctrl.start_place(js_block, face.x, face.y, face.z)
-        event = await self._relay.wait_for(_PlaceDoneEvent, timeout=30.0)
-        if event.error is not None:
-            raise BridgeError(f"place failed: {event.error}")
+            if js_block is None:
+                raise PyflayerError(
+                    f"Block at {reference_block.position} is no longer available "
+                    "(chunk unloaded or block changed)"
+                )
+            ctrl.start_place(js_block, face.x, face.y, face.z)
+            event = await self._relay.wait_for(_PlaceDoneEvent, timeout=30.0)
+            if event.error is not None:
+                raise BridgeError(f"place failed: {event.error}")
 
     async def use_item(self) -> None:
         """Activate the currently held item."""
