@@ -44,13 +44,19 @@ class ObserveAPI:
     def __init__(self, relay: EventRelay) -> None:
         self._relay = relay
         self._bound_raw_events: set[str] = set()
+        self._pending_raw_events: set[str] = set()
         self._js_bot: Any = None
         self._on_fn: Any = None
 
     def _bind_js(self, js_bot: Any, on_fn: Any) -> None:
-        """Store JS references for lazy raw event binding."""
+        """Store JS references and bind any queued raw events."""
         self._js_bot = js_bot
         self._on_fn = on_fn
+        # Bind raw events that were registered before connect()
+        for event_name in self._pending_raw_events:
+            self._relay.bind_raw_js_event(js_bot, on_fn, event_name)
+            self._bound_raw_events.add(event_name)
+        self._pending_raw_events.clear()
 
     @overload
     def on(self, event_type: type[E]) -> Callable[[_Handler[E]], _Handler[E]]: ...
@@ -135,16 +141,15 @@ class ObserveAPI:
             Raw event data is not typed or validated.
         """
         def _register(fn: Callable[[dict], Awaitable[None]]) -> None:
-            # Lazily bind the JS event the first time someone subscribes
-            if (
-                event_name not in self._bound_raw_events
-                and self._js_bot is not None
-                and self._on_fn is not None
-            ):
-                self._relay.bind_raw_js_event(
-                    self._js_bot, self._on_fn, event_name
-                )
-                self._bound_raw_events.add(event_name)
+            if event_name not in self._bound_raw_events:
+                if self._js_bot is not None and self._on_fn is not None:
+                    self._relay.bind_raw_js_event(
+                        self._js_bot, self._on_fn, event_name
+                    )
+                    self._bound_raw_events.add(event_name)
+                else:
+                    # Queue for binding once connect() provides JS refs
+                    self._pending_raw_events.add(event_name)
             self._relay.add_raw_handler(event_name, fn)  # type: ignore[arg-type]
 
         if handler is not None:
