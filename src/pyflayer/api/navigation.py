@@ -72,8 +72,22 @@ class NavigationAPI:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
 
-            for task in done:
-                exc = task.exception()
+            # Check futures in deterministic order: prioritise a
+            # successful GoalReachedEvent over GoalFailedEvent when
+            # both complete in the same tick.
+            if reached_fut in done:
+                exc = reached_fut.exception()
+                if exc is None:
+                    return  # goal reached — success
+                self._host.stop_pathfinder()
+                if isinstance(exc, asyncio.TimeoutError):
+                    raise NavigationError("Navigation timed out") from exc
+                raise NavigationError(
+                    f"Navigation failed: {exc}"
+                ) from exc
+
+            if failed_fut in done:
+                exc = failed_fut.exception()
                 if exc is not None:
                     self._host.stop_pathfinder()
                     if isinstance(exc, asyncio.TimeoutError):
@@ -83,10 +97,7 @@ class NavigationAPI:
                     raise NavigationError(
                         f"Navigation failed: {exc}"
                     ) from exc
-
-                result = task.result()
-                if isinstance(result, GoalReachedEvent):
-                    return
+                result = failed_fut.result()
                 if isinstance(result, GoalFailedEvent):
                     self._host.stop_pathfinder()
                     raise NavigationError(
