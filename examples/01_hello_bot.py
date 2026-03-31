@@ -7,7 +7,7 @@ from pyflayer.models.events import ChatEvent
 
 
 async def main() -> None:
-    bot = Bot(host="192.168.10.101", port=50213, username="pybot")
+    bot = Bot(host="localhost", port=25565, username="pybot")
 
     @bot.observe.on(ChatEvent)
     async def on_chat(event: ChatEvent) -> None:
