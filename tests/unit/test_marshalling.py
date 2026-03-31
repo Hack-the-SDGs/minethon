@@ -134,6 +134,48 @@ class TestJsEntityToEntity:
         entity = js_entity_to_entity(js_entity)
         assert entity.name is None
 
+    def test_metadata_dict(self) -> None:
+        """Entity with dict-like metadata should be populated."""
+        meta = SimpleNamespace()
+        meta.valueOf = lambda: {"key": "value"}
+
+        js_entity = SimpleNamespace(
+            id=20,
+            name="villager",
+            type="mob",
+            position=_mock_vec3(0.0, 0.0, 0.0),
+            metadata=meta,
+        )
+        entity = js_entity_to_entity(js_entity)
+        assert entity.metadata == {"key": "value"}
+
+    def test_metadata_non_dict_ignored(self) -> None:
+        """Entity with non-dict valueOf result should leave metadata as None."""
+        meta = SimpleNamespace()
+        meta.valueOf = lambda: [1, 2, 3]
+
+        js_entity = SimpleNamespace(
+            id=21,
+            name="cow",
+            type="animal",
+            position=_mock_vec3(0.0, 0.0, 0.0),
+            metadata=meta,
+        )
+        entity = js_entity_to_entity(js_entity)
+        assert entity.metadata is None
+
+    def test_metadata_no_valueof(self) -> None:
+        """Entity without valueOf on metadata should leave metadata as None."""
+        js_entity = SimpleNamespace(
+            id=22,
+            name="pig",
+            type="animal",
+            position=_mock_vec3(0.0, 0.0, 0.0),
+            metadata="not_a_proxy",
+        )
+        entity = js_entity_to_entity(js_entity)
+        assert entity.metadata is None
+
 
 class TestJsItemToItemStack:
     def test_basic_item(self) -> None:
