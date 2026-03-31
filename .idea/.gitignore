@@ -1,0 +1,20 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Ignored default folder with query files
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+inspectionProfiles/
+copilot.data.migration.ask2agent.xml
+discord.xml
+go.imports.xml
+misc.xml
+modules.xml
+swift-toolchain.xml
+vcs.xml
+*.iml
