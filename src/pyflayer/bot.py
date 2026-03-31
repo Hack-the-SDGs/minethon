@@ -256,6 +256,12 @@ class Bot:
         """
         if self._connected:
             return
+
+        # Clean up stale resources from a previous session (e.g. after a
+        # remote EndEvent flipped _connected but left runtime alive).
+        if self._runtime is not None or self._controller is not None:
+            await self.disconnect()
+
         loop = asyncio.get_running_loop()
         self._relay.set_loop(loop)
 
