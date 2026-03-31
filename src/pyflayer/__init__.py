@@ -5,7 +5,7 @@ from pyflayer.models.block import Block
 from pyflayer.models.entity import Entity, EntityKind
 from pyflayer.models.errors import (
     BridgeError,
-    ConnectionError,
+    PyflayerConnectionError,
     InventoryError,
     NavigationError,
     NotSpawnedError,
@@ -19,7 +19,7 @@ __all__ = [
     "Block",
     "Bot",
     "BridgeError",
-    "ConnectionError",
+    "PyflayerConnectionError",
     "Entity",
     "EntityKind",
     "InventoryError",

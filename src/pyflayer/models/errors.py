@@ -5,7 +5,7 @@ class PyflayerError(Exception):
     """Base exception for all pyflayer errors."""
 
 
-class ConnectionError(PyflayerError):
+class PyflayerConnectionError(PyflayerError):
     """Connection failed or disconnected."""
 
 
