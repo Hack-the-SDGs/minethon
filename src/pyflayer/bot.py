@@ -15,7 +15,12 @@ from pyflayer.config import BotConfig
 from pyflayer.models.block import Block
 from pyflayer.models.entity import Entity, EntityKind
 from pyflayer.models.errors import NavigationError, PyflayerConnectionError
-from pyflayer.models.events import GoalFailedEvent, GoalReachedEvent, SpawnEvent
+from pyflayer.models.events import (
+    EndEvent,
+    GoalFailedEvent,
+    GoalReachedEvent,
+    SpawnEvent,
+)
 from pyflayer.models.vec3 import Vec3
 
 E = TypeVar("E")
@@ -244,6 +249,13 @@ class Bot:
             self._runtime.js_module.On,
         )
         self._connected = True
+
+        # Update internal state when the connection drops remotely
+        async def _on_end(_event: EndEvent) -> None:
+            self._connected = False
+            self._spawned = False
+
+        self._relay.add_handler(EndEvent, _on_end)  # type: ignore[arg-type]
 
     async def disconnect(self) -> None:
         """Disconnect from the server and clean up."""

@@ -45,6 +45,13 @@ class DeathEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class EndEvent:
+    """Bot connection has ended (kicked, quit, or network error)."""
+
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class KickedEvent:
     """Bot was kicked from the server."""
 
