@@ -122,6 +122,15 @@ class JSBotController:
                 results.append(block)
         return results
 
+    def get_entity_by_id(self, entity_id: int) -> Any | None:
+        """Look up an entity by its numeric ID.
+
+        Returns the raw JS Entity proxy or ``None``.
+        """
+        entities = self._js_bot.entities
+        entity = getattr(entities, str(entity_id), None)
+        return entity
+
     def get_entity_by_filter(
         self,
         name: str | None,

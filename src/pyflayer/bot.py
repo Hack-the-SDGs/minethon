@@ -460,12 +460,11 @@ class Bot:
         """Attack an entity.
 
         Args:
-            entity: The :class:`Entity` to attack.
+            entity: The :class:`Entity` to attack. Looked up by
+                numeric entity ID for precision.
         """
         ctrl = self._ensure_connected()
-        js_entity = ctrl.get_entity_by_filter(
-            entity.name, None, 32,
-        )
+        js_entity = ctrl.get_entity_by_id(entity.id)
         if js_entity is not None:
             ctrl.attack(js_entity)
 
