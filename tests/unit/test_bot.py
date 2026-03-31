@@ -146,6 +146,11 @@ class TestBotState:
         with pytest.raises(NotSpawnedError):
             _ = bot.position
 
+    def test_navigation_not_connected_raises(self) -> None:
+        bot = Bot(host="localhost")
+        with pytest.raises(PyflayerConnectionError):
+            _ = bot.navigation
+
     def test_not_spawned_is_alive_raises(self) -> None:
         bot = Bot(host="localhost")
         bot._connected = True

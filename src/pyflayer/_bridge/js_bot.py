@@ -39,8 +39,6 @@ class JSBotController:
         self._runtime = runtime
         self._config = config
         self._js_bot: Any = None
-        self._pathfinder_goals: Any = None
-        self._pathfinder_loaded = False
         self._helpers: Any = None
 
     def create_bot(self) -> None:
@@ -313,45 +311,6 @@ class JSBotController:
             self._helpers.startLookAt(self._js_bot, pos)
         except Exception as exc:
             raise BridgeError(f"start_look_at failed: {exc}") from exc
-
-    # -- Pathfinder --
-
-    def load_pathfinder(self) -> None:
-        """Load the mineflayer-pathfinder plugin. Call once after create_bot()."""
-        if self._pathfinder_loaded:
-            return
-        try:
-            pf_mod = self._runtime.require("mineflayer-pathfinder")
-            self._js_bot.loadPlugin(pf_mod.pathfinder)
-            self._pathfinder_goals = pf_mod.goals
-            self._pathfinder_loaded = True
-        except Exception as exc:
-            raise BridgeError(f"load_pathfinder failed: {exc}") from exc
-
-    def setup_pathfinder_movements(self) -> None:
-        """Configure default Movements. Call after the bot has spawned."""
-        try:
-            pf_mod = self._runtime.require("mineflayer-pathfinder")
-            mcdata = self._runtime.require("minecraft-data")(self._js_bot.version)
-            movements = pf_mod.Movements(self._js_bot, mcdata)
-            self._js_bot.pathfinder.setMovements(movements)
-        except Exception as exc:
-            raise BridgeError(f"setup_pathfinder_movements failed: {exc}") from exc
-
-    def set_goal_near(self, x: float, y: float, z: float, radius: float) -> None:
-        """Set a GoalNear target. The pathfinder starts navigating immediately."""
-        try:
-            goal = self._pathfinder_goals.GoalNear(x, y, z, radius)
-            self._js_bot.pathfinder.setGoal(goal)
-        except Exception as exc:
-            raise BridgeError(f"set_goal_near failed: {exc}") from exc
-
-    def stop_pathfinder(self) -> None:
-        """Clear the current pathfinder goal."""
-        try:
-            self._js_bot.pathfinder.setGoal(None)
-        except Exception as exc:
-            raise BridgeError(f"stop_pathfinder failed: {exc}") from exc
 
     # -- Movement (quick-returning) --
 

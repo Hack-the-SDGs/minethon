@@ -14,7 +14,9 @@ from pyflayer._bridge.marshalling import (
     js_block_to_block,
     js_entity_to_entity,
 )
+from pyflayer._bridge.plugin_host import PluginHost
 from pyflayer._bridge.runtime import BridgeRuntime
+from pyflayer.api.navigation import NavigationAPI
 from pyflayer.api.observe import ObserveAPI
 from pyflayer.config import BotConfig
 from pyflayer.models.block import Block
@@ -22,15 +24,12 @@ from pyflayer.models.entity import Entity, EntityKind
 from pyflayer.models.errors import (
     BridgeError,
     InventoryError,
-    NavigationError,
     NotSpawnedError,
     PyflayerConnectionError,
     PyflayerError,
 )
 from pyflayer.models.events import (
     EndEvent,
-    GoalFailedEvent,
-    GoalReachedEvent,
     SpawnEvent,
 )
 from pyflayer.models.vec3 import Vec3
@@ -72,6 +71,8 @@ class Bot:
         self._controller: JSBotController | None = None
         self._connected = False
         self._spawned = False
+        self._plugin_host: PluginHost | None = None
+        self._navigation: NavigationAPI | None = None
 
     def _ensure_connected(self) -> JSBotController:
         """Return the controller or raise if not connected."""
@@ -117,7 +118,11 @@ class Bot:
         self._controller = JSBotController(self._runtime, self._config)
         self._controller.create_bot()
 
-        self._controller.load_pathfinder()
+        self._plugin_host = PluginHost(self._runtime, self._controller.js_bot)
+        self._plugin_host.load_pathfinder()
+        self._navigation = NavigationAPI(
+            self._plugin_host, self._controller, self._relay
+        )
 
         self._relay.register_js_events(
             self._controller.js_bot,
@@ -148,6 +153,8 @@ class Bot:
             if self._connected:
                 self._controller.quit()
             self._controller = None
+        self._navigation = None
+        self._plugin_host = None
         if self._runtime is not None:
             self._runtime.shutdown()
             self._runtime = None
@@ -160,8 +167,8 @@ class Bot:
             return
         await self._observe.wait_for(SpawnEvent, timeout=timeout)
         self._spawned = True
-        if self._controller is not None:
-            self._controller.setup_pathfinder_movements()
+        if self._plugin_host is not None:
+            self._plugin_host.setup_pathfinder_movements()
 
     # -- State properties --
 
@@ -403,9 +410,8 @@ class Bot:
     ) -> None:
         """Move the bot to a position using A* pathfinding.
 
+        Convenience wrapper for ``bot.navigation.goto()``.
         Uses ``mineflayer-pathfinder`` for obstacle-aware navigation.
-        Resolves when the bot arrives within *radius* of the target,
-        or raises :class:`NavigationError` if no path is found.
 
         Args:
             x: Target X coordinate.
@@ -417,43 +423,8 @@ class Bot:
             NotSpawnedError: If ``wait_until_spawned()`` has not completed.
             NavigationError: If the pathfinder cannot reach the goal.
         """
-        ctrl = self._ensure_spawned()
-
-        reached_fut = asyncio.ensure_future(
-            self._relay.wait_for(GoalReachedEvent, timeout=300.0)
-        )
-        failed_fut = asyncio.ensure_future(
-            self._relay.wait_for(GoalFailedEvent, timeout=300.0)
-        )
-
-        ctrl.set_goal_near(x, y, z, radius)
-
-        done, pending = await asyncio.wait(
-            [reached_fut, failed_fut],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        for task in pending:
-            task.cancel()
-        # Allow cancellation to propagate so waiters are cleaned up
-        await asyncio.gather(*pending, return_exceptions=True)
-
-        for task in done:
-            exc = task.exception()
-            if exc is not None:
-                ctrl.stop_pathfinder()
-                if isinstance(exc, asyncio.TimeoutError):
-                    raise NavigationError("Navigation timed out") from exc
-                raise NavigationError(f"Navigation failed: {exc}") from exc
-
-            result = task.result()
-            if isinstance(result, GoalReachedEvent):
-                return
-            if isinstance(result, GoalFailedEvent):
-                ctrl.stop_pathfinder()
-                raise NavigationError(
-                    f"Navigation failed: {result.reason}"
-                )
+        self._ensure_spawned()
+        await self.navigation.goto(x, y, z, radius=radius)
 
     async def look_at(self, x: float, y: float, z: float) -> None:
         """Rotate the bot to look at a position.
@@ -479,10 +450,17 @@ class Bot:
     async def stop(self) -> None:
         """Stop all movement and cancel pathfinding."""
         ctrl = self._ensure_connected()
-        ctrl.stop_pathfinder()
+        await self.navigation.stop()
         ctrl.clear_control_states()
 
     # -- Sub-APIs --
+
+    @property
+    def navigation(self) -> NavigationAPI:
+        """Path-planning and movement control API."""
+        if self._navigation is None:
+            raise PyflayerConnectionError("Bot is not connected.")
+        return self._navigation
 
     @property
     def observe(self) -> ObserveAPI:
