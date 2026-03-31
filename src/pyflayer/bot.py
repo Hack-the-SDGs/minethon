@@ -14,7 +14,11 @@ from pyflayer._bridge.runtime import BridgeRuntime
 from pyflayer.config import BotConfig
 from pyflayer.models.block import Block
 from pyflayer.models.entity import Entity, EntityKind
-from pyflayer.models.errors import NavigationError, PyflayerConnectionError
+from pyflayer.models.errors import (
+    NavigationError,
+    NotSpawnedError,
+    PyflayerConnectionError,
+)
 from pyflayer.models.events import (
     EndEvent,
     GoalFailedEvent,
@@ -229,6 +233,19 @@ class Bot:
             raise PyflayerConnectionError("Bot is not connected.")
         return self._controller
 
+    def _ensure_spawned(self) -> JSBotController:
+        """Return the controller or raise if not spawned.
+
+        Implies connected — raises ``PyflayerConnectionError`` first if
+        not connected, then ``NotSpawnedError`` if not yet spawned.
+        """
+        ctrl = self._ensure_connected()
+        if not self._spawned:
+            raise NotSpawnedError(
+                "Bot has not spawned yet. Call wait_until_spawned() first."
+            )
+        return ctrl
+
     # -- Lifecycle --
 
     async def connect(self) -> None:
@@ -303,26 +320,38 @@ class Bot:
     @property
     def is_alive(self) -> bool:
         """Whether the bot entity is alive (health > 0)."""
-        ctrl = self._ensure_connected()
+        ctrl = self._ensure_spawned()
         return ctrl.is_alive()
 
     @property
     def position(self) -> Vec3:
-        """Current bot position."""
-        ctrl = self._ensure_connected()
+        """Current bot position.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
         data = ctrl.get_position()
         return Vec3(x=data["x"], y=data["y"], z=data["z"])
 
     @property
     def health(self) -> float:
-        """Bot health (0–20)."""
-        ctrl = self._ensure_connected()
+        """Bot health (0–20).
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
         return ctrl.get_health()
 
     @property
     def food(self) -> float:
-        """Bot food level (0–20)."""
-        ctrl = self._ensure_connected()
+        """Bot food level (0–20).
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
         return ctrl.get_food()
 
     @property
@@ -537,9 +566,10 @@ class Bot:
             radius: Acceptable distance from the target.
 
         Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
             NavigationError: If the pathfinder cannot reach the goal.
         """
-        ctrl = self._ensure_connected()
+        ctrl = self._ensure_spawned()
 
         # Create futures for both possible outcomes
         reached_fut = self._relay.wait_for(GoalReachedEvent, timeout=300.0)
