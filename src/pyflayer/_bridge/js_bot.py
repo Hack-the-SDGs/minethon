@@ -51,7 +51,7 @@ class JSBotController:
         }
         # Optional fields — only set when explicitly provided so mineflayer
         # uses its own defaults for unset values.
-        _OPTIONAL: list[tuple[str, str]] = [
+        optional_fields: list[tuple[str, str]] = [
             ("password", "password"),
             ("hide_errors", "hideErrors"),
             ("disable_chat_signing", "disableChatSigning"),
@@ -72,7 +72,7 @@ class JSBotController:
             ("profiles_folder", "profilesFolder"),
             ("load_internal_plugins", "loadInternalPlugins"),
         ]
-        for py_attr, js_key in _OPTIONAL:
+        for py_attr, js_key in optional_fields:
             value = getattr(self._config, py_attr)
             if value is not None:
                 options[js_key] = value
