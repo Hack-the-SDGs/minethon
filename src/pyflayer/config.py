@@ -24,7 +24,8 @@ class BotConfig:
         log_errors: Log errors to the console.
         disable_chat_signing: Disable chat message signing (1.19.1+).
         check_timeout_interval: Milliseconds between keep-alive checks.
-            Set to ``0`` to disable. Defaults to ``30_000``.
+            Set to ``0`` to disable. ``None`` uses mineflayer's default
+            (currently ``30_000``).
         keep_alive: Send keep-alive packets.
         respawn: Auto-respawn after death.
         chat_length_limit: Maximum chat message length.
