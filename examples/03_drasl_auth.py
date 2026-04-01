@@ -1,27 +1,25 @@
-"""01_hello_bot.py -- Basic pyflayer bot."""
+"""03_drasl_auth.py -- Connect via a custom Drasl auth server.
+
+Run with:
+    uv run --env-file examples/.env examples/03_drasl_auth.py
+"""
 
 import asyncio
+import os
 
 from pyflayer import Bot
-from pyflayer.models.events import ChatEvent
 
 
 async def main() -> None:
     bot = Bot(
         host="localhost",
         port=25565,
-        username="pybot",
+        username=os.environ["MC_USERNAME"],
+        password=os.environ["MC_PASSWORD"],
         auth="mojang",
-        password="hunter2",
-        auth_server="https://drasl.example.com/auth",
-        session_server="https://drasl.example.com/session",
-        disable_chat_signing=True,
+        auth_server=os.environ["MC_AUTH_SERVER"],
+        session_server=os.environ["MC_SESSION_SERVER"],
     )
-
-    @bot.observe.on(ChatEvent)
-    async def on_chat(event: ChatEvent) -> None:
-        if event.sender != bot.username:
-            await bot.chat(f"You said: {event.message}")
 
     await bot.connect()
     await bot.wait_until_spawned()
