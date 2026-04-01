@@ -456,6 +456,7 @@ class Bot:
         Raises:
             NotSpawnedError: If ``wait_until_spawned()`` has not completed.
             NavigationError: If the pathfinder cannot reach the goal.
+            BridgeError: If a low-level bridge or pathfinding operation fails.
         """
         self._ensure_spawned()
         await self.navigation.goto(x, y, z, radius=radius)
