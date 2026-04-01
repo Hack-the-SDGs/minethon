@@ -172,7 +172,7 @@ class TestNavigationFollow:
         await nav.follow("Steve")
 
         host.set_goal_follow.assert_called_once()
-        _, args, _ = host.set_goal_follow.mock_calls[0]
+        args, _kwargs = host.set_goal_follow.call_args
         assert args[1] == 2.0
 
     @pytest.mark.asyncio
