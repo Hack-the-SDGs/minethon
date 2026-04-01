@@ -163,9 +163,14 @@ class Bot:
         Safe to call even after a remote disconnect -- the runtime and
         controller are always cleaned up if they exist.
         """
+        if self._on_end_handler is not None:
+            try:
+                self._relay.remove_handler(EndEvent, self._on_end_handler)  # type: ignore[arg-type]
+            except ValueError:
+                pass  # Handler already gone
+            self._on_end_handler = None
         self._relay.reset()
         self._observe._reset()
-        self._on_end_handler = None
         if self._controller is not None:
             if self._connected:
                 self._controller.quit()
