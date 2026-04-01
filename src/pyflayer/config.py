@@ -21,8 +21,10 @@ class BotConfig:
         session_server: Custom session server URL
             (e.g. ``"https://drasl.example.com/session"``).
         hide_errors: Suppress internal error logging from mineflayer.
+            ``None`` uses mineflayer's default (currently ``False``).
         log_errors: Log errors to the console.
         disable_chat_signing: Disable chat message signing (1.19.1+).
+            ``None`` uses mineflayer's default (currently ``False``).
         check_timeout_interval: Milliseconds between keep-alive checks.
             Set to ``0`` to disable. ``None`` uses mineflayer's default
             (currently ``30_000``).
@@ -47,9 +49,9 @@ class BotConfig:
     auth: str | None = None
     auth_server: str | None = None
     session_server: str | None = None
-    hide_errors: bool = False
+    hide_errors: bool | None = None
     log_errors: bool | None = None
-    disable_chat_signing: bool = False
+    disable_chat_signing: bool | None = None
     check_timeout_interval: int | None = None
     keep_alive: bool | None = None
     respawn: bool | None = None

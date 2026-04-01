@@ -15,9 +15,9 @@ class TestBotConfig:
         assert cfg.auth is None
         assert cfg.auth_server is None
         assert cfg.session_server is None
-        assert cfg.hide_errors is False
+        assert cfg.hide_errors is None
         assert cfg.log_errors is None
-        assert cfg.disable_chat_signing is False
+        assert cfg.disable_chat_signing is None
         assert cfg.check_timeout_interval is None
         assert cfg.keep_alive is None
         assert cfg.respawn is None

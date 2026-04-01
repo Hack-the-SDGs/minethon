@@ -48,13 +48,13 @@ class JSBotController:
             "host": self._config.host,
             "port": self._config.port,
             "username": self._config.username,
-            "hideErrors": self._config.hide_errors,
-            "disableChatSigning": self._config.disable_chat_signing,
         }
         # Optional fields — only set when explicitly provided so mineflayer
         # uses its own defaults for unset values.
         _OPTIONAL: list[tuple[str, str]] = [
             ("password", "password"),
+            ("hide_errors", "hideErrors"),
+            ("disable_chat_signing", "disableChatSigning"),
             ("version", "version"),
             ("auth", "auth"),
             ("auth_server", "authServer"),
