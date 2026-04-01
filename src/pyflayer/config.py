@@ -23,22 +23,33 @@ class BotConfig:
         hide_errors: Suppress internal error logging from mineflayer.
             ``None`` uses mineflayer's default (currently ``False``).
         log_errors: Log errors to the console.
+            ``None`` uses mineflayer's default.
         disable_chat_signing: Disable chat message signing (1.19.1+).
             ``None`` uses mineflayer's default (currently ``False``).
         check_timeout_interval: Milliseconds between keep-alive checks.
             Set to ``0`` to disable. ``None`` uses mineflayer's default
             (currently ``30_000``).
         keep_alive: Send keep-alive packets.
+            ``None`` uses mineflayer's default.
         respawn: Auto-respawn after death.
+            ``None`` uses mineflayer's default.
         chat_length_limit: Maximum chat message length.
+            ``None`` uses mineflayer's default.
         view_distance: Client-side view distance
             (``"tiny"``, ``"short"``, ``"normal"``, ``"far"``).
+            ``None`` uses mineflayer's default.
         default_chat_patterns: Enable default chat pattern parsing.
+            ``None`` uses mineflayer's default.
         physics_enabled: Enable client-side physics simulation.
+            ``None`` uses mineflayer's default.
         brand: Custom client brand string.
+            ``None`` uses mineflayer's default.
         skip_validation: Skip account validation on login.
+            ``None`` uses mineflayer's default.
         profiles_folder: Path to the folder containing auth profiles.
+            ``None`` uses mineflayer's default.
         load_internal_plugins: Load mineflayer's built-in plugins.
+            ``None`` uses mineflayer's default.
     """
 
     host: str
