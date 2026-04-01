@@ -1,6 +1,6 @@
 """Bot configuration."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,7 @@ class BotConfig:
     host: str
     port: int = 25565
     username: str = "pyflayer"
-    password: str | None = None
+    password: str | None = field(default=None, repr=False)
     version: str | None = None
     auth: str | None = None
     auth_server: str | None = None
