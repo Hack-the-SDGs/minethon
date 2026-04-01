@@ -467,11 +467,17 @@ class Bot:
             x: Target X coordinate.
             y: Target Y coordinate.
             z: Target Z coordinate.
+
+        Raises:
+            BridgeError: If the look operation fails or times out.
         """
         async with self._look_at_lock:
             ctrl = self._ensure_connected()
             ctrl.start_look_at(x, y, z)
-            event = await self._relay.wait_for(_LookAtDoneEvent, timeout=10.0)
+            try:
+                event = await self._relay.wait_for(_LookAtDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("look_at timed out") from exc
             if event.error is not None:
                 raise BridgeError(f"look_at failed: {event.error}")
 
