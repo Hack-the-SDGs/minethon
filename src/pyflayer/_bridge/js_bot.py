@@ -135,7 +135,7 @@ class JSBotController:
                 }
             return result
         except Exception as exc:
-            raise BridgeError(f"get_players failed: {exc}") from exc
+            raise BridgeError(f"get_players_dict failed: {exc}") from exc
 
     def is_alive(self) -> bool:
         """Whether the bot entity is alive (health > 0)."""
