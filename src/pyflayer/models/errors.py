@@ -31,3 +31,9 @@ class BridgeError(PyflayerError):
     def __init__(self, message: str, js_stack: str | None = None) -> None:
         super().__init__(message)
         self.js_stack = js_stack
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        if self.js_stack:
+            return f"{base}\n--- JS Stack ---\n{self.js_stack}"
+        return base

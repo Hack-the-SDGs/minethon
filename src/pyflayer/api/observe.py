@@ -10,6 +10,8 @@ E = TypeVar("E")
 
 _Handler = Callable[[E], Coroutine[Any, Any, None]]
 
+_RawHandler = Callable[[dict[str, Any]], Awaitable[None]]
+
 
 class ObserveAPI:
     """Event subscription API.
@@ -25,8 +27,8 @@ class ObserveAPI:
         self._js_bot: Any = None
         self._on_fn: Any = None
 
-    def _reset(self) -> None:
-        """Clear JS binding state so the next ``_bind_js()`` starts clean.
+    def reset_state(self) -> None:
+        """Clear JS binding state so the next ``bind_js()`` starts clean.
 
         Called by ``Bot.disconnect()``.  User-registered handlers
         (via ``on``/``on_raw``) are preserved across reconnect.
@@ -37,7 +39,7 @@ class ObserveAPI:
         self._pending_raw_events.update(self._bound_raw_events)
         self._bound_raw_events.clear()
 
-    def _bind_js(self, js_bot: Any, on_fn: Any) -> None:
+    def bind_js(self, js_bot: Any, on_fn: Any) -> None:
         """Store JS references and bind any queued or previously bound raw events.
 
         On initial connect only events queued before ``Bot.connect()``
@@ -118,25 +120,18 @@ class ObserveAPI:
     @overload
     def on_raw(
         self, event_name: str
-    ) -> Callable[
-        [Callable[[dict], Awaitable[None]]], Callable[[dict], Awaitable[None]]
-    ]: ...
+    ) -> Callable[[_RawHandler], _RawHandler]: ...
 
     @overload
     def on_raw(
-        self, event_name: str, handler: Callable[[dict], Awaitable[None]]
+        self, event_name: str, handler: _RawHandler
     ) -> None: ...
 
     def on_raw(
         self,
         event_name: str,
-        handler: Callable[[dict], Awaitable[None]] | None = None,
-    ) -> (
-        Callable[
-            [Callable[[dict], Awaitable[None]]], Callable[[dict], Awaitable[None]]
-        ]
-        | None
-    ):
+        handler: _RawHandler | None = None,
+    ) -> Callable[[_RawHandler], _RawHandler] | None:
         """Subscribe to a raw JS event by name.
 
         This is an escape hatch for events not covered by the typed API.
@@ -146,7 +141,7 @@ class ObserveAPI:
         Can be used as a decorator::
 
             @bot.observe.on_raw("entityMoved")
-            async def on_entity_moved(data: dict):
+            async def on_entity_moved(data: dict[str, Any]):
                 ...
 
         Or called directly::
@@ -156,7 +151,7 @@ class ObserveAPI:
         Warning:
             Raw event data is not typed or validated.
         """
-        def _register(fn: Callable[[dict], Awaitable[None]]) -> None:
+        def _register(fn: _RawHandler) -> None:
             if event_name not in self._bound_raw_events:
                 if self._js_bot is not None and self._on_fn is not None:
                     self._relay.bind_raw_js_event(
@@ -172,16 +167,14 @@ class ObserveAPI:
             _register(handler)
             return None
 
-        def decorator(
-            fn: Callable[[dict], Awaitable[None]],
-        ) -> Callable[[dict], Awaitable[None]]:
+        def decorator(fn: _RawHandler) -> _RawHandler:
             _register(fn)
             return fn
 
         return decorator
 
     def off_raw(
-        self, event_name: str, handler: Callable[[dict], Awaitable[None]]
+        self, event_name: str, handler: _RawHandler
     ) -> None:
         """Unsubscribe a raw event handler."""
         self._relay.remove_raw_handler(event_name, handler)  # type: ignore[arg-type]

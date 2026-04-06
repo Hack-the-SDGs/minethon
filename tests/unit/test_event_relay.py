@@ -5,10 +5,10 @@ import asyncio
 import pytest
 
 from pyflayer._bridge._events import (
-    _DigDoneEvent,
-    _EquipDoneEvent,
-    _LookAtDoneEvent,
-    _PlaceDoneEvent,
+    DigDoneEvent,
+    EquipDoneEvent,
+    LookAtDoneEvent,
+    PlaceDoneEvent,
 )
 from pyflayer._bridge.event_relay import EventRelay
 from pyflayer.models.events import (
@@ -199,10 +199,10 @@ class TestEventRelayInternalEvents:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_DigDoneEvent, _DigDoneEvent(error=None))
+            relay._dispatch(DigDoneEvent, DigDoneEvent(error=None))
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_DigDoneEvent, timeout=1.0)
+        event = await relay.wait_for(DigDoneEvent, timeout=1.0)
         assert event.error is None
 
     @pytest.mark.asyncio
@@ -212,10 +212,10 @@ class TestEventRelayInternalEvents:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_DigDoneEvent, _DigDoneEvent(error="block out of reach"))
+            relay._dispatch(DigDoneEvent, DigDoneEvent(error="block out of reach"))
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_DigDoneEvent, timeout=1.0)
+        event = await relay.wait_for(DigDoneEvent, timeout=1.0)
         assert event.error == "block out of reach"
 
     @pytest.mark.asyncio
@@ -225,10 +225,10 @@ class TestEventRelayInternalEvents:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_PlaceDoneEvent, _PlaceDoneEvent())
+            relay._dispatch(PlaceDoneEvent, PlaceDoneEvent())
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_PlaceDoneEvent, timeout=1.0)
+        event = await relay.wait_for(PlaceDoneEvent, timeout=1.0)
         assert event.error is None
 
     @pytest.mark.asyncio
@@ -238,10 +238,10 @@ class TestEventRelayInternalEvents:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_EquipDoneEvent, _EquipDoneEvent())
+            relay._dispatch(EquipDoneEvent, EquipDoneEvent())
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_EquipDoneEvent, timeout=1.0)
+        event = await relay.wait_for(EquipDoneEvent, timeout=1.0)
         assert event.error is None
 
     @pytest.mark.asyncio
@@ -251,10 +251,10 @@ class TestEventRelayInternalEvents:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_LookAtDoneEvent, _LookAtDoneEvent())
+            relay._dispatch(LookAtDoneEvent, LookAtDoneEvent())
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_LookAtDoneEvent, timeout=1.0)
+        event = await relay.wait_for(LookAtDoneEvent, timeout=1.0)
         assert event.error is None
 
 
