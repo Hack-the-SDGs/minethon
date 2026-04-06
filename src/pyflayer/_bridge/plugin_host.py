@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pyflayer._bridge._util import _extract_js_stack
+from pyflayer._bridge._util import extract_js_stack
 from pyflayer._bridge.runtime import BridgeRuntime
 from pyflayer.models.errors import BridgeError
 
@@ -33,7 +33,7 @@ class PluginHost:
             self._pf_goals = pf_mod.goals
             self._pf_loaded = True
         except Exception as exc:
-            raise BridgeError(f"load_pathfinder failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"load_pathfinder failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def setup_pathfinder_movements(self) -> None:
         """Configure default Movements.  Call after bot has spawned.
@@ -50,7 +50,7 @@ class PluginHost:
         except Exception as exc:
             raise BridgeError(
                 f"setup_pathfinder_movements failed: {exc}",
-                js_stack=_extract_js_stack(exc),
+                js_stack=extract_js_stack(exc),
             ) from exc
 
     def set_goal_near(
@@ -65,7 +65,7 @@ class PluginHost:
             goal = self._pf_goals.GoalNear(x, y, z, radius)
             self._js_bot.pathfinder.setGoal(goal)
         except Exception as exc:
-            raise BridgeError(f"set_goal_near failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"set_goal_near failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def set_goal_follow(self, js_entity: Any, distance: float) -> None:
         """Set a GoalFollow target.  Pathfinder follows continuously.
@@ -82,7 +82,7 @@ class PluginHost:
             goal = self._pf_goals.GoalFollow(js_entity, distance)
             self._js_bot.pathfinder.setGoal(goal, True)
         except Exception as exc:
-            raise BridgeError(f"set_goal_follow failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"set_goal_follow failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def stop_pathfinder(self) -> None:
         """Clear the current pathfinder goal.  Best-effort cleanup.

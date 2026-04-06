@@ -3,7 +3,7 @@
 import pathlib
 from typing import Any
 
-from pyflayer._bridge._util import _extract_js_stack
+from pyflayer._bridge._util import extract_js_stack
 from pyflayer._bridge.runtime import BridgeRuntime
 from pyflayer.config import BotConfig
 from pyflayer.models.entity import EntityKind
@@ -83,7 +83,7 @@ class JSBotController:
         except Exception as exc:
             raise BridgeError(
                 f"Failed to load JS helpers at {_JS_HELPERS_PATH}: {exc}",
-                js_stack=_extract_js_stack(exc),
+                js_stack=extract_js_stack(exc),
             ) from exc
 
     @property
@@ -98,14 +98,14 @@ class JSBotController:
         try:
             self._js_bot.chat(message)
         except Exception as exc:
-            raise BridgeError(f"chat failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"chat failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def whisper(self, username: str, message: str) -> None:
         """Send a whisper to a player."""
         try:
             self._js_bot.whisper(username, message)
         except Exception as exc:
-            raise BridgeError(f"whisper failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"whisper failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     # -- State queries --
 
@@ -115,28 +115,28 @@ class JSBotController:
             pos = self._js_bot.entity.position
             return {"x": float(pos.x), "y": float(pos.y), "z": float(pos.z)}
         except Exception as exc:
-            raise BridgeError(f"get_position failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_position failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_health(self) -> float:
         """Read bot health (0-20)."""
         try:
             return float(self._js_bot.health)
         except Exception as exc:
-            raise BridgeError(f"get_health failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_health failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_food(self) -> float:
         """Read bot food level (0-20)."""
         try:
             return float(self._js_bot.food)
         except Exception as exc:
-            raise BridgeError(f"get_food failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_food failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_username(self) -> str:
         """Read bot username."""
         try:
             return str(self._js_bot.username)
         except Exception as exc:
-            raise BridgeError(f"get_username failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_username failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_game_mode(self) -> str:
         """Read current game mode (``"survival"``, ``"creative"``, etc.)."""
@@ -144,7 +144,7 @@ class JSBotController:
             gm = self._js_bot.game.gameMode
             return str(gm) if gm is not None else "unknown"
         except Exception as exc:
-            raise BridgeError(f"get_game_mode failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_game_mode failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_players_dict(self) -> dict[str, dict[str, object]]:
         """Return online players as a Python dict (no JS proxy leaking)."""
@@ -159,7 +159,7 @@ class JSBotController:
                 }
             return result
         except Exception as exc:
-            raise BridgeError(f"get_players_dict failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_players_dict failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def is_alive(self) -> bool:
         """Whether the bot entity is alive (health > 0)."""
@@ -177,7 +177,7 @@ class JSBotController:
             pos = Vec3(x, y, z)
             return self._js_bot.blockAt(pos)
         except Exception as exc:
-            raise BridgeError(f"block_at failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"block_at failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def find_blocks(
         self,
@@ -207,7 +207,7 @@ class JSBotController:
                     results.append(block)
             return results
         except Exception as exc:
-            raise BridgeError(f"find_blocks failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"find_blocks failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_entity_by_id(self, entity_id: int) -> Any | None:
         """Look up an entity by its numeric ID."""
@@ -217,7 +217,7 @@ class JSBotController:
         except (KeyError, TypeError):
             return None
         except Exception as exc:
-            raise BridgeError(f"get_entity_by_id failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_entity_by_id failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_entity_by_filter(
         self,
@@ -271,7 +271,7 @@ class JSBotController:
 
             return best
         except Exception as exc:
-            raise BridgeError(f"get_entity_by_filter failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_entity_by_filter failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     # -- Synchronous actions (quick-returning) --
 
@@ -280,14 +280,14 @@ class JSBotController:
         try:
             self._js_bot.attack(js_entity)
         except Exception as exc:
-            raise BridgeError(f"attack failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"attack failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def use_item(self) -> None:
         """Activate the held item."""
         try:
             self._js_bot.activateItem()
         except Exception as exc:
-            raise BridgeError(f"use_item failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"use_item failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     # -- Non-blocking actions (long-running, completion via events) --
 
@@ -296,7 +296,7 @@ class JSBotController:
         try:
             self._helpers.startDig(self._js_bot, js_block)
         except Exception as exc:
-            raise BridgeError(f"start_dig failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"start_dig failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def start_place(
         self,
@@ -311,7 +311,7 @@ class JSBotController:
             face_vec = Vec3(face_x, face_y, face_z)
             self._helpers.startPlace(self._js_bot, js_reference_block, face_vec)
         except Exception as exc:
-            raise BridgeError(f"start_place failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"start_place failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def start_equip(self, item_name: str) -> bool:
         """Start equipping without blocking. Completion via ``_pyflayer:equipDone``.
@@ -329,7 +329,7 @@ class JSBotController:
                     return True
             return False
         except Exception as exc:
-            raise BridgeError(f"start_equip failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"start_equip failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def start_look_at(self, x: float, y: float, z: float) -> None:
         """Start looking at a position without blocking.
@@ -341,7 +341,7 @@ class JSBotController:
             pos = Vec3(x, y, z)
             self._helpers.startLookAt(self._js_bot, pos)
         except Exception as exc:
-            raise BridgeError(f"start_look_at failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"start_look_at failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     # -- Movement (quick-returning) --
 
@@ -350,14 +350,14 @@ class JSBotController:
         try:
             self._js_bot.setControlState(control, state)
         except Exception as exc:
-            raise BridgeError(f"set_control_state failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"set_control_state failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def clear_control_states(self) -> None:
         """Stop all movement controls."""
         try:
             self._js_bot.clearControlStates()
         except Exception as exc:
-            raise BridgeError(f"clear_control_states failed: {exc}", js_stack=_extract_js_stack(exc)) from exc
+            raise BridgeError(f"clear_control_states failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     # -- Lifecycle --
 

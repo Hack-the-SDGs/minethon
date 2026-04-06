@@ -1,7 +1,7 @@
 """Internal bridge utilities."""
 
 
-def _extract_js_stack(exc: BaseException) -> str | None:
+def extract_js_stack(exc: BaseException) -> str | None:
     """Try to extract a JS stack trace from a JSPyBridge exception.
 
     JSPyBridge exceptions may carry a ``stack`` attribute with the

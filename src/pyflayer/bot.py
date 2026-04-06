@@ -3,10 +3,10 @@
 import asyncio
 
 from pyflayer._bridge._events import (
-    _DigDoneEvent,
-    _EquipDoneEvent,
-    _LookAtDoneEvent,
-    _PlaceDoneEvent,
+    DigDoneEvent,
+    EquipDoneEvent,
+    LookAtDoneEvent,
+    PlaceDoneEvent,
 )
 from pyflayer._bridge.event_relay import EventRelay
 from pyflayer._bridge.js_bot import JSBotController
@@ -169,7 +169,7 @@ class Bot:
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
-        self._observe._bind_js(
+        self._observe.bind_js(
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
@@ -204,7 +204,7 @@ class Bot:
                 pass  # Handler already gone
             self._on_end_handler = None
         self._relay.reset()
-        self._observe._reset()
+        self._observe.reset_state()
         if self._controller is not None:
             if self._connected:
                 self._controller.quit()
@@ -394,7 +394,7 @@ class Bot:
                 )
             ctrl.start_dig(js_block)
             try:
-                event = await self._relay.wait_for(_DigDoneEvent, timeout=60.0)
+                event = await self._relay.wait_for(DigDoneEvent, timeout=60.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("dig timed out") from exc
             if event.error is not None:
@@ -429,7 +429,7 @@ class Bot:
                     )
                 try:
                     equip_event = await self._relay.wait_for(
-                        _EquipDoneEvent, timeout=10.0
+                        EquipDoneEvent, timeout=10.0
                     )
                 except asyncio.TimeoutError as exc:
                     raise InventoryError("equip timed out") from exc
@@ -448,7 +448,7 @@ class Bot:
                 )
             ctrl.start_place(js_block, face.x, face.y, face.z)
             try:
-                event = await self._relay.wait_for(_PlaceDoneEvent, timeout=30.0)
+                event = await self._relay.wait_for(PlaceDoneEvent, timeout=30.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("place timed out") from exc
             if event.error is not None:
@@ -510,7 +510,7 @@ class Bot:
             ctrl = self._ensure_connected()
             ctrl.start_look_at(x, y, z)
             try:
-                event = await self._relay.wait_for(_LookAtDoneEvent, timeout=10.0)
+                event = await self._relay.wait_for(LookAtDoneEvent, timeout=10.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("look_at timed out") from exc
             if event.error is not None:

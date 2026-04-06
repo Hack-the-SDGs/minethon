@@ -8,10 +8,10 @@ from collections.abc import Coroutine
 from typing import Any, Callable
 
 from pyflayer._bridge._events import (
-    _DigDoneEvent,
-    _EquipDoneEvent,
-    _LookAtDoneEvent,
-    _PlaceDoneEvent,
+    DigDoneEvent,
+    EquipDoneEvent,
+    LookAtDoneEvent,
+    PlaceDoneEvent,
 )
 from pyflayer.models.events import (
     ChatEvent,
@@ -179,22 +179,22 @@ class EventRelay:
         @on_fn(js_bot, "_pyflayer:digDone")
         def _on_dig_done(*args: Any) -> None:
             error = str(args[0]) if args and args[0] is not None else None
-            self._post(_DigDoneEvent, _DigDoneEvent(error=error))
+            self._post(DigDoneEvent, DigDoneEvent(error=error))
 
         @on_fn(js_bot, "_pyflayer:placeDone")
         def _on_place_done(*args: Any) -> None:
             error = str(args[0]) if args and args[0] is not None else None
-            self._post(_PlaceDoneEvent, _PlaceDoneEvent(error=error))
+            self._post(PlaceDoneEvent, PlaceDoneEvent(error=error))
 
         @on_fn(js_bot, "_pyflayer:equipDone")
         def _on_equip_done(*args: Any) -> None:
             error = str(args[0]) if args and args[0] is not None else None
-            self._post(_EquipDoneEvent, _EquipDoneEvent(error=error))
+            self._post(EquipDoneEvent, EquipDoneEvent(error=error))
 
         @on_fn(js_bot, "_pyflayer:lookAtDone")
         def _on_look_at_done(*args: Any) -> None:
             error = str(args[0]) if args and args[0] is not None else None
-            self._post(_LookAtDoneEvent, _LookAtDoneEvent(error=error))
+            self._post(LookAtDoneEvent, LookAtDoneEvent(error=error))
 
         # -- Throttled high-frequency events --
 

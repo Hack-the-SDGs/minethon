@@ -9,28 +9,28 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
-class _DigDoneEvent:
+class DigDoneEvent:
     """Dig operation finished (success if error is None)."""
 
     error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class _PlaceDoneEvent:
+class PlaceDoneEvent:
     """Place operation finished."""
 
     error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class _EquipDoneEvent:
+class EquipDoneEvent:
     """Equip operation finished."""
 
     error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class _LookAtDoneEvent:
+class LookAtDoneEvent:
     """LookAt operation finished."""
 
     error: str | None = None

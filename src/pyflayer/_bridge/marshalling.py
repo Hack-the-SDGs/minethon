@@ -100,7 +100,7 @@ def js_entity_to_entity(js_obj: Any) -> Entity:
     if js_name is not None:
         name = str(js_name)
 
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
     js_meta = getattr(js_obj, "metadata", None)
     if js_meta is not None:
         try:
@@ -128,7 +128,7 @@ def js_item_to_item_stack(js_obj: Any) -> ItemStack:
     Returns:
         An immutable :class:`ItemStack` snapshot.
     """
-    enchants: list[dict] | None = None
+    enchants: list[dict[str, Any]] | None = None
     js_enchants = getattr(js_obj, "enchants", None)
     if js_enchants is not None:
         try:
@@ -136,7 +136,7 @@ def js_item_to_item_stack(js_obj: Any) -> ItemStack:
         except (AttributeError, TypeError):
             pass
 
-    nbt: dict | None = None
+    nbt: dict[str, Any] | None = None
     js_nbt = getattr(js_obj, "nbt", None)
     if js_nbt is not None:
         try:

@@ -5,10 +5,10 @@ import asyncio
 import pytest
 
 from pyflayer._bridge._events import (
-    _DigDoneEvent,
-    _EquipDoneEvent,
-    _LookAtDoneEvent,
-    _PlaceDoneEvent,
+    DigDoneEvent,
+    EquipDoneEvent,
+    LookAtDoneEvent,
+    PlaceDoneEvent,
 )
 from pyflayer._bridge.event_relay import EventRelay
 from pyflayer.api.observe import ObserveAPI
@@ -233,33 +233,33 @@ class TestBotAsyncOperations:
 
     @pytest.mark.asyncio
     async def test_dig_done_success_flow(self) -> None:
-        """Simulate dig completing via _DigDoneEvent."""
+        """Simulate dig completing via DigDoneEvent."""
         relay = EventRelay()
         relay.set_loop(asyncio.get_running_loop())
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_DigDoneEvent, _DigDoneEvent(error=None))
+            relay._dispatch(DigDoneEvent, DigDoneEvent(error=None))
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_DigDoneEvent, timeout=1.0)
+        event = await relay.wait_for(DigDoneEvent, timeout=1.0)
         assert event.error is None
 
     @pytest.mark.asyncio
     async def test_dig_done_error_flow(self) -> None:
-        """Simulate dig failing via _DigDoneEvent with error."""
+        """Simulate dig failing via DigDoneEvent with error."""
         relay = EventRelay()
         relay.set_loop(asyncio.get_running_loop())
 
         async def post() -> None:
             await asyncio.sleep(0.01)
             relay._dispatch(
-                _DigDoneEvent,
-                _DigDoneEvent(error="cannot dig this block"),
+                DigDoneEvent,
+                DigDoneEvent(error="cannot dig this block"),
             )
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_DigDoneEvent, timeout=1.0)
+        event = await relay.wait_for(DigDoneEvent, timeout=1.0)
         assert event.error == "cannot dig this block"
 
     @pytest.mark.asyncio
@@ -269,10 +269,10 @@ class TestBotAsyncOperations:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_PlaceDoneEvent, _PlaceDoneEvent())
+            relay._dispatch(PlaceDoneEvent, PlaceDoneEvent())
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_PlaceDoneEvent, timeout=1.0)
+        event = await relay.wait_for(PlaceDoneEvent, timeout=1.0)
         assert event.error is None
 
     @pytest.mark.asyncio
@@ -282,10 +282,10 @@ class TestBotAsyncOperations:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_EquipDoneEvent, _EquipDoneEvent())
+            relay._dispatch(EquipDoneEvent, EquipDoneEvent())
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_EquipDoneEvent, timeout=1.0)
+        event = await relay.wait_for(EquipDoneEvent, timeout=1.0)
         assert event.error is None
 
     @pytest.mark.asyncio
@@ -295,10 +295,10 @@ class TestBotAsyncOperations:
 
         async def post() -> None:
             await asyncio.sleep(0.01)
-            relay._dispatch(_LookAtDoneEvent, _LookAtDoneEvent())
+            relay._dispatch(LookAtDoneEvent, LookAtDoneEvent())
 
         asyncio.create_task(post())
-        event = await relay.wait_for(_LookAtDoneEvent, timeout=1.0)
+        event = await relay.wait_for(LookAtDoneEvent, timeout=1.0)
         assert event.error is None
 
 

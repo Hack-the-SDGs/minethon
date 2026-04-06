@@ -1,6 +1,7 @@
 """Item stack type for inventory items."""
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,5 +23,5 @@ class ItemStack:
     count: int
     slot: int
     max_stack_size: int
-    enchantments: list[dict] | None = None
-    nbt: dict | None = None
+    enchantments: list[dict[str, Any]] | None = None
+    nbt: dict[str, Any] | None = None
