@@ -10,9 +10,9 @@ def extract_js_stack(exc: BaseException) -> str | None:
     stack = getattr(exc, "stack", None)
     if isinstance(stack, str):
         return stack
-    cause = exc.__cause__
-    if cause is not None:
-        stack = getattr(cause, "stack", None)
-        if isinstance(stack, str):
-            return stack
+    for chained in (exc.__cause__, exc.__context__):
+        if chained is not None:
+            stack = getattr(chained, "stack", None)
+            if isinstance(stack, str):
+                return stack
     return None

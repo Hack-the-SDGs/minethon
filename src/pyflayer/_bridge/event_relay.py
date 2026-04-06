@@ -31,6 +31,15 @@ _log = logging.getLogger(__name__)
 _HIGH_FREQ_EVENTS: frozenset[str] = frozenset({"physicsTick", "entityMoved"})
 _SLOW_HANDLER_THRESHOLD: float = 0.5  # 500ms
 
+# Events already bound by register_js_events().  bind_raw_js_event() must
+# skip these to avoid attaching a second, unthrottled JS listener.
+_INTERNALLY_BRIDGED_EVENTS: frozenset[str] = frozenset({
+    "move", "spawn", "chat", "whisper", "health", "death",
+    "kicked", "end", "goal_reached", "path_update", "path_stop",
+    "_pyflayer:digDone", "_pyflayer:placeDone",
+    "_pyflayer:equipDone", "_pyflayer:lookAtDone",
+})
+
 
 class EventRelay:
     """Receives JS events on the JSPyBridge callback thread and
@@ -52,6 +61,8 @@ class EventRelay:
         # Move event throttle state
         self._move_last_post: float = 0.0
         self._move_throttle: float = 0.1  # 100ms
+        # Suppress GoalFailedEvent from path_stop after a successful goal_reached
+        self._goal_just_reached: bool = False
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind to the running asyncio event loop."""
@@ -74,6 +85,7 @@ class EventRelay:
                     fut.cancel()
         self._waiters.clear()
         self._move_last_post = 0.0
+        self._goal_just_reached = False
         self._loop = None
 
     def register_js_events(self, js_bot: Any, on_fn: Any) -> None:
@@ -138,6 +150,7 @@ class EventRelay:
 
         @on_fn(js_bot, "goal_reached")
         def _on_goal_reached(*_args: Any) -> None:
+            self._goal_just_reached = True
             try:
                 pos = js_bot.entity.position
                 event = GoalReachedEvent(
@@ -164,10 +177,12 @@ class EventRelay:
 
         @on_fn(js_bot, "path_stop")
         def _on_path_stop(*_args: Any) -> None:
-            self._post(
-                GoalFailedEvent,
-                GoalFailedEvent(reason="stopped"),
-            )
+            if not self._goal_just_reached:
+                self._post(
+                    GoalFailedEvent,
+                    GoalFailedEvent(reason="stopped"),
+                )
+            self._goal_just_reached = False
 
         @on_fn(js_bot, "end")
         def _on_end(*args: Any) -> None:
@@ -255,11 +270,17 @@ class EventRelay:
     ) -> None:
         """Dynamically bind a raw JS event for ``on_raw()`` subscribers.
 
+        Events already handled by :meth:`register_js_events` are
+        skipped to avoid attaching a duplicate (unthrottled) listener.
+
         Args:
             js_bot: The JS bot proxy.
             on_fn: The ``On`` decorator from JSPyBridge.
             event_name: The JS event name to listen for.
         """
+        if event_name in _INTERNALLY_BRIDGED_EVENTS:
+            return
+
         if event_name in _HIGH_FREQ_EVENTS:
             _log.warning(
                 "Subscribing to high-frequency event '%s'. "
@@ -311,31 +332,29 @@ class EventRelay:
             except RuntimeError:
                 pass
 
-    def _make_done_callback(
-        self, handler_name: str, start_time: float
-    ) -> Callable[[asyncio.Task[None]], None]:
-        """Create a done-callback that logs slow handlers and exceptions."""
-
-        def _on_done(task: asyncio.Task[None]) -> None:
-            elapsed = time.monotonic() - start_time
+    @staticmethod
+    async def _timed(
+        coro: Coroutine[Any, Any, None], name: str
+    ) -> None:
+        """Run a handler coroutine with execution-time monitoring."""
+        t0 = time.monotonic()
+        try:
+            await coro
+        except Exception as exc:
+            _log.exception(
+                "Unhandled exception in event handler %s",
+                name,
+                exc_info=exc,
+            )
+        finally:
+            elapsed = time.monotonic() - t0
             if elapsed > _SLOW_HANDLER_THRESHOLD:
                 _log.warning(
                     "Event handler '%s' took %.1fms (threshold: %.0fms)",
-                    handler_name,
+                    name,
                     elapsed * 1000,
                     _SLOW_HANDLER_THRESHOLD * 1000,
                 )
-            if task.cancelled():
-                return
-            exc = task.exception()
-            if exc is not None:
-                _log.exception(
-                    "Unhandled exception in event handler %s",
-                    task.get_name(),
-                    exc_info=exc,
-                )
-
-        return _on_done
 
     def _dispatch(self, event_type: type, event: object) -> None:
         """Runs on the asyncio event loop thread."""
@@ -344,12 +363,10 @@ class EventRelay:
                 fut.set_result(event)
         if self._loop is not None:
             for handler in self._handlers.get(event_type, []):
-                start = time.monotonic()
-                task = self._loop.create_task(handler(event))
-                task.add_done_callback(
-                    self._make_done_callback(
+                self._loop.create_task(
+                    self._timed(
+                        handler(event),
                         getattr(handler, "__qualname__", repr(handler)),
-                        start,
                     )
                 )
 
@@ -357,11 +374,9 @@ class EventRelay:
         """Dispatch raw events on the asyncio event loop thread."""
         if self._loop is not None:
             for handler in self._raw_handlers.get(event_name, []):
-                start = time.monotonic()
-                task = self._loop.create_task(handler(data))
-                task.add_done_callback(
-                    self._make_done_callback(
+                self._loop.create_task(
+                    self._timed(
+                        handler(data),
                         getattr(handler, "__qualname__", repr(handler)),
-                        start,
                     )
                 )
