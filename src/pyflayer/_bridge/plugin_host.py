@@ -105,3 +105,23 @@ class PluginHost:
             return bool(self._js_bot.pathfinder.isMoving())
         except (AttributeError, TypeError):
             return False
+
+    def raw_plugin(self, name: str) -> Any:
+        """Load and return a raw JS plugin module.
+
+        This is an escape hatch for plugins not yet wrapped by pyflayer.
+
+        Args:
+            name: npm package name of the plugin.
+
+        Returns:
+            The raw JS module proxy.
+
+        Warning:
+            The returned object is a JSPyBridge proxy with no type
+            safety or stability guarantees.
+        """
+        try:
+            return self._runtime.require(name)
+        except Exception as exc:
+            raise BridgeError(f"raw_plugin '{name}' failed: {exc}") from exc

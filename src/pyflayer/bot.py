@@ -33,6 +33,7 @@ from pyflayer.models.events import (
     SpawnEvent,
 )
 from pyflayer.models.vec3 import Vec3
+from pyflayer.raw import RawBotHandle
 
 
 class Bot:
@@ -541,3 +542,26 @@ class Bot:
     def observe(self) -> ObserveAPI:
         """Event subscription API."""
         return self._observe
+
+    @property
+    def raw(self) -> RawBotHandle:
+        """Raw access to the underlying mineflayer JS bot.
+
+        Warning:
+            This is an escape hatch for advanced use cases. The returned
+            handle exposes the raw JSPyBridge proxy with **no** type
+            safety or API stability guarantees. Refer to the mineflayer
+            JS docs for usage.
+        """
+        ctrl = self._ensure_connected()
+        return RawBotHandle(ctrl.js_bot)
+
+    @property
+    def plugins(self) -> PluginHost:
+        """Plugin management API.
+
+        Includes ``raw_plugin(name)`` for loading arbitrary JS plugins.
+        """
+        if self._plugin_host is None:
+            raise PyflayerConnectionError("Bot is not connected.")
+        return self._plugin_host
