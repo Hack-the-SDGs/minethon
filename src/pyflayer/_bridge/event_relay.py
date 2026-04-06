@@ -31,10 +31,9 @@ _log = logging.getLogger(__name__)
 _HIGH_FREQ_EVENTS: frozenset[str] = frozenset({"physicsTick", "entityMoved"})
 _SLOW_HANDLER_THRESHOLD: float = 0.5  # 500ms
 
-# Events already bound by register_js_events().  bind_raw_js_event() must
-# skip these to avoid attaching a second, unthrottled JS listener.
-_INTERNALLY_BRIDGED_EVENTS: frozenset[str] = frozenset({
-    "move", "spawn", "chat", "whisper", "health", "death",
+# Static events always bound by register_js_events().
+_STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset({
+    "spawn", "chat", "whisper", "health", "death",
     "kicked", "end", "goal_reached", "path_update", "path_stop",
     "_pyflayer:digDone", "_pyflayer:placeDone",
     "_pyflayer:equipDone", "_pyflayer:lookAtDone",
@@ -66,6 +65,9 @@ class EventRelay:
             name: ms / 1000.0 for name, ms in throttle_cfg.items()
         }
         self._throttle_last_post: dict[str, float] = {}
+        # Events actually registered by register_js_events(); used by
+        # bind_raw_js_event() to avoid duplicate JS listeners.
+        self._registered_events: set[str] = set(_STATIC_BRIDGED_EVENTS)
         # Suppress GoalFailedEvent from path_stop after a successful goal_reached
         self._goal_just_reached: bool = False
 
@@ -237,6 +239,7 @@ class EventRelay:
             handler = _make_throttled(event_name, interval)
             on_fn(js_bot, event_name)(handler)
             throttled_handlers.append(handler)
+            self._registered_events.add(event_name)
 
         self._js_handler_refs.extend([
             _on_spawn,
@@ -295,7 +298,7 @@ class EventRelay:
             on_fn: The ``On`` decorator from JSPyBridge.
             event_name: The JS event name to listen for.
         """
-        if event_name in _INTERNALLY_BRIDGED_EVENTS:
+        if event_name in self._registered_events:
             return
 
         if event_name in _HIGH_FREQ_EVENTS:
