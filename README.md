@@ -114,6 +114,12 @@ uv run ruff check src/
 uv run pyright
 ```
 
+### IntelliJ / PyCharm 使用者注意
+
+`uv sync` 會以 editable 模式安裝本專案，導致 IDEA 的 Python SDK 將專案目錄同時視為外部 library，可能使整個專案被標記為 excluded。
+
+**解法：** File → Project Structure → SDKs → 選擇 Python interpreter → Paths 頁籤，移除指向本專案的路徑與指向本專案 `src/` 的路徑，然後 Apply。
+
 ## 貢獻
 歡迎 PR 與 Issue！
 
