@@ -48,12 +48,34 @@ class JSBotController:
             "host": self._config.host,
             "port": self._config.port,
             "username": self._config.username,
-            "hideErrors": self._config.hide_errors,
         }
-        if self._config.version is not None:
-            options["version"] = self._config.version
-        if self._config.auth is not None:
-            options["auth"] = self._config.auth
+        # Optional fields — only set when explicitly provided so mineflayer
+        # uses its own defaults for unset values.
+        optional_fields: list[tuple[str, str]] = [
+            ("password", "password"),
+            ("hide_errors", "hideErrors"),
+            ("disable_chat_signing", "disableChatSigning"),
+            ("version", "version"),
+            ("auth", "auth"),
+            ("auth_server", "authServer"),
+            ("session_server", "sessionServer"),
+            ("log_errors", "logErrors"),
+            ("check_timeout_interval", "checkTimeoutInterval"),
+            ("keep_alive", "keepAlive"),
+            ("respawn", "respawn"),
+            ("chat_length_limit", "chatLengthLimit"),
+            ("view_distance", "viewDistance"),
+            ("default_chat_patterns", "defaultChatPatterns"),
+            ("physics_enabled", "physicsEnabled"),
+            ("brand", "brand"),
+            ("skip_validation", "skipValidation"),
+            ("profiles_folder", "profilesFolder"),
+            ("load_internal_plugins", "loadInternalPlugins"),
+        ]
+        for py_attr, js_key in optional_fields:
+            value = getattr(self._config, py_attr)
+            if value is not None:
+                options[js_key] = value
         self._js_bot = mineflayer.createBot(options)
         try:
             self._helpers = self._runtime.require(str(_JS_HELPERS_PATH.as_posix()))
