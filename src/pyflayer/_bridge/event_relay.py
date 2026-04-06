@@ -60,7 +60,7 @@ class EventRelay:
         # Strong refs to prevent GC (JSPyBridge uses WeakValueDictionary)
         self._js_handler_refs: list[Any] = []
         # Per-event throttle: event_name -> interval in seconds
-        throttle_cfg = event_throttle_ms or {"move": 50}
+        throttle_cfg = event_throttle_ms if event_throttle_ms is not None else {"move": 50}
         self._throttle_intervals: dict[str, float] = {
             name: ms / 1000.0 for name, ms in throttle_cfg.items()
         }
