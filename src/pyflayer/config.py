@@ -55,7 +55,7 @@ class BotConfig:
     host: str
     port: int = 25565
     username: str = "pyflayer"
-    password: str | None = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False, kw_only=True)
     version: str | None = None
     auth: str | None = None
     auth_server: str | None = None
