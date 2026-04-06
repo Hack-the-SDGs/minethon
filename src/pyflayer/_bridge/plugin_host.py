@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from pyflayer._bridge._util import extract_js_stack
 from pyflayer._bridge.runtime import BridgeRuntime
 from pyflayer.models.errors import BridgeError
 
@@ -32,7 +33,7 @@ class PluginHost:
             self._pf_goals = pf_mod.goals
             self._pf_loaded = True
         except Exception as exc:
-            raise BridgeError(f"load_pathfinder failed: {exc}") from exc
+            raise BridgeError(f"load_pathfinder failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def setup_pathfinder_movements(self) -> None:
         """Configure default Movements.  Call after bot has spawned.
@@ -48,7 +49,8 @@ class PluginHost:
             self._js_bot.pathfinder.setMovements(movements)
         except Exception as exc:
             raise BridgeError(
-                f"setup_pathfinder_movements failed: {exc}"
+                f"setup_pathfinder_movements failed: {exc}",
+                js_stack=extract_js_stack(exc),
             ) from exc
 
     def set_goal_near(
@@ -63,7 +65,7 @@ class PluginHost:
             goal = self._pf_goals.GoalNear(x, y, z, radius)
             self._js_bot.pathfinder.setGoal(goal)
         except Exception as exc:
-            raise BridgeError(f"set_goal_near failed: {exc}") from exc
+            raise BridgeError(f"set_goal_near failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def set_goal_follow(self, js_entity: Any, distance: float) -> None:
         """Set a GoalFollow target.  Pathfinder follows continuously.
@@ -80,7 +82,7 @@ class PluginHost:
             goal = self._pf_goals.GoalFollow(js_entity, distance)
             self._js_bot.pathfinder.setGoal(goal, True)
         except Exception as exc:
-            raise BridgeError(f"set_goal_follow failed: {exc}") from exc
+            raise BridgeError(f"set_goal_follow failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def stop_pathfinder(self) -> None:
         """Clear the current pathfinder goal.  Best-effort cleanup.
@@ -105,3 +107,23 @@ class PluginHost:
             return bool(self._js_bot.pathfinder.isMoving())
         except (AttributeError, TypeError):
             return False
+
+    def raw_plugin(self, name: str) -> Any:
+        """Load and return a raw JS plugin module.
+
+        This is an escape hatch for plugins not yet wrapped by pyflayer.
+
+        Args:
+            name: npm package name of the plugin.
+
+        Returns:
+            The raw JS module proxy.
+
+        Warning:
+            The returned object is a JSPyBridge proxy with no type
+            safety or stability guarantees.
+        """
+        try:
+            return self._runtime.require(name)
+        except Exception as exc:
+            raise BridgeError(f"raw_plugin '{name}' failed: {exc}", js_stack=extract_js_stack(exc)) from exc

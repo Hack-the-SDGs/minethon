@@ -17,6 +17,7 @@ from pyflayer.models.errors import (
 from pyflayer.models.events import EndEvent
 from pyflayer.models.item import ItemStack
 from pyflayer.models.vec3 import Vec3
+from pyflayer.raw import RawBotHandle
 
 __all__ = [
     "Block",
@@ -34,5 +35,6 @@ __all__ = [
     "PluginError",
     "PyflayerConnectionError",
     "PyflayerError",
+    "RawBotHandle",
     "Vec3",
 ]

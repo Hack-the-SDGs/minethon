@@ -19,6 +19,7 @@ packages = ["src/pyflayer"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
     "ruff>=0.9",
     "pyright>=1.1",
 ]
@@ -29,8 +30,19 @@ line-length = 88
 
 [tool.pyright]
 include = ["src"]
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests requiring a running Minecraft server",
+]
+
+[tool.coverage.run]
+source = ["src/pyflayer"]
+omit = ["src/pyflayer/_bridge/js/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from pyflayer.models.vec3 import Vec3
 
@@ -39,4 +40,4 @@ class Entity:
     position: Vec3
     velocity: Vec3 | None = None
     health: float | None = None
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None

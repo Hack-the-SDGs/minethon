@@ -3,10 +3,10 @@
 import asyncio
 
 from pyflayer._bridge._events import (
-    _DigDoneEvent,
-    _EquipDoneEvent,
-    _LookAtDoneEvent,
-    _PlaceDoneEvent,
+    DigDoneEvent,
+    EquipDoneEvent,
+    LookAtDoneEvent,
+    PlaceDoneEvent,
 )
 from pyflayer._bridge.event_relay import EventRelay
 from pyflayer._bridge.js_bot import JSBotController
@@ -33,6 +33,7 @@ from pyflayer.models.events import (
     SpawnEvent,
 )
 from pyflayer.models.vec3 import Vec3
+from pyflayer.raw import RawBotHandle
 
 
 class Bot:
@@ -73,6 +74,7 @@ class Bot:
         skip_validation: bool | None = None,
         profiles_folder: str | None = None,
         load_internal_plugins: bool | None = None,
+        event_throttle_ms: dict[str, int] | None = None,
     ) -> None:
         self._config = BotConfig(
             host=host,
@@ -97,8 +99,9 @@ class Bot:
             skip_validation=skip_validation,
             profiles_folder=profiles_folder,
             load_internal_plugins=load_internal_plugins,
+            **({"event_throttle_ms": event_throttle_ms} if event_throttle_ms is not None else {}),
         )
-        self._relay = EventRelay()
+        self._relay = EventRelay(self._config.event_throttle_ms)
         self._observe = ObserveAPI(self._relay)
         self._runtime: BridgeRuntime | None = None
         self._controller: JSBotController | None = None
@@ -168,7 +171,7 @@ class Bot:
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
-        self._observe._bind_js(
+        self._observe.bind_js(
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
@@ -203,7 +206,7 @@ class Bot:
                 pass  # Handler already gone
             self._on_end_handler = None
         self._relay.reset()
-        self._observe._reset()
+        self._observe.reset_state()
         if self._controller is not None:
             if self._connected:
                 self._controller.quit()
@@ -393,7 +396,7 @@ class Bot:
                 )
             ctrl.start_dig(js_block)
             try:
-                event = await self._relay.wait_for(_DigDoneEvent, timeout=60.0)
+                event = await self._relay.wait_for(DigDoneEvent, timeout=60.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("dig timed out") from exc
             if event.error is not None:
@@ -428,7 +431,7 @@ class Bot:
                     )
                 try:
                     equip_event = await self._relay.wait_for(
-                        _EquipDoneEvent, timeout=10.0
+                        EquipDoneEvent, timeout=10.0
                     )
                 except asyncio.TimeoutError as exc:
                     raise InventoryError("equip timed out") from exc
@@ -447,7 +450,7 @@ class Bot:
                 )
             ctrl.start_place(js_block, face.x, face.y, face.z)
             try:
-                event = await self._relay.wait_for(_PlaceDoneEvent, timeout=30.0)
+                event = await self._relay.wait_for(PlaceDoneEvent, timeout=30.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("place timed out") from exc
             if event.error is not None:
@@ -509,7 +512,7 @@ class Bot:
             ctrl = self._ensure_connected()
             ctrl.start_look_at(x, y, z)
             try:
-                event = await self._relay.wait_for(_LookAtDoneEvent, timeout=10.0)
+                event = await self._relay.wait_for(LookAtDoneEvent, timeout=10.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("look_at timed out") from exc
             if event.error is not None:
@@ -541,3 +544,26 @@ class Bot:
     def observe(self) -> ObserveAPI:
         """Event subscription API."""
         return self._observe
+
+    @property
+    def raw(self) -> RawBotHandle:
+        """Raw access to the underlying mineflayer JS bot.
+
+        Warning:
+            This is an escape hatch for advanced use cases. The returned
+            handle exposes the raw JSPyBridge proxy with **no** type
+            safety or API stability guarantees. Refer to the mineflayer
+            JS docs for usage.
+        """
+        ctrl = self._ensure_connected()
+        return RawBotHandle(ctrl.js_bot)
+
+    @property
+    def plugins(self) -> PluginHost:
+        """Plugin management API.
+
+        Includes ``raw_plugin(name)`` for loading arbitrary JS plugins.
+        """
+        if self._plugin_host is None:
+            raise PyflayerConnectionError("Bot is not connected.")
+        return self._plugin_host
