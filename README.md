@@ -26,7 +26,7 @@ pyflayer 讓你用 Python 寫 Minecraft bot，不需要碰 JavaScript。
 | 項目 | 需求 |
 |------|------|
 | Python | 3.14+ |
-| Node.js | 18+ |
+| Node.js | 24+ |
 | Minecraft Server | Java Edition |
 
 ## 安裝
