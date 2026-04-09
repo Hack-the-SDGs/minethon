@@ -727,18 +727,19 @@ class Bot:
         async with self._place_lock:
             ctrl = self._ensure_connected()
             if item_name is not None:
-                if not ctrl.start_equip(item_name):
-                    raise InventoryError(
-                        f"Item '{item_name}' not found in inventory"
-                    )
-                try:
-                    equip_event = await self._relay.wait_for(
-                        EquipDoneEvent, timeout=10.0
-                    )
-                except asyncio.TimeoutError as exc:
-                    raise InventoryError("equip timed out") from exc
-                if equip_event.error is not None:
-                    raise InventoryError(f"equip failed: {equip_event.error}")
+                async with self._equip_lock:
+                    if not ctrl.start_equip(item_name):
+                        raise InventoryError(
+                            f"Item '{item_name}' not found in inventory"
+                        )
+                    try:
+                        equip_event = await self._relay.wait_for(
+                            EquipDoneEvent, timeout=10.0
+                        )
+                    except asyncio.TimeoutError as exc:
+                        raise InventoryError("equip timed out") from exc
+                    if equip_event.error is not None:
+                        raise InventoryError(f"equip failed: {equip_event.error}")
 
             js_block = ctrl.block_at(
                 int(reference_block.position.x),

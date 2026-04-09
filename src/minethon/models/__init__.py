@@ -48,7 +48,6 @@ from minethon.models.events import (
     EntityHandSwapEvent,
     EntityHurtEvent,
     EntityMagicCriticalEffectEvent,
-    EntityMovedEvent,
     EntityShakingOffWaterEvent,
     EntitySleepEvent,
     EntitySpawnEvent,
@@ -76,7 +75,6 @@ from minethon.models.events import (
     MoveEvent,
     NoteHeardEvent,
     ParticleEvent,
-    PhysicsTickEvent,
     PistonMoveEvent,
     PlayerCollectEvent,
     PlayerJoinedEvent,
@@ -191,7 +189,6 @@ __all__ = [
     "EntityHandSwapEvent",
     "EntityHurtEvent",
     "EntityMagicCriticalEffectEvent",
-    "EntityMovedEvent",
     "EntityShakingOffWaterEvent",
     "EntitySleepEvent",
     "EntitySpawnEvent",
@@ -248,6 +245,5 @@ __all__ = [
     "TeamUpdatedEvent",
     # Other events
     "ParticleEvent",
-    "PhysicsTickEvent",
     "UsedFireworkEvent",
 ]
