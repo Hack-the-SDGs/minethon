@@ -480,12 +480,30 @@ class Bot:
             NotSpawnedError: If ``wait_until_spawned()`` has not completed.
         """
         ctrl = self._ensure_spawned()
-        js_entities = ctrl.get_entities()
         result: dict[int, Entity] = {}
-        for eid in js_entities:
-            js_e = js_entities[eid]
-            if js_e is not None:
-                result[int(js_e.id)] = js_entity_to_entity(js_e)
+        for raw in ctrl.get_entities_snapshot():
+            pos = raw["position"]  # type: ignore[assignment]
+            position = Vec3(float(pos["x"]), float(pos["y"]), float(pos["z"]))  # type: ignore[index]
+            velocity: Vec3 | None = None
+            vel = raw.get("velocity")
+            if vel is not None:
+                velocity = Vec3(float(vel["x"]), float(vel["y"]), float(vel["z"]))  # type: ignore[index]
+            etype = raw.get("type")
+            kind_map = {"player": EntityKind.PLAYER, "mob": EntityKind.MOB,
+                        "animal": EntityKind.ANIMAL, "hostile": EntityKind.HOSTILE,
+                        "projectile": EntityKind.PROJECTILE, "object": EntityKind.OBJECT}
+            kind = kind_map.get(str(etype), EntityKind.OTHER) if etype else EntityKind.OTHER
+            name = raw.get("username") or raw.get("name")
+            health_val = raw.get("health")
+            eid = int(raw["id"])  # type: ignore[arg-type]
+            result[eid] = Entity(
+                id=eid,
+                name=str(name) if name is not None else None,
+                kind=kind,
+                position=position,
+                velocity=velocity,
+                health=float(health_val) if health_val is not None else None,
+            )
         return result
 
     @property

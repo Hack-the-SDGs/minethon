@@ -139,21 +139,6 @@ class JSBotController:
         except Exception as exc:
             raise BridgeError(f"get_game_mode failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
-    def get_players_dict(self) -> dict[str, dict[str, object]]:
-        """Return online players as a Python dict (no JS proxy leaking)."""
-        try:
-            js_players = self._js_bot.players
-            result: dict[str, dict[str, object]] = {}
-            for key in js_players:
-                p = js_players[key]
-                result[str(key)] = {
-                    "username": str(p.username),
-                    "ping": int(p.ping) if hasattr(p, "ping") else 0,
-                }
-            return result
-        except Exception as exc:
-            raise BridgeError(f"get_players_dict failed: {exc}", js_stack=extract_js_stack(exc)) from exc
-
     # -- Additional state queries --
 
     def get_food_saturation(self) -> float:
@@ -281,12 +266,16 @@ class JSBotController:
         except Exception as exc:
             raise BridgeError(f"get_bot_entity failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
-    def get_entities(self) -> Any:
-        """Return the raw JS entities dict proxy."""
+    def get_entities_snapshot(self) -> list[dict[str, object]]:
+        """Batch-serialise all entities in one JS call.
+
+        Uses ``helpers.snapshotEntities()`` to avoid per-entity bridge
+        round-trips.
+        """
         try:
-            return self._js_bot.entities
+            return list(self._helpers.snapshotEntities(self._js_bot))
         except Exception as exc:
-            raise BridgeError(f"get_entities failed: {exc}", js_stack=extract_js_stack(exc)) from exc
+            raise BridgeError(f"get_entities_snapshot failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_version(self) -> str:
         """Minecraft version string (e.g. ``"1.20.4"``)."""
@@ -361,7 +350,7 @@ class JSBotController:
                     "uuid": str(uuid_val) if uuid_val is not None else "",
                     "ping": int(p.ping) if hasattr(p, "ping") else 0,
                     "game_mode": int(game_mode) if game_mode is not None else 0,
-                    "display_name": str(display_name) if display_name is not None else None,
+                    "display_name": str(display_name.toString()) if display_name is not None else None,
                 }
             return result
         except Exception as exc:
