@@ -917,14 +917,15 @@ class Bot:
         Raises:
             BridgeError: If the wake operation fails or times out.
         """
-        ctrl = self._ensure_spawned()
-        ctrl.start_wake()
-        try:
-            event = await self._relay.wait_for(WakeDoneEvent, timeout=10.0)
-        except asyncio.TimeoutError as exc:
-            raise BridgeError("wake timed out") from exc
-        if event.error is not None:
-            raise BridgeError(f"wake failed: {event.error}")
+        async with self._sleep_lock:
+            ctrl = self._ensure_spawned()
+            ctrl.start_wake()
+            try:
+                event = await self._relay.wait_for(WakeDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("wake timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"wake failed: {event.error}")
 
     # -- Inventory operations --
 

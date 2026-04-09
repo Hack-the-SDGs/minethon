@@ -97,7 +97,6 @@ from minethon.models.events import (
     EntityHandSwapEvent,
     EntityHurtEvent,
     EntityMagicCriticalEffectEvent,
-    EntityMovedEvent,
     EntityShakingOffWaterEvent,
     EntitySleepEvent,
     EntitySpawnEvent,
@@ -194,7 +193,7 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset({
     "entityCrouch", "entityUncrouch",
     "entityEquip", "entitySleep",
     "entitySpawn", "entityElytraFlew",
-    "entityGone", "entityMoved", "entityUpdate",
+    "entityGone", "entityUpdate",
     "entityAttach", "entityDetach",
     "entityAttributes",
     "entityEffect", "entityEffectEnd",
@@ -479,7 +478,7 @@ class EventRelay:
         def _on_breath(*_args: Any) -> None:
             try:
                 self._post(BreathEvent, BreathEvent(
-                    oxygen_level=float(js_bot.oxygenLevel),
+                    oxygen_level=int(js_bot.oxygenLevel),
                 ))
             except (AttributeError, TypeError):
                 _log.debug("Failed to read oxygen level", exc_info=True)
@@ -763,19 +762,6 @@ class EventRelay:
                 try:
                     self._post(EntityGoneEvent, EntityGoneEvent(
                         entity_id=int(args[0].id),
-                    ))
-                except (AttributeError, TypeError):
-                    pass
-
-        @on_fn(js_bot, "entityMoved")
-        def _on_entity_moved(*args: Any) -> None:
-            if args:
-                try:
-                    e = args[0]
-                    pos = e.position
-                    self._post(EntityMovedEvent, EntityMovedEvent(
-                        entity_id=int(e.id),
-                        position=Vec3(float(pos.x), float(pos.y), float(pos.z)),
                     ))
                 except (AttributeError, TypeError):
                     pass
@@ -1623,7 +1609,7 @@ class EventRelay:
             _on_entity_crouch, _on_entity_uncrouch,
             _on_entity_equip, _on_entity_sleep,
             _on_entity_spawn, _on_entity_elytra_flew,
-            _on_entity_gone, _on_entity_moved, _on_entity_update,
+            _on_entity_gone, _on_entity_update,
             _on_entity_attach, _on_entity_detach,
             _on_entity_attributes,
             _on_entity_effect, _on_entity_effect_end,
