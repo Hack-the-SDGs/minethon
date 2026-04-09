@@ -131,13 +131,6 @@ class JSBotController:
         except Exception as exc:
             raise BridgeError(f"get_food failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
-    def get_username(self) -> str:
-        """Read bot username."""
-        try:
-            return str(self._js_bot.username)
-        except Exception as exc:
-            raise BridgeError(f"get_username failed: {exc}", js_stack=extract_js_stack(exc)) from exc
-
     def get_game_mode(self) -> str:
         """Read current game mode (``"survival"``, ``"creative"``, etc.)."""
         try:
@@ -160,13 +153,6 @@ class JSBotController:
             return result
         except Exception as exc:
             raise BridgeError(f"get_players_dict failed: {exc}", js_stack=extract_js_stack(exc)) from exc
-
-    def is_alive(self) -> bool:
-        """Whether the bot entity is alive (health > 0)."""
-        try:
-            return float(self._js_bot.health) > 0
-        except (TypeError, AttributeError):
-            return False
 
     # -- Additional state queries --
 
@@ -332,11 +318,16 @@ class JSBotController:
             raise BridgeError(f"get_firework_rocket_duration failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
     def get_tablist(self) -> dict[str, str]:
-        """Read tab list header and footer as plain strings."""
+        """Read tab list header and footer as plain text.
+
+        Uses ``toString()`` on the prismarine-chat ``ChatMessage``
+        objects.  If a server sends raw JSON chat components the result
+        may still contain JSON fragments; callers should handle that.
+        """
         try:
             tl = self._js_bot.tablist
-            header = str(tl.header) if tl.header is not None else ""
-            footer = str(tl.footer) if tl.footer is not None else ""
+            header = str(tl.header.toString()) if tl.header is not None else ""
+            footer = str(tl.footer.toString()) if tl.footer is not None else ""
             return {"header": header, "footer": footer}
         except Exception as exc:
             raise BridgeError(f"get_tablist failed: {exc}", js_stack=extract_js_stack(exc)) from exc

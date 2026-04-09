@@ -373,8 +373,7 @@ class Bot:
     @property
     def difficulty(self) -> str:
         """Server difficulty (``"peaceful"``, ``"easy"``, ``"normal"``, ``"hard"``)."""
-        ctrl = self._ensure_connected()
-        return str(ctrl.get_game_state()["difficulty"])
+        return self.game.difficulty
 
     @property
     def is_raining(self) -> bool:
@@ -427,6 +426,8 @@ class Bot:
 
     @quick_bar_slot.setter
     def quick_bar_slot(self, slot: int) -> None:
+        if not (0 <= slot <= 8):
+            raise ValueError(f"quick_bar_slot must be 0-8, got {slot}")
         ctrl = self._ensure_spawned()
         ctrl.set_quick_bar_slot(slot)
 
