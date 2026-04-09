@@ -14,7 +14,11 @@ from minethon.models.errors import (
     MinethonConnectionError,
     MinethonError,
 )
+from minethon.models.experience import Experience
+from minethon.models.game_state import GameState
 from minethon.models.item import ItemStack
+from minethon.models.player_info import PlayerInfo
+from minethon.models.time_state import TimeState
 from minethon.models.vec3 import Vec3
 from minethon.raw import RawBotHandle
 
@@ -29,7 +33,11 @@ __all__ = [
     "Block",
     "Entity",
     "EntityKind",
+    "Experience",
+    "GameState",
     "ItemStack",
+    "PlayerInfo",
+    "TimeState",
     "Vec3",
     # Errors
     "BridgeError",

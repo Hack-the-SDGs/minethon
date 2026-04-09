@@ -111,7 +111,11 @@ from minethon.models.events import (
     WindowCloseEvent,
     WindowOpenEvent,
 )
+from minethon.models.experience import Experience
+from minethon.models.game_state import GameState
 from minethon.models.item import ItemStack
+from minethon.models.player_info import PlayerInfo
+from minethon.models.time_state import TimeState
 from minethon.models.vec3 import Vec3
 
 __all__ = [
@@ -119,7 +123,11 @@ __all__ = [
     "Block",
     "Entity",
     "EntityKind",
+    "Experience",
+    "GameState",
     "ItemStack",
+    "PlayerInfo",
+    "TimeState",
     "Vec3",
     # Errors
     "BridgeError",
@@ -128,6 +136,7 @@ __all__ = [
     "MinethonError",
     "NavigationError",
     "NotSpawnedError",
+    "PlayerInfo",
     "PluginError",
     # Lifecycle events
     "DeathEvent",
