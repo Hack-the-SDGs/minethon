@@ -241,7 +241,11 @@ class JSBotController:
         """Read spawn point as ``{x, y, z}``."""
         try:
             sp = self._js_bot.spawnPoint
+            if sp is None:
+                raise BridgeError("spawnPoint is not yet available (server has not sent a spawn_position packet)")
             return {"x": float(sp.x), "y": float(sp.y), "z": float(sp.z)}
+        except BridgeError:
+            raise
         except Exception as exc:
             raise BridgeError(f"get_spawn_point failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 
@@ -270,10 +274,12 @@ class JSBotController:
         """Batch-serialise all entities in one JS call.
 
         Uses ``helpers.snapshotEntities()`` to avoid per-entity bridge
-        round-trips.
+        round-trips.  Each item is converted via ``.valueOf()`` to a
+        native Python dict.
         """
         try:
-            return list(self._helpers.snapshotEntities(self._js_bot))
+            raw_list = self._helpers.snapshotEntities(self._js_bot)
+            return [dict(item.valueOf()) for item in raw_list]
         except Exception as exc:
             raise BridgeError(f"get_entities_snapshot failed: {exc}", js_stack=extract_js_stack(exc)) from exc
 

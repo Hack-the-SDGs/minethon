@@ -476,6 +476,10 @@ class Bot:
             frequent access consider caching or using
             :meth:`find_entity` instead.
 
+            ``Entity.metadata`` is always ``None`` in this snapshot
+            for performance reasons.  Use :meth:`find_entity` if you
+            need metadata for a specific entity.
+
         Raises:
             NotSpawnedError: If ``wait_until_spawned()`` has not completed.
         """
