@@ -167,7 +167,7 @@ from minethon.models.vec3 import Vec3
 _log = logging.getLogger(__name__)
 
 _HIGH_FREQ_EVENTS: frozenset[str] = frozenset({
-    "physicsTick", "entityMoved", "move",
+    "physicsTick", "entityMoved", "entityUpdate", "move",
 })
 _SLOW_HANDLER_THRESHOLD: float = 0.5  # 500ms
 
@@ -196,7 +196,7 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset({
     "entityCrouch", "entityUncrouch",
     "entityEquip", "entitySleep",
     "entitySpawn", "entityElytraFlew",
-    "entityGone", "entityUpdate",
+    "entityGone",
     "entityAttach", "entityDetach",
     "entityAttributes",
     "entityEffect", "entityEffectEnd",
@@ -276,7 +276,7 @@ class EventRelay:
         throttle_cfg = (
             event_throttle_ms
             if event_throttle_ms is not None
-            else {"move": 50, "entityMoved": 50, "physicsTick": 50}
+            else {"move": 50, "entityMoved": 50, "entityUpdate": 50, "physicsTick": 50}
         )
         self._throttle_intervals: dict[str, float] = {
             name: ms / 1000.0 for name, ms in throttle_cfg.items()
@@ -334,15 +334,21 @@ class EventRelay:
             *args: Any,
             include_entity: bool = False,
         ) -> None:
-            def builder(entity: Any) -> object | None:
-                if entity is None:
-                    return None
+            normalized = self._normalize_js_args(js_bot, args)
+            entity = normalized[0] if normalized else None
+            if entity is None:
+                return
+            try:
                 payload: dict[str, Any] = {"entity_id": int(entity.id)}
                 if include_entity:
                     payload["entity"] = js_entity_to_entity(entity)
-                return event_type(**payload)
-
-            self._post_built(js_bot, event_type, builder, *args)
+                self._post(event_type, event_type(**payload))
+            except Exception:
+                _log.debug(
+                    "Failed to snapshot %s from JS entity payload",
+                    event_type.__name__,
+                    exc_info=True,
+                )
 
         def _post_player_event(event_type: type, *args: Any) -> None:
             def builder(player: Any) -> object | None:
@@ -692,10 +698,6 @@ class EventRelay:
         @on_fn(js_bot, "entityGone")
         def _on_entity_gone(*args: Any) -> None:
             _post_entity_event(EntityGoneEvent, *args)
-
-        @on_fn(js_bot, "entityUpdate")
-        def _on_entity_update(*args: Any) -> None:
-            _post_entity_event(EntityUpdateEvent, *args, include_entity=True)
 
         @on_fn(js_bot, "entityAttach")
         def _on_entity_attach(*args: Any) -> None:
@@ -1449,19 +1451,39 @@ class EventRelay:
                         return
                     self._throttle_last_post[evt] = now
                     if evt == "move":
-                        def build_move(*_unused: Any) -> MoveEvent:
-                            return MoveEvent(position=_vec3_from_js(js_bot.entity.position))
-
-                        self._post_built(js_bot, MoveEvent, build_move, *_args)
-                    elif evt == "entityMoved":
-                        def build_entity_moved(entity: Any) -> EntityMovedEvent:
-                            return EntityMovedEvent(
-                                entity_id=int(entity.id),
-                                position=_vec3_from_js(entity.position),
+                        normalized = self._normalize_js_args(js_bot, _args)
+                        position = normalized[0] if normalized else js_bot.entity.position
+                        try:
+                            self._post(
+                                MoveEvent,
+                                MoveEvent(position=_vec3_from_js(position)),
                             )
-
-                        self._post_built(js_bot, EntityMovedEvent, build_entity_moved, *_args)
-                        self._post_raw(evt, {"args": list(self._normalize_js_args(js_bot, _args))})
+                        except Exception:
+                            _log.debug("Failed to snapshot move payload", exc_info=True)
+                    elif evt == "entityMoved":
+                        normalized = self._normalize_js_args(js_bot, _args)
+                        entity = normalized[0] if normalized else None
+                        if entity is not None:
+                            try:
+                                self._post(
+                                    EntityMovedEvent,
+                                    EntityMovedEvent(
+                                        entity_id=int(entity.id),
+                                        position=_vec3_from_js(entity.position),
+                                    ),
+                                )
+                            except Exception:
+                                _log.debug(
+                                    "Failed to snapshot entityMoved payload",
+                                    exc_info=True,
+                                )
+                        self._post_raw(evt, {"args": list(normalized)})
+                    elif evt == "entityUpdate":
+                        _post_entity_event(EntityUpdateEvent, *_args, include_entity=True)
+                        self._post_raw(
+                            evt,
+                            {"args": list(self._normalize_js_args(js_bot, _args))},
+                        )
                     elif evt == "physicsTick":
                         def build_physics_tick(*_unused: Any) -> PhysicsTickEvent:
                             return PhysicsTickEvent()
@@ -1506,7 +1528,7 @@ class EventRelay:
             _on_entity_crouch, _on_entity_uncrouch,
             _on_entity_equip, _on_entity_sleep,
             _on_entity_spawn, _on_entity_elytra_flew,
-            _on_entity_gone, _on_entity_update,
+            _on_entity_gone,
             _on_entity_attach, _on_entity_detach,
             _on_entity_attributes,
             _on_entity_effect, _on_entity_effect_end,

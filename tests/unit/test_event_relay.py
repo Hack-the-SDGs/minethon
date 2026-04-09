@@ -14,6 +14,7 @@ from minethon._bridge._events import (
 from minethon._bridge.event_relay import EventRelay
 from minethon.models.events import (
     EntityMovedEvent,
+    EntityUpdateEvent,
     HeldItemChangedEvent,
     MessageStrEvent,
     PhysicsTickEvent,
@@ -542,3 +543,50 @@ class TestEventRelayMineflayerParity:
         assert entity_moves == [EntityMovedEvent(entity_id=99, position=Vec3(9.0, 65.0, 7.0))]
         assert len(ticks) == 1
         assert raw_entity_moves == [{"args": [moving_entity]}]
+
+    @pytest.mark.asyncio
+    async def test_entity_update_snapshots_before_later_proxy_mutation(self) -> None:
+        relay = EventRelay(
+            event_throttle_ms={"move": 0, "entityMoved": 0, "entityUpdate": 0, "physicsTick": 0}
+        )
+        relay.set_loop(asyncio.get_running_loop())
+        js_bot = self._make_bot()
+        handlers: dict[str, object] = {}
+
+        def on_fn(_bot: object, event_name: str):
+            def decorator(fn):
+                handlers[event_name] = fn
+                return fn
+
+            return decorator
+
+        relay.register_js_events(js_bot, on_fn)
+
+        updates: list[EntityUpdateEvent] = []
+
+        async def handler(event: EntityUpdateEvent) -> None:
+            updates.append(event)
+
+        relay.add_handler(EntityUpdateEvent, handler)
+        entity = SimpleNamespace(
+            id=7,
+            position=SimpleNamespace(x=1.0, y=65.0, z=2.0),
+            velocity=SimpleNamespace(x=0.1, y=0.0, z=0.2),
+            health=12.0,
+            username="Alex",
+            name="player",
+            metadata=None,
+            type="player",
+        )
+
+        handlers["entityUpdate"](js_bot, entity)
+        entity.position.x = 99.0
+        entity.velocity.z = 9.0
+        entity.health = 1.0
+        await asyncio.sleep(0.01)
+
+        assert len(updates) == 1
+        assert updates[0].entity is not None
+        assert updates[0].entity.position == Vec3(1.0, 65.0, 2.0)
+        assert updates[0].entity.velocity == Vec3(0.1, 0.0, 0.2)
+        assert updates[0].entity.health == 12.0

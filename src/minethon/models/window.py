@@ -7,7 +7,13 @@ from minethon.models.item import ItemStack
 
 @dataclass(frozen=True, slots=True)
 class WindowHandle:
-    """A typed handle to an opened mineflayer window."""
+    """A typed handle to an opened mineflayer window.
+
+    Warning:
+        ``_raw`` is a live JSPyBridge proxy. It is only valid while the
+        underlying window remains open. Accessing it after the window is
+        closed may fail unpredictably or crash the Node.js bridge.
+    """
 
     id: int
     title: str
@@ -29,7 +35,13 @@ class TradeOffer:
 
 @dataclass(frozen=True, slots=True)
 class VillagerSession:
-    """A typed villager trading session handle."""
+    """A typed villager trading session handle.
+
+    Warning:
+        ``_raw`` is a live JSPyBridge proxy. It is only valid while the
+        villager trading window remains open. Accessing it after the
+        session closes may fail unpredictably or crash the Node.js bridge.
+    """
 
     id: int
     title: str
