@@ -1007,14 +1007,16 @@ class Bot:
                     event = await self._relay.wait_for(TossStackDoneEvent, timeout=10.0)
                 except asyncio.TimeoutError as exc:
                     raise InventoryError("toss timed out") from exc
+                if event.error is not None:
+                    raise InventoryError(f"toss failed: {event.error}")
             else:
                 ctrl.start_toss(int(target.type), None, count)
                 try:
                     event = await self._relay.wait_for(TossDoneEvent, timeout=10.0)
                 except asyncio.TimeoutError as exc:
                     raise InventoryError("toss timed out") from exc
-            if event.error is not None:
-                raise InventoryError(f"toss failed: {event.error}")
+                if event.error is not None:
+                    raise InventoryError(f"toss failed: {event.error}")
 
     async def set_quick_bar_slot(self, slot: int) -> None:
         """Select a quick bar slot.
