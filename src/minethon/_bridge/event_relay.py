@@ -351,23 +351,38 @@ class EventRelay:
                 )
 
         def _post_player_event(event_type: type, *args: Any) -> None:
-            def builder(player: Any) -> object | None:
-                if player is None:
-                    return None
-                return event_type(username=str(player.username))
-
-            self._post_built(js_bot, event_type, builder, *args)
+            normalized = self._normalize_js_args(js_bot, args)
+            player = normalized[0] if normalized else None
+            if player is None:
+                return
+            try:
+                self._post(event_type, event_type(username=str(player.username)))
+            except Exception:
+                _log.debug(
+                    "Failed to snapshot %s from JS player payload",
+                    event_type.__name__,
+                    exc_info=True,
+                )
 
         def _name_from_proxy(value: Any) -> str:
             return str(value.name) if hasattr(value, "name") else str(value)
 
         def _post_named_event(event_type: type, field_name: str, *args: Any) -> None:
-            def builder(value: Any) -> object | None:
-                if value is None:
-                    return None
-                return event_type(**{field_name: _name_from_proxy(value)})
-
-            self._post_built(js_bot, event_type, builder, *args)
+            normalized = self._normalize_js_args(js_bot, args)
+            value = normalized[0] if normalized else None
+            if value is None:
+                return
+            try:
+                self._post(
+                    event_type,
+                    event_type(**{field_name: _name_from_proxy(value)}),
+                )
+            except Exception:
+                _log.debug(
+                    "Failed to snapshot %s from JS named payload",
+                    event_type.__name__,
+                    exc_info=True,
+                )
 
         # ================================================================
         # Lifecycle
@@ -562,11 +577,16 @@ class EventRelay:
 
         @on_fn(js_bot, "heldItemChanged")
         def _on_held_item_changed(*args: Any) -> None:
-            def builder(held_item: Any | None = None) -> HeldItemChangedEvent:
+            normalized = self._normalize_js_args(js_bot, args)
+            held_item = normalized[0] if normalized else None
+            try:
                 item = None if held_item is None else js_item_to_item_stack(held_item)
-                return HeldItemChangedEvent(item=item)
-
-            self._post_built(js_bot, HeldItemChangedEvent, builder, *args)
+                self._post(HeldItemChangedEvent, HeldItemChangedEvent(item=item))
+            except Exception:
+                _log.debug(
+                    "Failed to snapshot HeldItemChangedEvent from JS payload",
+                    exc_info=True,
+                )
 
         # ================================================================
         # Movement

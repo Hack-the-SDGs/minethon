@@ -17,9 +17,11 @@ from minethon.models.events import (
     EntityUpdateEvent,
     HeldItemChangedEvent,
     MessageStrEvent,
+    PlayerJoinedEvent,
     PhysicsTickEvent,
     ScoreUpdatedEvent,
     SoundEffectHeardEvent,
+    TeamCreatedEvent,
 )
 from minethon.models.events import (
     ChatEvent,
@@ -441,6 +443,80 @@ class TestEventRelayMineflayerParity:
         assert received[0].item is not None
         assert received[0].item.name == "stick"
         assert received[0].item.display_name == "Stick"
+
+    @pytest.mark.asyncio
+    async def test_held_item_changed_snapshots_before_later_proxy_mutation(self) -> None:
+        relay = EventRelay()
+        relay.set_loop(asyncio.get_running_loop())
+        js_bot = self._make_bot()
+        handlers: dict[str, object] = {}
+
+        def on_fn(_bot: object, event_name: str):
+            def decorator(fn):
+                handlers[event_name] = fn
+                return fn
+
+            return decorator
+
+        relay.register_js_events(js_bot, on_fn)
+
+        received: list[HeldItemChangedEvent] = []
+
+        async def handler(event: HeldItemChangedEvent) -> None:
+            received.append(event)
+
+        relay.add_handler(HeldItemChangedEvent, handler)
+        item = self._make_item()
+        handlers["heldItemChanged"](js_bot, item)
+        item.name = "diamond"
+        item.displayName = "Diamond"
+        item.count = 99
+        await asyncio.sleep(0.01)
+
+        assert len(received) == 1
+        assert received[0].item is not None
+        assert received[0].item.name == "stick"
+        assert received[0].item.display_name == "Stick"
+        assert received[0].item.count == 2
+
+    @pytest.mark.asyncio
+    async def test_player_and_named_events_snapshot_scalar_fields(self) -> None:
+        relay = EventRelay()
+        relay.set_loop(asyncio.get_running_loop())
+        js_bot = self._make_bot()
+        handlers: dict[str, object] = {}
+
+        def on_fn(_bot: object, event_name: str):
+            def decorator(fn):
+                handlers[event_name] = fn
+                return fn
+
+            return decorator
+
+        relay.register_js_events(js_bot, on_fn)
+
+        players: list[PlayerJoinedEvent] = []
+        teams: list[TeamCreatedEvent] = []
+
+        async def player_handler(event: PlayerJoinedEvent) -> None:
+            players.append(event)
+
+        async def team_handler(event: TeamCreatedEvent) -> None:
+            teams.append(event)
+
+        relay.add_handler(PlayerJoinedEvent, player_handler)
+        relay.add_handler(TeamCreatedEvent, team_handler)
+
+        player = SimpleNamespace(username="Alex")
+        team = SimpleNamespace(name="builders")
+        handlers["playerJoined"](js_bot, player)
+        handlers["teamCreated"](js_bot, team)
+        player.username = "Steve"
+        team.name = "raiders"
+        await asyncio.sleep(0.01)
+
+        assert players == [PlayerJoinedEvent(username="Alex")]
+        assert teams == [TeamCreatedEvent(name="builders")]
 
     @pytest.mark.asyncio
     async def test_sound_and_score_payloads_match_docs(self) -> None:
