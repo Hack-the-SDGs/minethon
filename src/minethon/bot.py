@@ -13,6 +13,7 @@ from minethon._bridge.js_bot import JSBotController
 from minethon._bridge.marshalling import (
     js_block_to_block,
     js_entity_to_entity,
+    js_item_to_item_stack,
 )
 from minethon._bridge.plugin_host import PluginHost
 from minethon._bridge.runtime import BridgeRuntime
@@ -32,6 +33,11 @@ from minethon.models.events import (
     EndEvent,
     SpawnEvent,
 )
+from minethon.models.experience import Experience
+from minethon.models.game_state import GameState
+from minethon.models.item import ItemStack
+from minethon.models.player_info import PlayerInfo
+from minethon.models.time_state import TimeState
 from minethon.models.vec3 import Vec3
 from minethon.raw import RawBotHandle
 
@@ -237,9 +243,13 @@ class Bot:
 
     @property
     def is_alive(self) -> bool:
-        """Whether the bot entity is alive (health > 0)."""
+        """Whether the bot entity is alive.
+
+        Reads the ``isAlive`` flag from mineflayer directly, which
+        accounts for respawn transitions.
+        """
         ctrl = self._ensure_spawned()
-        return ctrl.is_alive()
+        return ctrl.get_is_alive_js()
 
     @property
     def position(self) -> Vec3:
@@ -274,7 +284,15 @@ class Bot:
 
     @property
     def username(self) -> str:
-        """Bot username."""
+        """Bot username.
+
+        After authentication the server may assign a different name
+        (e.g. Microsoft auth).  This reads the live value from the JS
+        bot when connected, falling back to the config value before
+        connection.
+        """
+        if self._controller is not None and self._connected:
+            return self._controller.get_username_js()
         return self._config.username
 
     @property
@@ -284,10 +302,220 @@ class Bot:
         return ctrl.get_game_mode()
 
     @property
-    def players(self) -> dict[str, dict[str, object]]:
-        """Online players as ``{username: info_dict}``."""
+    def players(self) -> dict[str, PlayerInfo]:
+        """Online players as ``{username: PlayerInfo}``."""
         ctrl = self._ensure_connected()
-        return ctrl.get_players_dict()
+        raw = ctrl.get_players_full()
+        return {
+            name: PlayerInfo(
+                username=str(info["username"]),
+                uuid=str(info["uuid"]),
+                ping=int(info["ping"]),  # type: ignore[arg-type]
+                game_mode=int(info["game_mode"]),  # type: ignore[arg-type]
+                display_name=str(info["display_name"]) if info["display_name"] is not None else None,
+            )
+            for name, info in raw.items()
+        }
+
+    @property
+    def food_saturation(self) -> float:
+        """Bot food saturation level.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        return ctrl.get_food_saturation()
+
+    @property
+    def oxygen_level(self) -> int:
+        """Bot oxygen (air supply) level (0-20).
+
+        Defaults to 20 when no metadata has been received yet.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        return ctrl.get_oxygen_level()
+
+    @property
+    def experience(self) -> Experience:
+        """Bot experience state snapshot.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        data = ctrl.get_experience()
+        return Experience(
+            level=int(data["level"]),  # type: ignore[arg-type]
+            points=int(data["points"]),  # type: ignore[arg-type]
+            progress=float(data["progress"]),  # type: ignore[arg-type]
+        )
+
+    @property
+    def game(self) -> GameState:
+        """Server game state snapshot."""
+        ctrl = self._ensure_connected()
+        data = ctrl.get_game_state()
+        return GameState(
+            game_mode=str(data["game_mode"]),
+            dimension=str(data["dimension"]),
+            difficulty=str(data["difficulty"]),
+            hardcore=bool(data["hardcore"]),
+            max_players=int(data["max_players"]),  # type: ignore[arg-type]
+            server_brand=str(data["server_brand"]),
+            min_y=int(data["min_y"]),  # type: ignore[arg-type]
+            height=int(data["height"]),  # type: ignore[arg-type]
+        )
+
+    @property
+    def difficulty(self) -> str:
+        """Server difficulty (``"peaceful"``, ``"easy"``, ``"normal"``, ``"hard"``)."""
+        ctrl = self._ensure_connected()
+        return str(ctrl.get_game_state()["difficulty"])
+
+    @property
+    def is_raining(self) -> bool:
+        """Whether it is currently raining."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_is_raining()
+
+    @property
+    def thunder_state(self) -> float:
+        """Thunder intensity level (0 means no thunder)."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_thunder_state()
+
+    @property
+    def time(self) -> TimeState:
+        """World time state snapshot."""
+        ctrl = self._ensure_connected()
+        data = ctrl.get_time()
+        return TimeState(
+            time_of_day=int(data["time_of_day"]),  # type: ignore[arg-type]
+            day=int(data["day"]),  # type: ignore[arg-type]
+            is_day=bool(data["is_day"]),
+            moon_phase=int(data["moon_phase"]),  # type: ignore[arg-type]
+            age=int(data["age"]),  # type: ignore[arg-type]
+            do_daylight_cycle=bool(data["do_daylight_cycle"]),
+        )
+
+    @property
+    def held_item(self) -> ItemStack | None:
+        """Item currently held in the bot's main hand, or ``None``.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        js_item = ctrl.get_held_item()
+        if js_item is None:
+            return None
+        return js_item_to_item_stack(js_item)
+
+    @property
+    def quick_bar_slot(self) -> int:
+        """Currently selected quick bar slot (0-8).
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        return ctrl.get_quick_bar_slot()
+
+    @quick_bar_slot.setter
+    def quick_bar_slot(self, slot: int) -> None:
+        ctrl = self._ensure_spawned()
+        ctrl.set_quick_bar_slot(slot)
+
+    @property
+    def spawn_point(self) -> Vec3:
+        """Bot spawn point position.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        data = ctrl.get_spawn_point()
+        return Vec3(x=data["x"], y=data["y"], z=data["z"])
+
+    @property
+    def is_sleeping(self) -> bool:
+        """Whether the bot is currently sleeping in a bed."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_is_sleeping()
+
+    @property
+    def target_dig_block(self) -> Block | None:
+        """Block currently being dug, or ``None``."""
+        ctrl = self._ensure_connected()
+        js_block = ctrl.get_target_dig_block()
+        if js_block is None:
+            return None
+        return js_block_to_block(js_block)
+
+    @property
+    def entity(self) -> Entity:
+        """The bot's own entity snapshot.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        return js_entity_to_entity(ctrl.get_bot_entity())
+
+    @property
+    def entities(self) -> dict[int, Entity]:
+        """All currently tracked entities as ``{entity_id: Entity}``.
+
+        Note:
+            This creates a snapshot of every tracked entity. For
+            frequent access consider caching or using
+            :meth:`find_entity` instead.
+
+        Raises:
+            NotSpawnedError: If ``wait_until_spawned()`` has not completed.
+        """
+        ctrl = self._ensure_spawned()
+        js_entities = ctrl.get_entities()
+        result: dict[int, Entity] = {}
+        for eid in js_entities:
+            js_e = js_entities[eid]
+            if js_e is not None:
+                result[int(js_e.id)] = js_entity_to_entity(js_e)
+        return result
+
+    @property
+    def version(self) -> str:
+        """Minecraft version string (e.g. ``"1.20.4"``)."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_version()
+
+    @property
+    def physics_enabled(self) -> bool:
+        """Whether the physics simulation is active."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_physics_enabled()
+
+    @physics_enabled.setter
+    def physics_enabled(self, value: bool) -> None:
+        ctrl = self._ensure_connected()
+        ctrl.set_physics_enabled(value)
+
+    @property
+    def firework_rocket_duration(self) -> int:
+        """Remaining firework rocket boost ticks (0 if not boosting)."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_firework_rocket_duration()
+
+    @property
+    def tablist(self) -> tuple[str, str]:
+        """Tab list ``(header, footer)`` as plain strings."""
+        ctrl = self._ensure_connected()
+        data = ctrl.get_tablist()
+        return (data["header"], data["footer"])
 
     # -- Chat --
 
