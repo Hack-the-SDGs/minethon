@@ -14,19 +14,6 @@ from minethon.models.errors import (
     MinethonConnectionError,
     MinethonError,
 )
-from minethon.models.events import (
-    BlockBrokenEvent,
-    ChatEvent,
-    CollectCompletedEvent,
-    DeathEvent,
-    EndEvent,
-    GoalFailedEvent,
-    GoalReachedEvent,
-    HealthChangedEvent,
-    KickedEvent,
-    SpawnEvent,
-    WhisperEvent,
-)
 from minethon.models.experience import Experience
 from minethon.models.game_state import GameState
 from minethon.models.item import ItemStack
@@ -36,35 +23,28 @@ from minethon.models.vec3 import Vec3
 from minethon.raw import RawBotHandle
 
 __all__ = [
-    "Block",
-    "BlockBrokenEvent",
+    # Core
     "Bot",
-    "BridgeError",
-    "ChatEvent",
-    "CollectCompletedEvent",
-    "DeathEvent",
-    "EndEvent",
+    "RawBotHandle",
+    # Sub-APIs
+    "NavigationAPI",
+    "ObserveAPI",
+    # Types
+    "Block",
     "Entity",
     "EntityKind",
     "Experience",
     "GameState",
-    "GoalFailedEvent",
-    "GoalReachedEvent",
-    "HealthChangedEvent",
-    "InventoryError",
     "ItemStack",
-    "KickedEvent",
-    "NavigationAPI",
-    "NavigationError",
-    "NotSpawnedError",
-    "ObserveAPI",
     "PlayerInfo",
-    "PluginError",
-    "MinethonConnectionError",
-    "MinethonError",
-    "RawBotHandle",
-    "SpawnEvent",
     "TimeState",
     "Vec3",
-    "WhisperEvent",
+    # Errors
+    "BridgeError",
+    "InventoryError",
+    "MinethonConnectionError",
+    "MinethonError",
+    "NavigationError",
+    "NotSpawnedError",
+    "PluginError",
 ]

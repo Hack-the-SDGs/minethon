@@ -1,12 +1,27 @@
 """Bot -- the public entry point for minethon."""
 
 import asyncio
+from typing import Any
 
 from minethon._bridge._events import (
+    ActivateBlockDoneEvent,
+    ActivateEntityDoneEvent,
+    ChunksLoadedDoneEvent,
+    ConsumeDoneEvent,
+    CraftDoneEvent,
     DigDoneEvent,
     EquipDoneEvent,
+    FishDoneEvent,
     LookAtDoneEvent,
+    LookDoneEvent,
     PlaceDoneEvent,
+    SleepDoneEvent,
+    TabCompleteDoneEvent,
+    TossDoneEvent,
+    TossStackDoneEvent,
+    UnequipDoneEvent,
+    WaitForTicksDoneEvent,
+    WakeDoneEvent,
 )
 from minethon._bridge.event_relay import EventRelay
 from minethon._bridge.js_bot import JSBotController
@@ -123,6 +138,19 @@ class Bot:
         self._dig_lock = asyncio.Lock()
         self._place_lock = asyncio.Lock()
         self._look_at_lock = asyncio.Lock()
+        self._look_lock = asyncio.Lock()
+        self._sleep_lock = asyncio.Lock()
+        self._consume_lock = asyncio.Lock()
+        self._fish_lock = asyncio.Lock()
+        self._equip_lock = asyncio.Lock()
+        self._unequip_lock = asyncio.Lock()
+        self._toss_lock = asyncio.Lock()
+        self._activate_block_lock = asyncio.Lock()
+        self._activate_entity_lock = asyncio.Lock()
+        self._craft_lock = asyncio.Lock()
+        self._tab_complete_lock = asyncio.Lock()
+        self._wait_chunks_lock = asyncio.Lock()
+        self._wait_ticks_lock = asyncio.Lock()
 
     def _ensure_connected(self) -> JSBotController:
         """Return the controller or raise if not connected."""
@@ -545,6 +573,24 @@ class Bot:
         data = ctrl.get_tablist()
         return (data["header"], data["footer"])
 
+    @property
+    def using_held_item(self) -> bool:
+        """Whether the bot is currently using its held item (e.g. eating)."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_using_held_item()
+
+    @property
+    def rain_state(self) -> float:
+        """Rain intensity (0.0 = clear, 1.0 = full rain)."""
+        ctrl = self._ensure_connected()
+        return ctrl.get_rain_state()
+
+    @property
+    def inventory_items(self) -> list[ItemStack]:
+        """All items currently in the bot inventory."""
+        ctrl = self._ensure_connected()
+        return [js_item_to_item_stack(item) for item in ctrl.get_inventory_items()]
+
     # -- Chat --
 
     async def chat(self, message: str) -> None:
@@ -681,18 +727,19 @@ class Bot:
         async with self._place_lock:
             ctrl = self._ensure_connected()
             if item_name is not None:
-                if not ctrl.start_equip(item_name):
-                    raise InventoryError(
-                        f"Item '{item_name}' not found in inventory"
-                    )
-                try:
-                    equip_event = await self._relay.wait_for(
-                        EquipDoneEvent, timeout=10.0
-                    )
-                except asyncio.TimeoutError as exc:
-                    raise InventoryError("equip timed out") from exc
-                if equip_event.error is not None:
-                    raise InventoryError(f"equip failed: {equip_event.error}")
+                async with self._equip_lock:
+                    if not ctrl.start_equip(item_name):
+                        raise InventoryError(
+                            f"Item '{item_name}' not found in inventory"
+                        )
+                    try:
+                        equip_event = await self._relay.wait_for(
+                            EquipDoneEvent, timeout=10.0
+                        )
+                    except asyncio.TimeoutError as exc:
+                        raise InventoryError("equip timed out") from exc
+                    if equip_event.error is not None:
+                        raise InventoryError(f"equip failed: {equip_event.error}")
 
             js_block = ctrl.block_at(
                 int(reference_block.position.x),
@@ -774,6 +821,27 @@ class Bot:
             if event.error is not None:
                 raise BridgeError(f"look_at failed: {event.error}")
 
+    async def look(self, yaw: float, pitch: float, *, force: bool = False) -> None:
+        """Set head direction by yaw and pitch.
+
+        Args:
+            yaw: Horizontal rotation in radians.
+            pitch: Vertical rotation in radians.
+            force: If ``True``, snap instantly instead of smoothly rotating.
+
+        Raises:
+            BridgeError: If the look operation fails or times out.
+        """
+        async with self._look_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_look(yaw, pitch, force)
+            try:
+                event = await self._relay.wait_for(LookDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("look timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"look failed: {event.error}")
+
     async def jump(self) -> None:
         """Make the bot jump once."""
         ctrl = self._ensure_connected()
@@ -823,3 +891,505 @@ class Bot:
         if self._plugin_host is None:
             raise MinethonConnectionError("Bot is not connected.")
         return self._plugin_host
+
+    # -- Sleep / Wake --
+
+    async def sleep(self, bed_block: Block) -> None:
+        """Sleep in a bed.
+
+        Args:
+            bed_block: The :class:`Block` representing the bed.
+
+        Raises:
+            MinethonError: If the bed block is not found at the position.
+            BridgeError: If the sleep operation fails or times out.
+        """
+        async with self._sleep_lock:
+            ctrl = self._ensure_spawned()
+            js_block = ctrl.block_at(
+                int(bed_block.position.x),
+                int(bed_block.position.y),
+                int(bed_block.position.z),
+            )
+            if js_block is None:
+                raise MinethonError("Bed block not found")
+            ctrl.start_sleep(js_block)
+            try:
+                event = await self._relay.wait_for(SleepDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("sleep timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"sleep failed: {event.error}")
+
+    async def wake(self) -> None:
+        """Wake up from sleeping.
+
+        Raises:
+            BridgeError: If the wake operation fails or times out.
+        """
+        async with self._sleep_lock:
+            ctrl = self._ensure_spawned()
+            ctrl.start_wake()
+            try:
+                event = await self._relay.wait_for(WakeDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("wake timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"wake failed: {event.error}")
+
+    # -- Inventory operations --
+
+    async def equip(self, item_name: str, destination: str = "hand") -> None:
+        """Equip an item by name.
+
+        Args:
+            item_name: Name of the item to equip (e.g. ``"diamond_sword"``).
+            destination: Where to equip (``"hand"``, ``"off-hand"``,
+                ``"head"``, ``"torso"``, ``"legs"``, ``"feet"``).
+
+        Raises:
+            InventoryError: If the item is not found or equip fails.
+        """
+        async with self._equip_lock:
+            ctrl = self._ensure_connected()
+            if not ctrl.start_equip(item_name, destination):
+                raise InventoryError(f"Item '{item_name}' not found in inventory")
+            try:
+                event = await self._relay.wait_for(EquipDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise InventoryError("equip timed out") from exc
+            if event.error is not None:
+                raise InventoryError(f"equip failed: {event.error}")
+
+    async def unequip(self, destination: str) -> None:
+        """Unequip an item from a slot.
+
+        Args:
+            destination: Slot to unequip (``"hand"``, ``"off-hand"``,
+                ``"head"``, ``"torso"``, ``"legs"``, ``"feet"``).
+
+        Raises:
+            InventoryError: If the unequip operation fails.
+        """
+        async with self._unequip_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_unequip(destination)
+            try:
+                event = await self._relay.wait_for(UnequipDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise InventoryError("unequip timed out") from exc
+            if event.error is not None:
+                raise InventoryError(f"unequip failed: {event.error}")
+
+    async def toss(self, item_name: str, count: int | None = None) -> None:
+        """Toss items by name.
+
+        Args:
+            item_name: Name of the item to toss.
+            count: Number of items to toss. ``None`` tosses the whole stack.
+
+        Raises:
+            InventoryError: If the item is not found or toss fails.
+        """
+        async with self._toss_lock:
+            ctrl = self._ensure_connected()
+            items = ctrl.get_inventory_items()
+            target = None
+            for item in items:
+                if str(item.name) == item_name:
+                    target = item
+                    break
+            if target is None:
+                raise InventoryError(f"Item '{item_name}' not found")
+            if count is None:
+                ctrl.start_toss_stack(target)
+                try:
+                    event = await self._relay.wait_for(TossStackDoneEvent, timeout=10.0)
+                except asyncio.TimeoutError as exc:
+                    raise InventoryError("toss timed out") from exc
+                if event.error is not None:
+                    raise InventoryError(f"toss failed: {event.error}")
+            else:
+                ctrl.start_toss(int(target.type), None, count)
+                try:
+                    event = await self._relay.wait_for(TossDoneEvent, timeout=10.0)
+                except asyncio.TimeoutError as exc:
+                    raise InventoryError("toss timed out") from exc
+                if event.error is not None:
+                    raise InventoryError(f"toss failed: {event.error}")
+
+    async def set_quick_bar_slot(self, slot: int) -> None:
+        """Select a quick bar slot.
+
+        Args:
+            slot: Slot index (0-8).
+        """
+        ctrl = self._ensure_connected()
+        ctrl.set_quick_bar_slot(slot)
+
+    # -- Actions (extended) --
+
+    async def consume(self) -> None:
+        """Eat or drink the currently held item.
+
+        Raises:
+            BridgeError: If the consume operation fails or times out.
+        """
+        async with self._consume_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_consume()
+            try:
+                event = await self._relay.wait_for(ConsumeDoneEvent, timeout=30.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("consume timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"consume failed: {event.error}")
+
+    async def fish(self) -> None:
+        """Cast a fishing rod and wait for a catch.
+
+        Raises:
+            BridgeError: If the fish operation fails or times out.
+        """
+        async with self._fish_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_fish()
+            try:
+                event = await self._relay.wait_for(FishDoneEvent, timeout=120.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("fish timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"fish failed: {event.error}")
+
+    async def activate_block(self, block: Block) -> None:
+        """Activate a block (open door, punch note block, etc.).
+
+        Args:
+            block: The :class:`Block` to activate.
+
+        Raises:
+            MinethonError: If the block is not found at the position.
+            BridgeError: If the activation fails or times out.
+        """
+        async with self._activate_block_lock:
+            ctrl = self._ensure_connected()
+            js_block = ctrl.block_at(
+                int(block.position.x),
+                int(block.position.y),
+                int(block.position.z),
+            )
+            if js_block is None:
+                raise MinethonError(f"Block at {block.position} not found")
+            ctrl.start_activate_block(js_block)
+            try:
+                event = await self._relay.wait_for(ActivateBlockDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("activate_block timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"activate_block failed: {event.error}")
+
+    async def activate_entity(self, entity: Entity) -> None:
+        """Activate (right-click) an entity.
+
+        Args:
+            entity: The :class:`Entity` to activate.
+
+        Raises:
+            BridgeError: If the activation fails or times out.
+        """
+        async with self._activate_entity_lock:
+            ctrl = self._ensure_connected()
+            js_entity = ctrl.get_entity_by_id(entity.id)
+            if js_entity is None:
+                return
+            ctrl.start_activate_entity(js_entity)
+            try:
+                event = await self._relay.wait_for(ActivateEntityDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("activate_entity timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"activate_entity failed: {event.error}")
+
+    async def swing_arm(self, hand: str = "right") -> None:
+        """Swing the bot arm.
+
+        Args:
+            hand: ``"right"`` or ``"left"``.
+        """
+        ctrl = self._ensure_connected()
+        ctrl.swing_arm(hand)
+
+    async def deactivate_item(self) -> None:
+        """Stop using the currently held item (e.g. stop eating/blocking)."""
+        ctrl = self._ensure_connected()
+        ctrl.deactivate_item()
+
+    async def use_on(self, entity: Entity) -> None:
+        """Use the currently held item on an entity.
+
+        Args:
+            entity: The :class:`Entity` to interact with.
+        """
+        ctrl = self._ensure_connected()
+        js_entity = ctrl.get_entity_by_id(entity.id)
+        if js_entity is not None:
+            ctrl.use_on(js_entity)
+
+    async def mount(self, entity: Entity) -> None:
+        """Mount an entity (horse, boat, minecart, etc.).
+
+        Args:
+            entity: The :class:`Entity` to mount.
+        """
+        ctrl = self._ensure_connected()
+        js_entity = ctrl.get_entity_by_id(entity.id)
+        if js_entity is not None:
+            ctrl.mount(js_entity)
+
+    async def dismount(self) -> None:
+        """Dismount the currently mounted entity."""
+        ctrl = self._ensure_connected()
+        ctrl.dismount()
+
+    async def move_vehicle(self, left: float, forward: float) -> None:
+        """Move the currently mounted vehicle.
+
+        Args:
+            left: Leftward movement (-1.0 to 1.0).
+            forward: Forward movement (-1.0 to 1.0).
+        """
+        ctrl = self._ensure_connected()
+        ctrl.move_vehicle(left, forward)
+
+    # -- Crafting --
+
+    async def craft(
+        self,
+        recipe: Any,
+        count: int = 1,
+        crafting_table: Block | None = None,
+    ) -> None:
+        """Craft items using a recipe.
+
+        Use ``bot.raw`` to look up recipes from the mineflayer API.
+
+        Args:
+            recipe: A mineflayer recipe object (obtained via ``bot.raw``).
+            count: Number of times to craft.
+            crafting_table: Optional crafting table :class:`Block` for
+                3x3 recipes.
+
+        Raises:
+            BridgeError: If the craft operation fails or times out.
+        """
+        async with self._craft_lock:
+            ctrl = self._ensure_connected()
+            js_table = None
+            if crafting_table is not None:
+                js_table = ctrl.block_at(
+                    int(crafting_table.position.x),
+                    int(crafting_table.position.y),
+                    int(crafting_table.position.z),
+                )
+            ctrl.start_craft(recipe, count, js_table)
+            try:
+                event = await self._relay.wait_for(CraftDoneEvent, timeout=30.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("craft timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"craft failed: {event.error}")
+
+    # -- World queries (extended) --
+
+    async def block_at_cursor(self, max_distance: float = 256) -> Block | None:
+        """Get the block the bot is currently looking at.
+
+        Args:
+            max_distance: Maximum raycast distance.
+
+        Returns:
+            A :class:`Block` snapshot, or ``None`` if nothing is in range.
+        """
+        ctrl = self._ensure_connected()
+        js_block = ctrl.block_at_cursor(max_distance)
+        return js_block_to_block(js_block) if js_block is not None else None
+
+    async def entity_at_cursor(self, max_distance: float = 3.5) -> Entity | None:
+        """Get the entity the bot is currently looking at.
+
+        Args:
+            max_distance: Maximum raycast distance.
+
+        Returns:
+            An :class:`Entity` snapshot, or ``None``.
+        """
+        ctrl = self._ensure_connected()
+        js_entity = ctrl.entity_at_cursor(max_distance)
+        return js_entity_to_entity(js_entity) if js_entity is not None else None
+
+    async def can_dig_block(self, block: Block) -> bool:
+        """Check whether the bot can dig the given block.
+
+        Args:
+            block: The :class:`Block` to check.
+
+        Returns:
+            ``True`` if the block is diggable.
+        """
+        ctrl = self._ensure_connected()
+        js_block = ctrl.block_at(
+            int(block.position.x),
+            int(block.position.y),
+            int(block.position.z),
+        )
+        return ctrl.can_dig_block(js_block) if js_block is not None else False
+
+    async def can_see_block(self, block: Block) -> bool:
+        """Check whether the bot has line-of-sight to the block.
+
+        Args:
+            block: The :class:`Block` to check.
+
+        Returns:
+            ``True`` if the block is visible.
+        """
+        ctrl = self._ensure_connected()
+        js_block = ctrl.block_at(
+            int(block.position.x),
+            int(block.position.y),
+            int(block.position.z),
+        )
+        return ctrl.can_see_block(js_block) if js_block is not None else False
+
+    async def dig_time(self, block: Block) -> int:
+        """Return the estimated dig time in milliseconds.
+
+        Args:
+            block: The :class:`Block` to query.
+
+        Returns:
+            Dig time in milliseconds.
+
+        Raises:
+            MinethonError: If the block is not found.
+        """
+        ctrl = self._ensure_connected()
+        js_block = ctrl.block_at(
+            int(block.position.x),
+            int(block.position.y),
+            int(block.position.z),
+        )
+        if js_block is None:
+            raise MinethonError(f"Block at {block.position} not found")
+        return ctrl.dig_time(js_block)
+
+    async def stop_digging(self) -> None:
+        """Cancel the current dig operation."""
+        ctrl = self._ensure_connected()
+        ctrl.stop_digging()
+
+    async def wait_for_chunks_to_load(self) -> None:
+        """Wait until all nearby chunks have been loaded.
+
+        Raises:
+            BridgeError: If the operation fails or times out.
+        """
+        async with self._wait_chunks_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_wait_for_chunks_to_load()
+            try:
+                event = await self._relay.wait_for(ChunksLoadedDoneEvent, timeout=30.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("wait_for_chunks timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"wait_for_chunks failed: {event.error}")
+
+    async def wait_for_ticks(self, ticks: int) -> None:
+        """Wait for a specific number of game ticks.
+
+        Args:
+            ticks: Number of ticks to wait (1 tick ~ 50ms).
+
+        Raises:
+            BridgeError: If the operation fails or times out.
+        """
+        async with self._wait_ticks_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_wait_for_ticks(ticks)
+            try:
+                event = await self._relay.wait_for(
+                    WaitForTicksDoneEvent,
+                    timeout=max(30.0, ticks * 0.05 + 5.0),
+                )
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("wait_for_ticks timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"wait_for_ticks failed: {event.error}")
+
+    # -- Misc --
+
+    async def accept_resource_pack(self) -> None:
+        """Accept the server resource pack."""
+        ctrl = self._ensure_connected()
+        ctrl.accept_resource_pack()
+
+    async def deny_resource_pack(self) -> None:
+        """Deny the server resource pack."""
+        ctrl = self._ensure_connected()
+        ctrl.deny_resource_pack()
+
+    async def set_settings(self, **options: Any) -> None:
+        """Update client settings (view distance, skin parts, etc.).
+
+        Args:
+            **options: Key-value pairs of settings to update.
+        """
+        ctrl = self._ensure_connected()
+        ctrl.set_settings(options)
+
+    def support_feature(self, name: str) -> bool:
+        """Check whether the server supports a protocol feature.
+
+        Args:
+            name: Feature name string.
+
+        Returns:
+            ``True`` if the feature is supported.
+        """
+        ctrl = self._ensure_connected()
+        return ctrl.support_feature(name)
+
+    async def respawn(self) -> None:
+        """Respawn after death."""
+        ctrl = self._ensure_connected()
+        ctrl.do_respawn()
+
+    async def tab_complete(
+        self, text: str, *, assume_command: bool = False
+    ) -> list[str]:
+        """Request tab-completion suggestions from the server.
+
+        Args:
+            text: The partial text to complete.
+            assume_command: If ``True``, treat the text as a command
+                even without a leading ``/``.
+
+        Returns:
+            List of completion suggestions.
+
+        Raises:
+            BridgeError: If the tab-complete operation fails.
+        """
+        async with self._tab_complete_lock:
+            ctrl = self._ensure_connected()
+            ctrl.start_tab_complete(text, assume_command)
+            try:
+                event = await self._relay.wait_for(TabCompleteDoneEvent, timeout=10.0)
+            except asyncio.TimeoutError as exc:
+                raise BridgeError("tab_complete timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"tab_complete failed: {event.error}")
+            try:
+                return list(event.result) if event.result is not None else []
+            except (TypeError, ValueError):
+                return []
