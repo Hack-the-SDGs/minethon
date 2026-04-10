@@ -440,26 +440,30 @@ class Bot:
             self._state.rain_state = event.rain_state
             self._state.thunder_state = event.thunder_state
 
-        async def _on_rain(_event: RainEvent) -> None:
-            if self._controller is not None and self._connected:
-                try:
-                    self._state.rain_state = self._controller.get_rain_state()
-                except BridgeError:
-                    pass
+        async def _on_rain(event: RainEvent) -> None:
+            self._state.rain_state = event.rain_state
 
-        async def _on_time(_event: TimeEvent) -> None:
-            if self._controller is not None and self._connected:
-                try:
-                    self._state.time = self._time_state_from_raw(self._controller.get_time())
-                except BridgeError:
-                    pass
+        async def _on_time(event: TimeEvent) -> None:
+            self._state.time = TimeState(
+                time_of_day=event.time_of_day,
+                day=event.day,
+                is_day=event.is_day,
+                moon_phase=event.moon_phase,
+                age=event.age,
+                do_daylight_cycle=event.do_daylight_cycle,
+            )
 
-        async def _on_game(_event: GameEvent) -> None:
-            if self._controller is not None and self._connected:
-                try:
-                    self._state.game = self._game_state_from_raw(self._controller.get_game_state())
-                except BridgeError:
-                    pass
+        async def _on_game(event: GameEvent) -> None:
+            self._state.game = GameState(
+                game_mode=event.game_mode,
+                dimension=event.dimension,
+                difficulty=event.difficulty,
+                hardcore=event.hardcore,
+                max_players=event.max_players,
+                server_brand=event.server_brand,
+                min_y=event.min_y,
+                height=event.height,
+            )
 
         async def _on_sleep(_event: SleepEvent) -> None:
             self._state.is_sleeping = True

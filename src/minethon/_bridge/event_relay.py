@@ -419,7 +419,22 @@ class EventRelay:
 
         @on_fn(js_bot, "game")
         def _on_game(*_args: Any) -> None:
-            self._post(GameEvent, GameEvent())
+            # Ref: mineflayer/lib/plugins/game.js — bot.game is already
+            # updated when this event fires.
+            def builder(*_unused: Any) -> GameEvent:
+                g = js_bot.game
+                return GameEvent(
+                    game_mode=str(getattr(g, "gameMode", "unknown") or "unknown"),
+                    dimension=str(getattr(g, "dimension", "unknown") or "unknown"),
+                    difficulty=str(getattr(g, "difficulty", "unknown") or "unknown"),
+                    hardcore=bool(getattr(g, "hardcore", False)),
+                    max_players=int(getattr(g, "maxPlayers", 0) or 0),
+                    server_brand=str(getattr(g, "serverBrand", "") or ""),
+                    min_y=int(getattr(g, "minY", 0) or 0),
+                    height=int(getattr(g, "height", 256) or 256),
+                )
+
+            self._post_built(js_bot, GameEvent, builder, *_args)
 
         @on_fn(js_bot, "spawnReset")
         def _on_spawn_reset(*_args: Any) -> None:
@@ -981,7 +996,12 @@ class EventRelay:
 
         @on_fn(js_bot, "rain")
         def _on_rain(*_args: Any) -> None:
-            self._post(RainEvent, RainEvent())
+            # Ref: mineflayer/lib/plugins/rain.js — bot.rainState is
+            # already updated when this event fires.
+            def builder(*_unused: Any) -> RainEvent:
+                return RainEvent(rain_state=float(js_bot.rainState))
+
+            self._post_built(js_bot, RainEvent, builder, *_args)
 
         @on_fn(js_bot, "weatherUpdate")
         def _on_weather_update(*_args: Any) -> None:
@@ -995,10 +1015,17 @@ class EventRelay:
 
         @on_fn(js_bot, "time")
         def _on_time(*_args: Any) -> None:
+            # Ref: mineflayer/lib/plugins/time.js — all bot.time fields
+            # are updated before emit('time').
             def builder(*_unused: Any) -> TimeEvent:
+                t = js_bot.time
                 return TimeEvent(
-                    time_of_day=int(js_bot.time.timeOfDay),
-                    age=int(js_bot.time.age),
+                    time_of_day=int(t.timeOfDay),
+                    day=int(t.day),
+                    is_day=bool(t.isDay),
+                    moon_phase=int(t.moonPhase),
+                    age=int(t.age),
+                    do_daylight_cycle=bool(t.doDaylightCycle),
                 )
 
             self._post_built(js_bot, TimeEvent, builder, *_args)

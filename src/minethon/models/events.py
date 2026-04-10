@@ -160,7 +160,19 @@ class ExperienceEvent:
 
 @dataclass(frozen=True, slots=True)
 class GameEvent:
-    """Game properties changed (difficulty, game mode, etc.)."""
+    """Game properties changed (difficulty, game mode, etc.).
+
+    Ref: mineflayer/lib/plugins/game.js — bot.game
+    """
+
+    game_mode: str
+    dimension: str
+    difficulty: str
+    hardcore: bool
+    max_players: int
+    server_brand: str
+    min_y: int
+    height: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,7 +625,12 @@ class NoteHeardEvent:
 
 @dataclass(frozen=True, slots=True)
 class RainEvent:
-    """Rain started or stopped."""
+    """Rain started or stopped.
+
+    Ref: mineflayer/lib/plugins/rain.js — bot.rainState
+    """
+
+    rain_state: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -626,10 +643,17 @@ class WeatherUpdateEvent:
 
 @dataclass(frozen=True, slots=True)
 class TimeEvent:
-    """World time changed."""
+    """World time changed.
+
+    Ref: mineflayer/lib/plugins/time.js — bot.time
+    """
 
     time_of_day: int
+    day: int
+    is_day: bool
+    moon_phase: int
     age: int
+    do_daylight_cycle: bool
 
 
 # -- World Events --
