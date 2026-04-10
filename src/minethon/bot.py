@@ -406,14 +406,9 @@ class Bot:
         async def _on_held_item(event: HeldItemChangedEvent) -> None:
             self._state.held_item = event.item
             self._state.held_item_known = True
-            # Ref: mineflayer/lib/plugins/inventory.js:670-672
-            # held_item_slot packet → setQuickBarSlot → heldItemChanged
-            # bot.quickBarSlot is already updated when this event fires.
-            if self._controller is not None:
-                try:
-                    self._state.quick_bar_slot = self._controller.get_quick_bar_slot()
-                except BridgeError:
-                    pass
+            # quick_bar_slot is read on the JS callback thread and
+            # included in the event — no bridge call needed here.
+            self._state.quick_bar_slot = event.quick_bar_slot
 
         async def _on_weather(event: WeatherUpdateEvent) -> None:
             self._state.rain_state = event.rain_state

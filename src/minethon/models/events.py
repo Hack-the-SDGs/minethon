@@ -180,9 +180,15 @@ class WakeEvent:
 
 @dataclass(frozen=True, slots=True)
 class HeldItemChangedEvent:
-    """Bot held item changed."""
+    """Bot held item changed.
+
+    Ref: mineflayer/lib/plugins/inventory.js:670-672 — held_item_slot
+    packet triggers setQuickBarSlot before emitting heldItemChanged,
+    so ``quick_bar_slot`` is already up-to-date when this fires.
+    """
 
     item: ItemStack | None
+    quick_bar_slot: int
 
 
 # -- Movement --

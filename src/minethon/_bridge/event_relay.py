@@ -581,7 +581,11 @@ class EventRelay:
             held_item = normalized[0] if normalized else None
             try:
                 item = None if held_item is None else js_item_to_item_stack(held_item)
-                self._post(HeldItemChangedEvent, HeldItemChangedEvent(item=item))
+                # Read quickBarSlot here on the JS callback thread so the
+                # asyncio handler doesn't need a bridge call.
+                # Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
+                slot = int(js_bot.quickBarSlot) if js_bot.quickBarSlot is not None else 0
+                self._post(HeldItemChangedEvent, HeldItemChangedEvent(item=item, quick_bar_slot=slot))
             except Exception:
                 _log.debug(
                     "Failed to snapshot HeldItemChangedEvent from JS payload",
