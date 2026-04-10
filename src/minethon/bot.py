@@ -191,6 +191,7 @@ class Bot:
         self._connected = False
         self._spawned = False
         self._state = _BotStateCache()
+        self._window_registry: dict[int, Any] = {}
         self._resolved_username: str | None = None
         self._plugin_host: PluginHost | None = None
         self._navigation: NavigationAPI | None = None
@@ -230,6 +231,7 @@ class Bot:
     def _reset_state_cache(self) -> None:
         """Discard all cached snapshot values."""
         self._state = _BotStateCache()
+        self._window_registry.clear()
 
     @staticmethod
     def _vec3_from_raw(data: dict[str, float]) -> Vec3:
@@ -1600,7 +1602,9 @@ class Bot:
                 raise BridgeError(f"open_container failed: {event.error}")
             if event.result is None:
                 raise BridgeError("open_container returned no window")
-            return js_window_to_window_handle(event.result)
+            handle = js_window_to_window_handle(event.result)
+            self._window_registry[handle.id] = event.result
+            return handle
 
     async def open_furnace(self, block: Block) -> WindowHandle:
         """Open a furnace-like block and return a typed session handle."""
@@ -1618,7 +1622,9 @@ class Bot:
                 raise BridgeError(f"open_furnace failed: {event.error}")
             if event.result is None:
                 raise BridgeError("open_furnace returned no window")
-            return js_window_to_window_handle(event.result)
+            handle = js_window_to_window_handle(event.result)
+            self._window_registry[handle.id] = event.result
+            return handle
 
     async def open_enchantment_table(self, block: Block) -> WindowHandle:
         """Open an enchantment table and return a typed session handle."""
@@ -1639,7 +1645,9 @@ class Bot:
                 raise BridgeError(f"open_enchantment_table failed: {event.error}")
             if event.result is None:
                 raise BridgeError("open_enchantment_table returned no window")
-            return js_window_to_window_handle(event.result)
+            handle = js_window_to_window_handle(event.result)
+            self._window_registry[handle.id] = event.result
+            return handle
 
     async def open_anvil(self, block: Block) -> WindowHandle:
         """Open an anvil and return a typed session handle."""
@@ -1657,7 +1665,9 @@ class Bot:
                 raise BridgeError(f"open_anvil failed: {event.error}")
             if event.result is None:
                 raise BridgeError("open_anvil returned no window")
-            return js_window_to_window_handle(event.result)
+            handle = js_window_to_window_handle(event.result)
+            self._window_registry[handle.id] = event.result
+            return handle
 
     async def open_villager(self, villager: Entity) -> VillagerSession:
         """Open a villager trading window and return a typed session."""
@@ -1675,12 +1685,17 @@ class Bot:
                 raise BridgeError(f"open_villager failed: {event.error}")
             if event.result is None:
                 raise BridgeError("open_villager returned no session")
-            return js_villager_to_session(event.result)
+            session = js_villager_to_session(event.result)
+            self._window_registry[session.id] = event.result
+            return session
 
     async def close_window(self, window: WindowHandle | VillagerSession) -> None:
         """Close an open window or villager session."""
         ctrl = self._ensure_connected()
-        ctrl.close_window(window._raw)
+        js_proxy = self._window_registry.pop(window.id, None)
+        if js_proxy is None:
+            raise BridgeError(f"No JS proxy found for window id={window.id} (already closed?)")
+        ctrl.close_window(js_proxy)
 
     async def trade(
         self,
@@ -1692,14 +1707,19 @@ class Bot:
         """Execute a villager trade and return the updated session snapshot."""
         async with self._trade_lock:
             ctrl = self._ensure_connected()
-            ctrl.start_trade(villager._raw, trade_index, times)
+            js_proxy = self._window_registry.get(villager.id)
+            if js_proxy is None:
+                raise BridgeError(f"No JS proxy found for villager session id={villager.id}")
+            ctrl.start_trade(js_proxy, trade_index, times)
             try:
                 event = await self._relay.wait_for(TradeDoneEvent, timeout=30.0)
             except asyncio.TimeoutError as exc:
                 raise BridgeError("trade timed out") from exc
             if event.error is not None:
                 raise BridgeError(f"trade failed: {event.error}")
-            return js_villager_to_session(villager._raw)
+            session = js_villager_to_session(js_proxy)
+            self._window_registry[session.id] = js_proxy
+            return session
 
     async def craft(
         self,

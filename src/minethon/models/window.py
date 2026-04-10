@@ -1,6 +1,10 @@
-"""Typed window and villager session handles."""
+"""Typed window and villager session handles.
 
-from dataclasses import dataclass, field
+Pure Python domain models — no JSPyBridge dependency.  The live JS
+proxy is held in ``Bot._window_registry`` (keyed by ``id``), not here.
+"""
+
+from dataclasses import dataclass
 
 from minethon.models.item import ItemStack
 
@@ -9,16 +13,13 @@ from minethon.models.item import ItemStack
 class WindowHandle:
     """A typed handle to an opened mineflayer window.
 
-    Warning:
-        ``_raw`` is a live JSPyBridge proxy. It is only valid while the
-        underlying window remains open. Accessing it after the window is
-        closed may fail unpredictably or crash the Node.js bridge.
+    The underlying JS proxy is managed by ``Bot._window_registry``.
+    Use :meth:`Bot.close_window` to release it.
     """
 
     id: int
     title: str
     kind: str
-    _raw: object = field(repr=False, compare=False, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,13 +38,10 @@ class TradeOffer:
 class VillagerSession:
     """A typed villager trading session handle.
 
-    Warning:
-        ``_raw`` is a live JSPyBridge proxy. It is only valid while the
-        villager trading window remains open. Accessing it after the
-        session closes may fail unpredictably or crash the Node.js bridge.
+    The underlying JS proxy is managed by ``Bot._window_registry``.
+    Use :meth:`Bot.close_window` to release it.
     """
 
     id: int
     title: str
     trades: tuple[TradeOffer, ...]
-    _raw: object = field(repr=False, compare=False, hash=False)

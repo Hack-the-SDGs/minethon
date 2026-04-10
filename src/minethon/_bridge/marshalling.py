@@ -163,12 +163,15 @@ def js_recipe_to_recipe(js_obj: Any) -> Recipe:
 
 
 def js_window_to_window_handle(js_obj: Any) -> WindowHandle:
-    """Convert a JS ``Window`` proxy to a lightweight session handle."""
+    """Convert a JS ``Window`` proxy to a pure-Python handle.
+
+    The caller is responsible for registering the JS proxy in the
+    window registry (``Bot._window_registry``) keyed by ``handle.id``.
+    """
     return WindowHandle(
         id=int(js_obj.id),
         title=str(js_obj.title),
         kind=str(js_obj.type),
-        _raw=js_obj,
     )
 
 
@@ -195,5 +198,4 @@ def js_villager_to_session(js_obj: Any) -> VillagerSession:
         id=int(js_obj.id),
         title=str(js_obj.title),
         trades=tuple(trades),
-        _raw=js_obj,
     )
