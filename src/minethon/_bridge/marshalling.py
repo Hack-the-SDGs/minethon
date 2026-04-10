@@ -10,7 +10,9 @@ from typing import Any
 from minethon.models.block import Block
 from minethon.models.entity import Entity, EntityKind
 from minethon.models.item import ItemStack
+from minethon.models.recipe import Recipe
 from minethon.models.vec3 import Vec3
+from minethon.models.window import TradeOffer, VillagerSession, WindowHandle
 
 
 def js_vec3_to_vec3(js_obj: Any) -> Vec3:
@@ -152,4 +154,64 @@ def js_item_to_item_stack(js_obj: Any) -> ItemStack:
         max_stack_size=int(js_obj.stackSize),
         enchantments=enchants,
         nbt=nbt,
+    )
+
+
+def js_recipe_to_recipe(recipe_id: int) -> Recipe:
+    """Create a :class:`Recipe` handle with a registry key."""
+    return Recipe(id=recipe_id)
+
+
+def js_window_to_window_handle(js_obj: Any) -> WindowHandle:
+    """Convert a JS ``Window`` proxy to a pure-Python handle.
+
+    The caller is responsible for registering the JS proxy in the
+    window registry (``Bot._window_registry``) keyed by ``handle.id``.
+    """
+    return WindowHandle(
+        id=int(js_obj.id),
+        title=str(js_obj.title),
+        kind=str(js_obj.type),
+    )
+
+
+def _dict_to_item_stack(raw: dict[str, Any]) -> ItemStack:
+    """Convert a plain dict (from JS snapshot) to :class:`ItemStack`."""
+    enchants = raw.get("enchants")
+    nbt = raw.get("nbt")
+    return ItemStack(
+        name=str(raw["name"]),
+        display_name=str(raw["displayName"]) if raw.get("displayName") else str(raw["name"]),
+        count=int(raw["count"]),
+        slot=int(raw["slot"]),
+        max_stack_size=int(raw["stackSize"]),
+        enchantments=list(enchants) if enchants else None,
+        nbt=dict(nbt) if nbt else None,
+    )
+
+
+def villager_snapshot_to_session(data: dict[str, Any]) -> VillagerSession:
+    """Convert a plain dict snapshot to :class:`VillagerSession`.
+
+    Expects output from ``helpers.snapshotVillagerSession()``.
+    """
+    trades: list[TradeOffer] = []
+    for trade in data.get("trades", []) or []:
+        secondary = trade.get("inputItem2")
+        trades.append(
+            TradeOffer(
+                first_input=_dict_to_item_stack(trade["inputItem1"]),
+                output=_dict_to_item_stack(trade["outputItem"]),
+                secondary_input=(
+                    _dict_to_item_stack(secondary) if secondary else None
+                ),
+                disabled=bool(trade.get("tradeDisabled", False)),
+                uses=int(trade.get("nbTradeUses", 0)),
+                max_uses=int(trade.get("maximumNbTradeUses", 0)),
+            )
+        )
+    return VillagerSession(
+        id=int(data["id"]),
+        title=str(data["title"]),
+        trades=tuple(trades),
     )
