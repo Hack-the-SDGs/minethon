@@ -196,6 +196,8 @@ class Bot:
         self._spawned = False
         self._state = _BotStateCache()
         self._window_registry: dict[int, Any] = {}
+        self._recipe_registry: dict[int, Any] = {}
+        self._recipe_counter: int = 0
         self._resolved_username: str | None = None
         self._plugin_host: PluginHost | None = None
         self._navigation: NavigationAPI | None = None
@@ -236,6 +238,8 @@ class Bot:
         """Discard all cached snapshot values."""
         self._state = _BotStateCache()
         self._window_registry.clear()
+        self._recipe_registry.clear()
+        self._recipe_counter = 0
 
     @staticmethod
     def _vec3_from_raw(data: dict[str, float]) -> Vec3:
@@ -1619,8 +1623,8 @@ class Bot:
         ctrl = self._ensure_connected()
         item_type = self._resolve_item_type(item_name)
         js_table = self._resolve_js_block(crafting_table) if crafting_table else None
-        recipes = ctrl.recipes_for(item_type, metadata, min_result_count, js_table)
-        return [js_recipe_to_recipe(recipe) for recipe in recipes]
+        js_recipes = ctrl.recipes_for(item_type, metadata, min_result_count, js_table)
+        return self._register_recipes(js_recipes)
 
     async def recipes_all(
         self,
@@ -1633,8 +1637,18 @@ class Bot:
         ctrl = self._ensure_connected()
         item_type = self._resolve_item_type(item_name)
         js_table = self._resolve_js_block(crafting_table) if crafting_table else None
-        recipes = ctrl.recipes_all(item_type, metadata, js_table)
-        return [js_recipe_to_recipe(recipe) for recipe in recipes]
+        js_recipes = ctrl.recipes_all(item_type, metadata, js_table)
+        return self._register_recipes(js_recipes)
+
+    def _register_recipes(self, js_recipes: list[Any]) -> list[Recipe]:
+        """Register JS recipe proxies and return typed handles."""
+        result: list[Recipe] = []
+        for js_recipe in js_recipes:
+            self._recipe_counter += 1
+            rid = self._recipe_counter
+            self._recipe_registry[rid] = js_recipe
+            result.append(Recipe(id=rid))
+        return result
 
     async def open_container(self, target: Block | Entity) -> WindowHandle:
         """Open a generic container and return a typed session handle."""
@@ -1801,7 +1815,13 @@ class Bot:
             js_table = None
             if crafting_table is not None:
                 js_table = self._resolve_js_block(crafting_table)
-            ctrl.start_craft(recipe._raw, count, js_table)
+            js_recipe = self._recipe_registry.get(recipe.id)
+            if js_recipe is None:
+                raise BridgeError(
+                    f"Recipe handle id={recipe.id} is no longer valid "
+                    "(stale from a previous session?)"
+                )
+            ctrl.start_craft(js_recipe, count, js_table)
             try:
                 event = await self._relay.wait_for(CraftDoneEvent, timeout=30.0)
             except asyncio.TimeoutError as exc:

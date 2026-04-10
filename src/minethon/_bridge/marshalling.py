@@ -157,9 +157,9 @@ def js_item_to_item_stack(js_obj: Any) -> ItemStack:
     )
 
 
-def js_recipe_to_recipe(js_obj: Any) -> Recipe:
-    """Wrap a JS ``Recipe`` proxy in an opaque typed handle."""
-    return Recipe(_raw=js_obj)
+def js_recipe_to_recipe(recipe_id: int) -> Recipe:
+    """Create a :class:`Recipe` handle with a registry key."""
+    return Recipe(id=recipe_id)
 
 
 def js_window_to_window_handle(js_obj: Any) -> WindowHandle:
