@@ -379,6 +379,7 @@ class TestEventRelayMineflayerParity:
             rainState=0.0,
             thunderState=0.0,
             time=SimpleNamespace(timeOfDay=6000, age=12000),
+            quickBarSlot=0,
         )
 
     @pytest.mark.asyncio
@@ -519,7 +520,15 @@ class TestEventRelayMineflayerParity:
         team.name = "raiders"
         await asyncio.sleep(0.01)
 
-        assert players == [PlayerJoinedEvent(username="Alex")]
+        assert players == [
+            PlayerJoinedEvent(
+                username="Alex",
+                uuid="",
+                ping=0,
+                game_mode=0,
+                display_name=None,
+            )
+        ]
         assert teams == [TeamCreatedEvent(name="builders")]
 
     @pytest.mark.asyncio
