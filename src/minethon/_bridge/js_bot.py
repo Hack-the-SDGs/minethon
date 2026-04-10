@@ -701,7 +701,7 @@ class JSBotController:
             raw = self._helpers.snapshotVillagerSession(js_villager)
             result = dict(raw.valueOf())
             trades_raw = raw.trades
-            trades = []
+            trades: list[dict[str, Any]] = []
             for t in trades_raw:
                 trade = dict(t.valueOf())
                 for key in ("inputItem1", "outputItem", "inputItem2"):

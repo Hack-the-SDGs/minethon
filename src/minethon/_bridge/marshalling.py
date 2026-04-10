@@ -198,8 +198,9 @@ def villager_snapshot_to_session(data: dict[str, Any]) -> VillagerSession:
     Expects output from ``helpers.snapshotVillagerSession()``.
     """
     trades: list[TradeOffer] = []
-    for trade in data.get("trades", []) or []:
-        secondary = trade.get("inputItem2")
+    raw_trades: list[dict[str, Any]] = data.get("trades", []) or []
+    for trade in raw_trades:
+        secondary: dict[str, Any] | None = trade.get("inputItem2")
         trades.append(
             TradeOffer(
                 first_input=_dict_to_item_stack(trade["inputItem1"]),

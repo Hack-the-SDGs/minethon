@@ -121,7 +121,7 @@ class _BotStateCache:
     version: str | None = None
     physics_enabled: bool | None = None
     quick_bar_slot: int | None = None
-    players: dict[str, PlayerInfo] = field(default_factory=dict)
+    players: dict[str, PlayerInfo] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
 
 class Bot:
@@ -573,7 +573,7 @@ class Bot:
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
-        self._observe._bind_js(
+        self._observe._bind_js(  # pyright: ignore[reportPrivateUsage]
             self._controller.js_bot,
             self._runtime.js_module.On,
         )
@@ -610,7 +610,7 @@ class Bot:
                 pass  # Handler already gone
             self._on_end_handler = None
         self._relay.reset()
-        self._observe._reset_state()
+        self._observe._reset_state()  # pyright: ignore[reportPrivateUsage]
         if self._controller is not None:
             if self._connected:
                 self._controller.quit()
@@ -896,7 +896,7 @@ class Bot:
                 else EntityKind.OTHER
             )
             name = raw.get("username") or raw.get("name")
-            health_val = raw.get("health")
+            health_val: Any = raw.get("health")
             eid = int(raw["id"])  # type: ignore[arg-type]
             result[eid] = Entity(
                 id=eid,
@@ -1312,8 +1312,8 @@ class Bot:
         )
         return RawBotHandle(
             ctrl.js_bot,
-            raw_subscribe=self._observe._on_raw,
-            raw_unsubscribe=self._observe._off_raw,
+            raw_subscribe=self._observe._on_raw,  # pyright: ignore[reportPrivateUsage]
+            raw_unsubscribe=self._observe._off_raw,  # pyright: ignore[reportPrivateUsage]
             plugin_loader=plugin_loader,
         )
 
@@ -1429,7 +1429,7 @@ class Bot:
         async with self._toss_lock:
             ctrl = self._ensure_connected()
             item_type, js_item = ctrl.find_inventory_item_by_name(item_name)
-            if js_item is None:
+            if js_item is None or item_type is None:
                 raise InventoryError(f"Item '{item_name}' not found")
             if count is None:
                 ctrl.start_toss_stack(js_item)
