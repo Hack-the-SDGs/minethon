@@ -14,8 +14,8 @@ from minethon._bridge.event_relay import EventRelay
 from minethon.api.observe import ObserveAPI
 from minethon.bot import Bot
 from minethon.models.errors import (
-    NotSpawnedError,
     MinethonConnectionError,
+    NotSpawnedError,
 )
 from minethon.models.events import (
     ChatEvent,

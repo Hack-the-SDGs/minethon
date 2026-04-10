@@ -13,22 +13,20 @@ from minethon._bridge._events import (
 )
 from minethon._bridge.event_relay import EventRelay
 from minethon.models.events import (
+    ChatEvent,
     EntityMovedEvent,
     EntityUpdateEvent,
-    HeldItemChangedEvent,
-    MessageStrEvent,
-    PlayerJoinedEvent,
-    PhysicsTickEvent,
-    ScoreUpdatedEvent,
-    SoundEffectHeardEvent,
-    TeamCreatedEvent,
-)
-from minethon.models.events import (
-    ChatEvent,
     GoalFailedEvent,
     GoalReachedEvent,
+    HeldItemChangedEvent,
+    MessageStrEvent,
     MoveEvent,
+    PhysicsTickEvent,
+    PlayerJoinedEvent,
+    ScoreUpdatedEvent,
+    SoundEffectHeardEvent,
     SpawnEvent,
+    TeamCreatedEvent,
 )
 from minethon.models.vec3 import Vec3
 

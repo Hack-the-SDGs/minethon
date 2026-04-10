@@ -36,25 +36,17 @@ ignore = [
     # conflict with formatter
     "E501", "Q000", "Q003", "COM812", "ISC001",
 
-    # optimize
-    "D", "ARG", "FBT001", "FBT002", "N818", "S101",
-
-    # bridge layer unavoidably uses Any for JS proxy objects
-    "ANN401",
-    # exception message style — too noisy for SDK with many raise sites
-    "TRY003", "EM101", "EM102",
-    # bridge layer catches broad JS proxy exceptions by design
-    "BLE001",
-    # JS interop uses camelCase locals; contextlib.suppress less clear than try/except
-    "N806", "SIM105",
-    # try/except wrapping style for bridge error conversion
-    "TRY300", "TRY301",
-    # internal cross-module _private access within the package
-    "SLF001",
-    # timeout param is standard SDK pattern, not an antipattern
-    "ASYNC109",
-    # delayed import needed for JSPyBridge conditional loading
-    "PLC0415"
+    # project-wide opt-outs
+    "D",       # docstring rules (managed separately)
+    "ARG",     # unused arguments
+    "FBT001", "FBT002",  # boolean-typed parameters
+    "N818",    # exception naming
+    "S101",    # assert in non-test code
+    "TRY003", "EM101", "EM102",  # exception message style
+    "SIM105",  # contextlib.suppress preferred — style choice across codebase
+    "ASYNC109", # timeout= param is idiomatic for this SDK's public API
+    # try/except error-wrapping patterns used throughout SDK, not just bridge
+    "TRY300", "TRY301"
 ]
 allowed-confusables = ["（", "）", "，", "！"]
 pylint.max-args = 6
@@ -63,11 +55,54 @@ pylint.max-branches = 15
 pylint.max-statements = 65
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["INP001", "S105", "S106", "S107", "PLR2004", "SLF001", "ANN001", "SIM117"]
-"src/minethon/_bridge/runtime.py" = ["S603", "PLW1510", "PLR2004"]
+# test suite — relaxed for assertions, magic values, private access
+"tests/*" = [
+    "INP001",              # not a namespace package
+    "ANN",                 # type annotations not required in tests
+    "SLF001",              # private member access for white-box testing
+    "SIM117",              # nested with-statements OK
+    "S105", "S106", "S107", "S108", # hardcoded credentials and paths in fixtures
+    "PLR2004",             # magic values in assertions
+    "FBT003",              # boolean positional values in test calls
+    "PLC0415",             # local imports inside test methods are fine
+    "RUF006",              # asyncio.create_task without storing result (test pattern)
+]
+
+# examples — written by contributors, intentionally loose
+"examples/**" = [
+    "INP001",              # not a namespace package
+    "ANN",                 # type annotations not required
+    "T201",                # print() is expected
+    "PLR2004",             # magic values (ports, coords) are fine
+    "S",                   # security lints less relevant in demo code
+    "ERA001",              # commented-out code OK while iterating
+]
+
+# bridge internals — JS interop constraints
+"src/minethon/_bridge/*" = [
+    "ANN401",  # Any is unavoidable for JS proxy objects
+    "BLE001",  # broad except catches unpredictable JS proxy errors
+    "N806",    # JS camelCase local variables (e.g. displayName, tradeDisabled)
+]
+# files outside _bridge/ that still interface directly with JS proxies
+"src/minethon/api/observe.py" = ["ANN401"]  # js_bot / on_fn params are JS proxies
+"src/minethon/raw.py" = ["ANN401"]           # explicit raw escape hatch, Any by design
+"src/minethon/_bridge/runtime.py" = [
+    "PLC0415", # delayed `import javascript` for conditional bridge loading
+    "S603", "PLW1510",   # subprocess.run for node version check
+    "PLR2004", # magic value 18 for Node.js minimum version
+]
 "src/minethon/_bridge/js_bot.py" = ["S110", "FBT003"]
 "src/minethon/_bridge/plugin_host.py" = ["FBT003"]
-"src/minethon/bot.py" = ["FBT003", "PLR2004", "PLR0913"]
+
+# bot.py — large orchestration class with known structural exceptions
+"src/minethon/bot.py" = [
+    "ANN401",  # internal helpers and raw escape hatch methods use JS proxy Any
+    "FBT003",  # boolean positional for bridge control calls
+    "PLR2004", # magic value 8 for quick_bar_slot range
+    "PLR0913", # Bot.__init__ has many config parameters by design
+    "SLF001",  # intentional access to observe._bind_js / _reset_state / _on_raw
+]
 
 [tool.pyright]
 include = ["src"]
