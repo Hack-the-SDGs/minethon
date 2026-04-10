@@ -114,6 +114,9 @@ class _BotStateCache:
     thunder_state: float | None = None
     is_sleeping: bool = False
     is_sleeping_known: bool = False
+    version: str | None = None
+    physics_enabled: bool | None = None
+    quick_bar_slot: int | None = None
 
 
 class Bot:
@@ -290,6 +293,18 @@ class Bot:
             self._state.is_sleeping_known = True
         except BridgeError:
             pass
+        # Ref: mineflayer/lib/plugins/inventory.js — bot.version (set once at login)
+        if self._state.version is None:
+            try:
+                self._state.version = ctrl.get_version()
+            except BridgeError:
+                pass
+        # Ref: mineflayer/lib/plugins/physics.js — bot.physicsEnabled
+        if self._state.physics_enabled is None:
+            try:
+                self._state.physics_enabled = ctrl.get_physics_enabled()
+            except BridgeError:
+                pass
 
     def _refresh_spawn_state_cache(self) -> None:
         """Refresh spawned-state snapshots on the event-loop thread."""
@@ -321,6 +336,11 @@ class Bot:
                 js_item_to_item_stack(js_item) if js_item is not None else None
             )
             self._state.held_item_known = True
+        except BridgeError:
+            pass
+        # Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
+        try:
+            self._state.quick_bar_slot = ctrl.get_quick_bar_slot()
         except BridgeError:
             pass
 
@@ -384,6 +404,14 @@ class Bot:
         async def _on_held_item(event: HeldItemChangedEvent) -> None:
             self._state.held_item = event.item
             self._state.held_item_known = True
+            # Ref: mineflayer/lib/plugins/inventory.js:670-672
+            # held_item_slot packet → setQuickBarSlot → heldItemChanged
+            # bot.quickBarSlot is already updated when this event fires.
+            if self._controller is not None:
+                try:
+                    self._state.quick_bar_slot = self._controller.get_quick_bar_slot()
+                except BridgeError:
+                    pass
 
         async def _on_weather(event: WeatherUpdateEvent) -> None:
             self._state.rain_state = event.rain_state
@@ -710,11 +738,15 @@ class Bot:
     def quick_bar_slot(self) -> int:
         """Currently selected quick bar slot (0-8).
 
+        Backed by snapshot, updated via ``heldItemChanged`` event and setter.
+
+        Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
+
         Raises:
             NotSpawnedError: If ``wait_until_spawned()`` has not completed.
         """
-        ctrl = self._ensure_spawned()
-        return ctrl.get_quick_bar_slot()
+        self._ensure_spawned()
+        return self._require_snapshot(self._state.quick_bar_slot, "quick_bar_slot")
 
     @quick_bar_slot.setter
     def quick_bar_slot(self, slot: int) -> None:
@@ -722,6 +754,7 @@ class Bot:
             raise ValueError(f"quick_bar_slot must be 0-8, got {slot}")
         ctrl = self._ensure_spawned()
         ctrl.set_quick_bar_slot(slot)
+        self._state.quick_bar_slot = slot
 
     @property
     def spawn_point(self) -> Vec3:
@@ -808,20 +841,31 @@ class Bot:
 
     @property
     def version(self) -> str:
-        """Minecraft version string (e.g. ``"1.20.4"``)."""
-        ctrl = self._ensure_connected()
-        return ctrl.get_version()
+        """Minecraft version string (e.g. ``"1.20.4"``).
+
+        Backed by one-time snapshot taken at connect (immutable after login).
+
+        Ref: mineflayer/lib/version.js — bot.version
+        """
+        self._ensure_connected()
+        return self._require_snapshot(self._state.version, "version")
 
     @property
     def physics_enabled(self) -> bool:
-        """Whether the physics simulation is active."""
-        ctrl = self._ensure_connected()
-        return ctrl.get_physics_enabled()
+        """Whether the physics simulation is active.
+
+        Backed by snapshot, updated via setter.
+
+        Ref: mineflayer/lib/plugins/physics.js — bot.physicsEnabled
+        """
+        self._ensure_connected()
+        return self._require_snapshot(self._state.physics_enabled, "physics_enabled")
 
     @physics_enabled.setter
     def physics_enabled(self, value: bool) -> None:
         ctrl = self._ensure_connected()
         ctrl.set_physics_enabled(value)
+        self._state.physics_enabled = value
 
     @property
     def firework_rocket_duration(self) -> int:
