@@ -53,17 +53,17 @@ from minethon._bridge.marshalling import (
 )
 from minethon._bridge.plugin_registry import PluginRegistry
 from minethon._bridge.runtime import BridgeRuntime
-from minethon.api.inventory_viewer import InventoryViewerAPI
-from minethon.api.viewer import ViewerAPI
 from minethon.api.armor import ArmorAPI
 from minethon.api.combat import CombatAPI
 from minethon.api.dashboard import DashboardAPI
 from minethon.api.gui import GuiAPI
+from minethon.api.inventory_viewer import InventoryViewerAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.panorama import PanoramaAPI
 from minethon.api.plugins import PluginAPI
 from minethon.api.tool import ToolAPI
+from minethon.api.viewer import ViewerAPI
 from minethon.config import BotConfig
 from minethon.models import Recipe, VillagerSession, WindowHandle
 from minethon.models.block import Block
@@ -1356,7 +1356,7 @@ class Bot:
 
         Requires ``mineflayer-armor-manager`` to be loaded first::
 
-            await bot.plugins.load("mineflayer-armor-manager")
+            bot.plugins.load("mineflayer-armor-manager")
             await bot.armor.equip_best()
 
         Raises:
@@ -1373,7 +1373,7 @@ class Bot:
         if bridge is None or not bridge.is_loaded:
             raise BridgeError(
                 "armor-manager plugin is not loaded. "
-                'Call await bot.plugins.load("mineflayer-armor-manager") first.'
+                'Call bot.plugins.load("mineflayer-armor-manager") first.'
             )
         self._armor = ArmorAPI(bridge, self._relay)
         return self._armor
@@ -1387,7 +1387,7 @@ class Bot:
 
         Requires ``mineflayer-gui`` to be loaded first::
 
-            await bot.plugins.load("mineflayer-gui")
+            bot.plugins.load("mineflayer-gui")
             await bot.gui.click_item("diamond_sword")
 
         Raises:
@@ -1404,7 +1404,7 @@ class Bot:
         if bridge is None or not bridge.is_loaded:
             raise BridgeError(
                 "gui plugin is not loaded. "
-                'Call await bot.plugins.load("mineflayer-gui") first.'
+                'Call bot.plugins.load("mineflayer-gui") first.'
             )
         self._gui = GuiAPI(bridge, self._relay)
         return self._gui
@@ -1415,7 +1415,7 @@ class Bot:
 
         Requires ``@ssmidge/mineflayer-dashboard`` to be loaded first::
 
-            await bot.plugins.load("@ssmidge/mineflayer-dashboard")
+            bot.plugins.load("@ssmidge/mineflayer-dashboard")
             bot.dashboard.log("Hello!")
 
         .. warning:: **Experimental.** This plugin targets mineflayer
@@ -1436,7 +1436,7 @@ class Bot:
         if bridge is None or not bridge.is_loaded:
             raise BridgeError(
                 "dashboard plugin is not loaded. "
-                'Call await bot.plugins.load("@ssmidge/mineflayer-dashboard") first.'
+                'Call bot.plugins.load("@ssmidge/mineflayer-dashboard") first.'
             )
         self._dashboard = DashboardAPI(bridge)
         return self._dashboard
@@ -1447,7 +1447,7 @@ class Bot:
 
         Requires ``minecrafthawkeye`` to be loaded first::
 
-            await bot.plugins.load("minecrafthawkeye")
+            bot.plugins.load("minecrafthawkeye")
             zombie = await bot.nearest_entity(name="zombie")
             bot.combat.auto_attack(zombie)
 
@@ -1465,7 +1465,7 @@ class Bot:
         if bridge is None or not bridge.is_loaded:
             raise BridgeError(
                 "hawkeye plugin is not loaded. "
-                'Call await bot.plugins.load("minecrafthawkeye") first.'
+                'Call bot.plugins.load("minecrafthawkeye") first.'
             )
         self._combat = CombatAPI(bridge, self._relay)
         return self._combat
@@ -1484,7 +1484,7 @@ class Bot:
 
         Requires ``mineflayer-panorama`` to be loaded first::
 
-            await bot.plugins.load("mineflayer-panorama")
+            bot.plugins.load("mineflayer-panorama")
             stream = await bot.panorama.raw_take_panorama()
 
         Raises:
@@ -1501,7 +1501,7 @@ class Bot:
         if bridge is None or not bridge.is_loaded:
             raise BridgeError(
                 "panorama plugin is not loaded. "
-                'Call await bot.plugins.load("mineflayer-panorama") first.'
+                'Call bot.plugins.load("mineflayer-panorama") first.'
             )
         self._panorama = PanoramaAPI(bridge, self._relay)
         return self._panorama

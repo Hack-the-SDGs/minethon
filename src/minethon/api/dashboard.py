@@ -23,7 +23,7 @@ class DashboardAPI:
 
     Example::
 
-        await bot.plugins.load("@ssmidge/mineflayer-dashboard")
+        bot.plugins.load("@ssmidge/mineflayer-dashboard")
         bot.dashboard.log("Hello from minethon!")
 
     .. warning:: **Experimental.** The dashboard uses blessed terminal

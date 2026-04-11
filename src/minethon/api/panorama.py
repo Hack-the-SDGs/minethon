@@ -29,7 +29,7 @@ class PanoramaAPI:
 
     Example::
 
-        await bot.plugins.load("mineflayer-panorama")
+        bot.plugins.load("mineflayer-panorama")
         stream = await bot.panorama.raw_take_panorama()
 
     Ref: mineflayer-panorama/index.js
