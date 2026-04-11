@@ -524,12 +524,20 @@ class WebInventoryService:
         mod(self._js_bot, {"port": port, "startOnLoad": False})
         self._initialized = True
 
-    async def start(self):
-        """Start the server. Must init first."""
-        await self._js_bot.webInventory.start()
+    def start_server(self) -> None:
+        """Non-blocking: triggers start; resolves via _minethon:webInvStartDone."""
+        self._helpers.startWebInventory(self._js_bot)
 
-    async def stop(self):
-        await self._js_bot.webInventory.stop()
+    def stop_server(self) -> None:
+        """Non-blocking: triggers stop; resolves via _minethon:webInvStopDone."""
+        self._helpers.stopWebInventory(self._js_bot)
+
+    # Caller (bridge/service layer):
+    # async def start(self) -> None:
+    #     self._bridge.start_server()
+    #     event = await self._relay.wait_for(WebInvStartDoneEvent, timeout=10.0)
+    #     if event.error is not None:
+    #         raise BridgeError(f"web-inventory start failed: {event.error}")
 ```
 
 ### 4.8 statemachine

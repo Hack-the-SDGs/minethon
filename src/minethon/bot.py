@@ -423,7 +423,7 @@ class Bot:
 
         async def _on_respawn(_event: RespawnEvent) -> None:
             self._spawned = False
-            self._state.is_alive = True
+            # is_alive will be reset to True by the following _on_spawn handler.
 
         async def _on_death(_event: DeathEvent) -> None:
             self._state.is_alive = False
