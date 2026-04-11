@@ -9,6 +9,7 @@ Ref: mineflayer-web-inventory/index.js
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import pathlib
 from typing import TYPE_CHECKING, Any
@@ -46,6 +47,8 @@ class WebInventoryService:
         self._initialized = False
         self._running = False
         self._port: int | None = None
+        self._start_lock = asyncio.Lock()
+        self._stop_lock = asyncio.Lock()
 
     # -- Lifecycle --
 
@@ -111,21 +114,25 @@ class WebInventoryService:
         Ref: mineflayer-web-inventory/index.js --
              ``bot.webInventory.start()``
         """
-        self._ensure_initialized()
-        if self._running:
-            raise BridgeError("Web inventory is already running.")
+        async with self._start_lock:
+            self._ensure_initialized()
+            if self._running:
+                raise BridgeError("Web inventory is already running.")
 
-        helpers = self._ensure_helpers()
-        helpers.startWebInventory(self._js_bot)
+            helpers = self._ensure_helpers()
+            helpers.startWebInventory(self._js_bot)
 
-        event: WebInvStartDoneEvent = await self._relay.wait_for(
-            WebInvStartDoneEvent, timeout=_OPERATION_TIMEOUT
-        )
-        if event.error is not None:
-            raise BridgeError(f"web-inventory start failed: {event.error}")
+            try:
+                event: WebInvStartDoneEvent = await self._relay.wait_for(
+                    WebInvStartDoneEvent, timeout=_OPERATION_TIMEOUT
+                )
+            except TimeoutError as exc:
+                raise BridgeError("web-inventory start timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"web-inventory start failed: {event.error}")
 
-        self._running = True
-        _log.info("Web inventory started on port %s", self._port)
+            self._running = True
+            _log.info("Web inventory started on port %s", self._port)
 
     async def stop(self) -> None:
         """Stop the web inventory HTTP server.
@@ -140,21 +147,25 @@ class WebInventoryService:
         Ref: mineflayer-web-inventory/index.js --
              ``bot.webInventory.stop()``
         """
-        self._ensure_initialized()
-        if not self._running:
-            raise BridgeError("Web inventory is not running.")
+        async with self._stop_lock:
+            self._ensure_initialized()
+            if not self._running:
+                raise BridgeError("Web inventory is not running.")
 
-        helpers = self._ensure_helpers()
-        helpers.stopWebInventory(self._js_bot)
+            helpers = self._ensure_helpers()
+            helpers.stopWebInventory(self._js_bot)
 
-        event: WebInvStopDoneEvent = await self._relay.wait_for(
-            WebInvStopDoneEvent, timeout=_OPERATION_TIMEOUT
-        )
-        if event.error is not None:
-            raise BridgeError(f"web-inventory stop failed: {event.error}")
+            try:
+                event: WebInvStopDoneEvent = await self._relay.wait_for(
+                    WebInvStopDoneEvent, timeout=_OPERATION_TIMEOUT
+                )
+            except TimeoutError as exc:
+                raise BridgeError("web-inventory stop timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"web-inventory stop failed: {event.error}")
 
-        self._running = False
-        _log.info("Web inventory stopped")
+            self._running = False
+            _log.info("Web inventory stopped")
 
     # -- Properties --
 

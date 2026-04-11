@@ -10,6 +10,7 @@ Ref: prismarine-viewer/lib/mineflayer.js — module.exports
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,7 @@ class ViewerService:
         self._relay = relay
         self._helpers: Any | None = None
         self._started = False
+        self._start_lock = asyncio.Lock()
 
     def _ensure_helpers(self) -> Any:
         """Lazy-load helpers.js and cache the reference."""
@@ -72,26 +74,30 @@ class ViewerService:
 
         Ref: prismarine-viewer/lib/mineflayer.js — module.exports
         """
-        if self._started:
-            return
-        # Resolve through JSPyBridge's node_modules (not repo-local)
-        mod = self._runtime.require("prismarine-viewer")
-        helpers = self._ensure_helpers()
-        helpers.startViewer(
-            self._js_bot,
-            mod.mineflayer,
-            {
-                "viewDistance": view_distance,
-                "firstPerson": first_person,
-                "port": port,
-            },
-        )
-        event: ViewerStartDoneEvent = await self._relay.wait_for(
-            ViewerStartDoneEvent, timeout=_OPERATION_TIMEOUT
-        )
-        if event.error is not None:
-            raise BridgeError(f"viewer start failed: {event.error}")
-        self._started = True
+        async with self._start_lock:
+            if self._started:
+                return
+            # Resolve through JSPyBridge's node_modules (not repo-local)
+            mod = self._runtime.require("prismarine-viewer")
+            helpers = self._ensure_helpers()
+            helpers.startViewer(
+                self._js_bot,
+                mod.mineflayer,
+                {
+                    "viewDistance": view_distance,
+                    "firstPerson": first_person,
+                    "port": port,
+                },
+            )
+            try:
+                event: ViewerStartDoneEvent = await self._relay.wait_for(
+                    ViewerStartDoneEvent, timeout=_OPERATION_TIMEOUT
+                )
+            except TimeoutError as exc:
+                raise BridgeError("viewer start timed out") from exc
+            if event.error is not None:
+                raise BridgeError(f"viewer start failed: {event.error}")
+            self._started = True
 
     def stop(self) -> None:
         """Close the viewer.  Best-effort cleanup.
