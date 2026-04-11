@@ -19,6 +19,15 @@
   - mineflayer 文件位置：`.venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer/docs`
   - 相關插件的文件也在對應的 node_modules 目錄下
 
+## CI / Commit 前置檢查
+
+每次 commit 前必須通過以下檢查，全部通過才可 commit：
+
+```bash
+uv run pytest -m "not integration" --tb=short -q
+uv run ruff format --check src/ tests/
+```
+
 ## 專案定義
 
 **minethon** 是一套 Python-first 的 Mineflayer SDK。

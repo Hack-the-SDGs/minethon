@@ -9,24 +9,25 @@ from minethon.models.errors import PluginError
 
 
 class TestPluginAPI:
-    @pytest.mark.asyncio
-    async def test_load_pathfinder(self) -> None:
+    def test_load_pathfinder(self) -> None:
         registry = MagicMock()
         registry.supported = ("mineflayer-pathfinder",)
         api = PluginAPI(registry)
 
-        await api.load("mineflayer-pathfinder")
+        api.load("mineflayer-pathfinder")
 
         registry.load.assert_called_once_with("mineflayer-pathfinder")
 
-    @pytest.mark.asyncio
-    async def test_load_unknown_plugin_raises(self) -> None:
+    def test_load_unknown_plugin_raises(self) -> None:
         registry = MagicMock()
         registry.supported = ("mineflayer-pathfinder",)
+        registry.load.side_effect = PluginError(
+            "Unsupported plugin 'mineflayer-web-inventory'."
+        )
         api = PluginAPI(registry)
 
         with pytest.raises(PluginError, match="Unsupported plugin"):
-            await api.load("mineflayer-web-inventory")
+            api.load("mineflayer-web-inventory")
 
     def test_is_loaded_returns_registry_state(self) -> None:
         registry = MagicMock()
