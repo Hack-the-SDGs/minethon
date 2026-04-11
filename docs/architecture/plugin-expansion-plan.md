@@ -6,7 +6,7 @@
 ## 目錄
 
 1. [現狀評估](#1-現狀評估)
-2. [插件分類：三種整合模式](#2-插件分類三種整合模式)
+2. [插件分類：四種整合模式](#2-插件分類四種整合模式)
 3. [Phase 0：最小 Registry 重構](#3-phase-0最小-registry-重構)
 4. [各插件設計規格（Source-Verified）](#4-各插件設計規格source-verified)
 5. [Async 完成策略：Promise vs 自訂事件](#5-async-完成策略promise-vs-自訂事件)

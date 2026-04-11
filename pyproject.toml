@@ -92,7 +92,7 @@ pylint.max-statements = 65
 "src/minethon/_bridge/runtime.py" = [
     "PLC0415", # delayed `import javascript` for conditional bridge loading
     "S603", "PLW1510",   # subprocess.run for node version check
-    "PLR2004", # magic value 18 for Node.js minimum version
+    "PLR2004", # magic value 22 for Node.js minimum version
 ]
 "src/minethon/_bridge/js_bot.py" = ["S110", "FBT003"]
 "src/minethon/_bridge/plugin_host.py" = ["FBT003"]
