@@ -123,11 +123,28 @@ class TestDashboardBridgeLog:
 
 
 class TestDashboardBridgeTeardown:
-    """Teardown is a no-op (dashboard has no cleanup)."""
+    """Teardown destroys blessed screen and marks plugin unloaded."""
 
-    def test_teardown_is_noop(self) -> None:
-        bridge, _bot, _rt = _loaded_bridge()
+    def test_teardown_destroys_screen(self) -> None:
+        bridge, _bot, rt = _loaded_bridge()
+        ui_mod = MagicMock()
+        rt.require.return_value = ui_mod
+        bridge.teardown()
+        ui_mod.screen.destroy.assert_called_once()
+        assert bridge.is_loaded is False
+
+    def test_teardown_safe_when_not_loaded(self) -> None:
+        runtime = MagicMock()
+        js_bot = MagicMock()
+        relay = MagicMock()
+        bridge = DashboardBridge(runtime, js_bot, relay)
         bridge.teardown()  # should not raise
+
+    def test_teardown_survives_screen_error(self) -> None:
+        bridge, _bot, rt = _loaded_bridge()
+        rt.require.side_effect = Exception("no ui module")
+        bridge.teardown()  # should not raise
+        assert bridge.is_loaded is False
 
 
 # ---------------------------------------------------------------------------

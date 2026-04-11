@@ -65,6 +65,32 @@ class PanoramaBridge(PluginBridge):
                 js_stack=extract_js_stack(exc),
             ) from exc
 
+    def teardown(self) -> None:
+        """Best-effort cleanup of panorama native resources.
+
+        Each ``panoramaImage`` / ``image`` inject function creates a
+        ``Camera`` instance inside a closure that allocates a
+        ``node-canvas-webgl`` canvas, ``THREE.WebGLRenderer``, and
+        ``Viewer``.  These are **not** reachable from outside the
+        closure, so we can only null out the bot-level references to
+        release the JS-side GC roots.
+
+        Ref: mineflayer-panorama/index.js:3-21 — closure-captured Camera
+        Ref: mineflayer-panorama/lib/camera.js:19-21 — canvas/renderer/viewer
+        """
+        if not self._loaded:
+            return
+        try:
+            self._js_bot.panoramaImage = None
+        except Exception:
+            pass
+        try:
+            self._js_bot.image = None
+        except Exception:
+            pass
+        self._helpers = None
+        self._loaded = False
+
     def start_take_panorama(self, cam_pos: float | None = None) -> None:
         """Start panorama capture without blocking.
 

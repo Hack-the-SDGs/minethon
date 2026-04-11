@@ -130,11 +130,31 @@ class TestPanoramaBridgeTakePicture:
 
 
 class TestPanoramaBridgeTeardown:
-    """Teardown is a no-op (panorama has no cleanup)."""
+    """Teardown nulls out bot references and marks plugin unloaded."""
 
-    def test_teardown_is_noop(self) -> None:
-        bridge, _bot, _rt = _loaded_bridge()
+    def test_teardown_nulls_bot_refs(self) -> None:
+        bridge, js_bot, _rt = _loaded_bridge()
+        bridge.teardown()
+        # Should null out bot.panoramaImage and bot.image
+        assert js_bot.panoramaImage is None
+        assert js_bot.image is None
+        assert bridge.is_loaded is False
+
+    def test_teardown_safe_when_not_loaded(self) -> None:
+        runtime = MagicMock()
+        js_bot = MagicMock()
+        relay = MagicMock()
+        bridge = PanoramaBridge(runtime, js_bot, relay)
         bridge.teardown()  # should not raise
+
+    def test_teardown_survives_attribute_error(self) -> None:
+        bridge, js_bot, _rt = _loaded_bridge()
+        # Simulate bot proxy that rejects attribute set
+        type(js_bot).panoramaImage = property(
+            lambda s: None, lambda s, v: (_ for _ in ()).throw(AttributeError)
+        )
+        bridge.teardown()  # should not raise
+        assert bridge.is_loaded is False
 
 
 # ---------------------------------------------------------------------------

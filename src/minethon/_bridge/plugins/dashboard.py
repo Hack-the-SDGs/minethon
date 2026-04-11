@@ -73,6 +73,32 @@ class DashboardBridge(PluginBridge):
                 js_stack=extract_js_stack(exc),
             ) from exc
 
+    def teardown(self) -> None:
+        """Best-effort cleanup of blessed terminal resources.
+
+        The upstream dashboard creates a module-scope blessed ``screen``
+        (``src/ui.js:3``) and input listeners.  There is no upstream
+        ``destroy()`` API, so we try to call ``screen.destroy()``
+        directly and null out ``bot.dashboard`` to prevent further use.
+
+        Ref: @ssmidge/mineflayer-dashboard/src/ui.js:3 — module-scope screen
+        Ref: @ssmidge/mineflayer-dashboard/index.js:125 — bot.once('end')
+        """
+        if not self._loaded:
+            return
+        try:
+            ui_mod = self._runtime.require(
+                "@ssmidge/mineflayer-dashboard/src/ui"
+            )
+            ui_mod.screen.destroy()
+        except Exception:
+            pass  # Best-effort: upstream may not expose screen
+        try:
+            self._js_bot.dashboard._ended = True
+        except Exception:
+            pass
+        self._loaded = False
+
     def log(self, *messages: str) -> None:
         """Write messages to the dashboard log box.
 

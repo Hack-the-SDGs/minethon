@@ -435,23 +435,40 @@ class EventRelay:
             *args: Any,
             include_entity: bool = False,
         ) -> None:
+            # Snapshot entity_id (scalar, cheap) on callback thread.
+            # Defer heavy js_entity_to_entity traversal to asyncio loop
+            # per AGENTS.md callback-thread-minimal-work rule.
             normalized = self._normalize_js_args(js_bot, args)
             entity = normalized[0] if normalized else None
             if entity is None:
                 return
             try:
-                payload: dict[str, Any] = {"entity_id": int(entity.id)}
-                if include_entity:
-                    payload["entity"] = js_entity_to_entity(entity)
-                self._post(event_type, event_type(**payload))
+                entity_id = int(entity.id)  # scalar — safe on callback thread
             except Exception:
                 _log.debug(
-                    "Failed to snapshot %s from JS entity payload",
+                    "Failed to snapshot %s entity_id",
                     event_type.__name__,
                     exc_info=True,
                 )
+                return
+            if not include_entity:
+                self._post(event_type, event_type(entity_id=entity_id))
+            else:
+                # Heavy conversion deferred to asyncio loop thread.
+                def _build_with_entity(*_norm: Any) -> object | None:
+                    ent = _norm[0] if _norm else None
+                    if ent is None:
+                        return None
+                    return event_type(
+                        entity_id=entity_id,
+                        entity=js_entity_to_entity(ent),
+                    )
+
+                self._post_built(js_bot, event_type, _build_with_entity, *args)
 
         def _post_player_event(event_type: type, *args: Any) -> None:
+            # All reads are scalar properties (username, uuid, ping, etc.)
+            # — safe on callback thread per AGENTS.md minimal-work rule.
             # Ref: mineflayer/docs/api.md — player object has
             # username, uuid, displayName, gamemode, ping, entity.
             normalized = self._normalize_js_args(js_bot, args)
@@ -723,25 +740,23 @@ class EventRelay:
 
         @on_fn(js_bot, "heldItemChanged")
         def _on_held_item_changed(*args: Any) -> None:
-            normalized = self._normalize_js_args(js_bot, args)
-            held_item = normalized[0] if normalized else None
+            # Snapshot quickBarSlot (scalar, cheap) on callback thread.
+            # Defer heavy js_item_to_item_stack traversal to asyncio loop
+            # per AGENTS.md callback-thread-minimal-work rule.
+            # Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
             try:
-                item = None if held_item is None else js_item_to_item_stack(held_item)
-                # Read quickBarSlot here on the JS callback thread so the
-                # asyncio handler doesn't need a bridge call.
-                # Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
                 slot = (
                     int(js_bot.quickBarSlot) if js_bot.quickBarSlot is not None else 0
                 )
-                self._post(
-                    HeldItemChangedEvent,
-                    HeldItemChangedEvent(item=item, quick_bar_slot=slot),
-                )
             except Exception:
-                _log.debug(
-                    "Failed to snapshot HeldItemChangedEvent from JS payload",
-                    exc_info=True,
-                )
+                slot = 0
+
+            def _build(*normalized: Any) -> HeldItemChangedEvent:
+                held_item = normalized[0] if normalized else None
+                item = None if held_item is None else js_item_to_item_stack(held_item)
+                return HeldItemChangedEvent(item=item, quick_bar_slot=slot)
+
+            self._post_built(js_bot, HeldItemChangedEvent, _build, *args)
 
         # ================================================================
         # Movement
@@ -1850,6 +1865,8 @@ class EventRelay:
                             _log.debug("Failed to snapshot move payload", exc_info=True)
                     elif evt == "entityMoved":
                         normalized = self._normalize_js_args(js_bot, _args)
+                        # Scalar reads (id, position.x/y/z) — safe on
+                        # callback thread per AGENTS.md minimal-work rule.
                         entity = normalized[0] if normalized else None
                         if entity is not None:
                             try:
