@@ -58,9 +58,12 @@ class GuiAPI:
         """
         async with self._click_lock:
             self._bridge.start_click_by_name(name, window=window)
-            event: GuiQueryDoneEvent = await self._relay.wait_for(
-                GuiQueryDoneEvent, timeout=30.0
-            )
+            try:
+                event: GuiQueryDoneEvent = await self._relay.wait_for(
+                    GuiQueryDoneEvent, timeout=30.0
+                )
+            except TimeoutError as exc:
+                raise BridgeError("click_item timed out") from exc
             if event.error is not None:
                 raise BridgeError(f"click_item failed: {event.error}")
             return event.result
@@ -85,9 +88,12 @@ class GuiAPI:
         """
         async with self._drop_lock:
             self._bridge.start_drop_by_name(name, count)
-            event: GuiDropDoneEvent = await self._relay.wait_for(
-                GuiDropDoneEvent, timeout=30.0
-            )
+            try:
+                event: GuiDropDoneEvent = await self._relay.wait_for(
+                    GuiDropDoneEvent, timeout=30.0
+                )
+            except TimeoutError as exc:
+                raise BridgeError("drop_item timed out") from exc
             if event.error is not None:
                 raise BridgeError(f"drop_item failed: {event.error}")
             return event.result

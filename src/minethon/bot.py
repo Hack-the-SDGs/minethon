@@ -609,11 +609,6 @@ class Bot:
         assert pf is not None  # just loaded above
         self._navigation = NavigationAPI(pf, self._relay)
 
-        self._registry.load("mineflayer-tool")
-        tool_bridge = self._registry.get_tool()
-        assert tool_bridge is not None  # just loaded above
-        self._tool = ToolAPI(tool_bridge, self._relay)
-
         self._relay.register_js_events(
             self._controller.js_bot,
             self._runtime.js_module.On,
@@ -1516,10 +1511,28 @@ class Bot:
     def tool(self) -> ToolAPI:
         """Tool-equip API (mineflayer-tool).
 
+        Requires ``mineflayer-tool`` to be loaded first::
+
+            bot.plugins.load("mineflayer-tool")
+            await bot.tool.equip_for_block(block)
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the tool plugin is not loaded.
+
         Ref: mineflayer-tool/lib/Tool.js
         """
-        if self._tool is None:
+        if self._registry is None:
             raise MinethonConnectionError("Bot is not connected.")
+        if self._tool is not None:
+            return self._tool
+        bridge = self._registry.get_tool()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "tool plugin is not loaded. "
+                'Call bot.plugins.load("mineflayer-tool") first.'
+            )
+        self._tool = ToolAPI(bridge, self._relay)
         return self._tool
 
     @property

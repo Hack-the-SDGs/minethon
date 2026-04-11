@@ -69,9 +69,12 @@ class ToolAPI:
                 position,
                 require_harvest=require_harvest,
             )
-            event = await self._relay.wait_for(
-                ToolEquipDoneEvent,
-                timeout=timeout,
-            )
+            try:
+                event = await self._relay.wait_for(
+                    ToolEquipDoneEvent,
+                    timeout=timeout,
+                )
+            except TimeoutError as exc:
+                raise BridgeError("equip_for_block timed out") from exc
             if event.error is not None:
                 raise BridgeError(f"equip_for_block failed: {event.error}")

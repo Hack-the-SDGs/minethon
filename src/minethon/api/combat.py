@@ -102,6 +102,9 @@ class CombatAPI:
         """
         async with self._simply_shot_lock:
             self._bridge.start_simply_shot(yaw, pitch)
-            result = await self._relay.wait_for(SimplyShotDoneEvent, timeout=10.0)
+            try:
+                result = await self._relay.wait_for(SimplyShotDoneEvent, timeout=10.0)
+            except TimeoutError as exc:
+                raise BridgeError("simply_shot timed out") from exc
             if result.error is not None:
                 raise BridgeError(f"simply_shot failed: {result.error}")
