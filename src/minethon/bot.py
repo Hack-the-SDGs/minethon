@@ -53,6 +53,7 @@ from minethon._bridge.marshalling import (
 )
 from minethon._bridge.plugin_host import PluginHost
 from minethon._bridge.runtime import BridgeRuntime
+from minethon._bridge.services.viewer import ViewerService
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.plugins import PluginAPI
@@ -208,6 +209,7 @@ class Bot:
         self._resolved_username: str | None = None
         self._plugin_host: PluginHost | None = None
         self._navigation: NavigationAPI | None = None
+        self._viewer_service: ViewerService | None = None
         self._on_end_handler: object | None = None
         # Serialize long-running operations that use global completion
         # events, preventing concurrent calls from stealing each other's
@@ -625,6 +627,9 @@ class Bot:
             self._on_end_handler = None
         self._relay.reset()
         self._observe._reset_state()  # pyright: ignore[reportPrivateUsage]
+        if self._viewer_service is not None:
+            self._viewer_service.stop()
+            self._viewer_service = None
         if self._plugin_host is not None:
             self._plugin_host.stop_pathfinder()
         if self._controller is not None:
@@ -1343,6 +1348,23 @@ class Bot:
         if self._plugin_host is None:
             raise MinethonConnectionError("Bot is not connected.")
         return PluginAPI(self._plugin_host)
+
+    @property
+    def viewer(self) -> ViewerService:
+        """Web 3D viewer (prismarine-viewer).
+
+        Type B service -- lazy-initialized on first access.  Call
+        ``bot.viewer.start()`` to launch the HTTP server and
+        ``bot.viewer.stop()`` to shut it down.  The viewer is
+        automatically stopped on ``disconnect()``.
+
+        Ref: prismarine-viewer/lib/mineflayer.js
+        """
+        ctrl = self._ensure_connected()
+        if self._viewer_service is None:
+            assert self._runtime is not None
+            self._viewer_service = ViewerService(self._runtime, ctrl.js_bot)
+        return self._viewer_service
 
     # -- Sleep / Wake --
 
