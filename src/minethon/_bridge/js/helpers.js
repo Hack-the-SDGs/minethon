@@ -357,6 +357,20 @@ module.exports = {
             .catch(err => bot.emit("_minethon:webInvStopDone", _err(err)));
     },
 
+    // -- Panorama (mineflayer-panorama) --
+
+    startPanorama(bot, camPos) {
+        bot.panoramaImage.takePanoramaPictures(camPos)
+            .then(stream => bot.emit("_minethon:panoramaDone", null, stream))
+            .catch(err => bot.emit("_minethon:panoramaDone", _err(err)));
+    },
+
+    startPicture(bot, point, direction) {
+        bot.image.takePicture(point, direction)
+            .then(stream => bot.emit("_minethon:pictureDone", null, stream))
+            .catch(err => bot.emit("_minethon:pictureDone", _err(err)));
+    },
+
     /**
      * Serialise all tracked entities into a plain array in one JS call,
      * avoiding per-entity bridge round-trips from Python.

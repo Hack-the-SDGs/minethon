@@ -31,6 +31,8 @@ from minethon._bridge._events import (
     OpenEnchantmentTableDoneEvent,
     OpenFurnaceDoneEvent,
     OpenVillagerDoneEvent,
+    PanoramaDoneEvent,
+    PictureDoneEvent,
     PlaceDoneEvent,
     PlaceEntityDoneEvent,
     PutAwayDoneEvent,
@@ -1733,6 +1735,32 @@ class EventRelay:
 
             self._post_built(js_bot, WebInvStopDoneEvent, builder, *args)
 
+        # -- Panorama plugin done events --
+
+        @on_fn(js_bot, "_minethon:panoramaDone")
+        def _on_panorama_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> PanoramaDoneEvent:
+                return PanoramaDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=result,
+                )
+
+            self._post_built(js_bot, PanoramaDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "_minethon:pictureDone")
+        def _on_picture_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> PictureDoneEvent:
+                return PictureDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=result,
+                )
+
+            self._post_built(js_bot, PictureDoneEvent, builder, *args)
+
         # -- HawkEye --
 
         @on_fn(js_bot, "_minethon:simplyShotDone")
@@ -2002,6 +2030,9 @@ class EventRelay:
                 _on_viewer_start_done,
                 _on_web_inv_start_done,
                 _on_web_inv_stop_done,
+                # Panorama done events
+                _on_panorama_done,
+                _on_picture_done,
                 # Throttled
                 *throttled_handlers,
             ]

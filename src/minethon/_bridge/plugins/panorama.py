@@ -1,0 +1,130 @@
+"""Panorama plugin bridge.
+
+.. warning:: **Experimental.** Requires native ``node-canvas-webgl``
+   build. Version 0.0.1 — API may be unstable.
+
+Ref: mineflayer-panorama/index.js — ``{ panoramaImage, image }``
+"""
+
+from __future__ import annotations
+
+import pathlib
+from typing import Any
+
+from minethon._bridge._util import extract_js_stack
+from minethon._bridge.plugins._base import PluginBridge
+from minethon.models.errors import BridgeError
+
+_JS_HELPERS_PATH = pathlib.Path(__file__).resolve().parent.parent / "js" / "helpers.js"
+
+
+class PanoramaBridge(PluginBridge):
+    """Bridge for ``mineflayer-panorama``.
+
+    .. warning:: **Experimental.** Requires native ``node-canvas-webgl``
+       build. Version 0.0.1 — API may be unstable.
+
+    Ref: mineflayer-panorama/index.js
+    """
+
+    NPM_NAME = "mineflayer-panorama"
+
+    def __init__(
+        self,
+        runtime: Any,
+        js_bot: Any,
+        relay: Any,
+    ) -> None:
+        super().__init__(runtime, js_bot, relay)
+        self._helpers: Any = None
+
+    def _ensure_helpers(self) -> Any:
+        """Lazy-load helpers.js and cache the reference."""
+        if self._helpers is None:
+            self._helpers = self._runtime.require(
+                str(_JS_HELPERS_PATH.as_posix())
+            )
+        return self._helpers
+
+    def _do_load(self) -> None:
+        """Load the panorama plugin into the JS bot.
+
+        The module exports ``{ panoramaImage, image }`` — two independent
+        inject functions that must both be loaded.
+
+        Ref: mineflayer-panorama/index.js:23-26 — ``module.exports = { panoramaImage, image }``
+        """
+        try:
+            mod = self._runtime.require(self.NPM_NAME)
+            self._js_bot.loadPlugin(mod.panoramaImage)
+            self._js_bot.loadPlugin(mod.image)
+        except Exception as exc:
+            self._loaded = False
+            raise BridgeError(
+                f"load panorama failed: {exc}",
+                js_stack=extract_js_stack(exc),
+            ) from exc
+
+    def start_take_panorama(self, cam_pos: float | None = None) -> None:
+        """Start panorama capture without blocking.
+
+        Completion is signalled via ``_minethon:panoramaDone`` event.
+
+        Args:
+            cam_pos: Camera height. ``None`` for default (bot position,
+                height 10), or a float for custom height.
+
+        Ref: mineflayer-panorama/lib/camera.js:51-56 — camPos handling
+        """
+        if not self._loaded:
+            raise BridgeError(
+                "start_take_panorama failed: panorama has not been loaded"
+            )
+        try:
+            helpers = self._ensure_helpers()
+            helpers.startPanorama(self._js_bot, cam_pos)
+        except Exception as exc:
+            raise BridgeError(
+                f"start_take_panorama failed: {exc}",
+                js_stack=extract_js_stack(exc),
+            ) from exc
+
+    def start_take_picture(
+        self,
+        point_x: float,
+        point_y: float,
+        point_z: float,
+        dir_x: float,
+        dir_y: float,
+        dir_z: float,
+    ) -> None:
+        """Start single picture capture without blocking.
+
+        Completion is signalled via ``_minethon:pictureDone`` event.
+
+        Args:
+            point_x: Camera position X.
+            point_y: Camera position Y.
+            point_z: Camera position Z.
+            dir_x: Look direction X.
+            dir_y: Look direction Y.
+            dir_z: Look direction Z.
+
+        Ref: mineflayer-panorama/lib/camera.js — ``takePicture(point, direction)``
+        """
+        if not self._loaded:
+            raise BridgeError(
+                "start_take_picture failed: panorama has not been loaded"
+            )
+        try:
+            helpers = self._ensure_helpers()
+            helpers.startPicture(
+                self._js_bot,
+                {"x": point_x, "y": point_y, "z": point_z},
+                {"x": dir_x, "y": dir_y, "z": dir_z},
+            )
+        except Exception as exc:
+            raise BridgeError(
+                f"start_take_picture failed: {exc}",
+                js_stack=extract_js_stack(exc),
+            ) from exc

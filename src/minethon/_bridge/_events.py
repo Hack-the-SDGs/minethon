@@ -379,3 +379,32 @@ class WebInvStopDoneEvent:
     """
 
     error: str | None = None
+
+
+# -- Panorama plugin --
+
+
+@dataclass(frozen=True, slots=True)
+class PanoramaDoneEvent:
+    """Panorama capture finished.
+
+    .. warning:: **Experimental.** mineflayer-panorama 0.0.1.
+
+    Ref: mineflayer-panorama/index.js — ``bot.panoramaImage.takePanoramaPictures``
+    """
+
+    error: str | None = None
+    result: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class PictureDoneEvent:
+    """Single picture capture finished.
+
+    .. warning:: **Experimental.** mineflayer-panorama 0.0.1.
+
+    Ref: mineflayer-panorama/index.js — ``bot.image.takePicture``
+    """
+
+    error: str | None = None
+    result: Any = None

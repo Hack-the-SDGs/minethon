@@ -59,6 +59,7 @@ from minethon.api.armor import ArmorAPI
 from minethon.api.combat import CombatAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
+from minethon.api.panorama import PanoramaAPI
 from minethon.api.plugins import PluginAPI
 from minethon.api.tool import ToolAPI
 from minethon.config import BotConfig
@@ -215,6 +216,7 @@ class Bot:
         self._navigation: NavigationAPI | None = None
         self._armor: ArmorAPI | None = None
         self._combat: CombatAPI | None = None
+        self._panorama: PanoramaAPI | None = None
         self._tool: ToolAPI | None = None
         self._viewer_service: ViewerService | None = None
         self._web_inventory_service: WebInventoryService | None = None
@@ -658,6 +660,7 @@ class Bot:
         self._navigation = None
         self._armor = None
         self._combat = None
+        self._panorama = None
         self._tool = None
         self._registry = None
         if self._runtime is not None:
@@ -1398,6 +1401,37 @@ class Bot:
     def hawkeye(self) -> CombatAPI:
         """Alias for :attr:`combat`."""
         return self.combat
+
+    @property
+    def panorama(self) -> PanoramaAPI:
+        """Panorama and image capture API.
+
+        .. warning:: **Experimental.** Requires native ``node-canvas-webgl``.
+           mineflayer-panorama 0.0.1 -- API may be unstable.
+
+        Requires ``mineflayer-panorama`` to be loaded first::
+
+            await bot.plugins.load("mineflayer-panorama")
+            stream = await bot.panorama.take_panorama()
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the panorama plugin is not loaded.
+
+        Ref: mineflayer-panorama/index.js
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._panorama is not None:
+            return self._panorama
+        bridge = self._registry.get_panorama()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "panorama plugin is not loaded. "
+                'Call await bot.plugins.load("mineflayer-panorama") first.'
+            )
+        self._panorama = PanoramaAPI(bridge, self._relay)
+        return self._panorama
 
     @property
     def tool(self) -> ToolAPI:
