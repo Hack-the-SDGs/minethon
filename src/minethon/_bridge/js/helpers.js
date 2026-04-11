@@ -427,6 +427,30 @@ module.exports = {
         };
     },
 
+    // -- GUI (mineflayer-gui) --
+
+    guiClickByName(bot, name, useWindow) {
+        const query = bot.gui.Query();
+        const comparator = (_search, item) => item.name === name;
+        if (useWindow) {
+            query.Window(comparator).Click(comparator).close();
+        } else {
+            query.Hotbar(comparator).Equip(comparator).end();
+        }
+        query.run()
+            .then(result => bot.emit("_minethon:guiQueryDone", null, !!result))
+            .catch(err => bot.emit("_minethon:guiQueryDone", _err(err)));
+    },
+
+    guiDropByName(bot, name, count) {
+        const query = bot.gui.Query();
+        const comparator = (_search, item) => item.name === name;
+        query.Window(comparator).Drop(comparator, count).close();
+        query.run()
+            .then(result => bot.emit("_minethon:guiDropDone", null, !!result))
+            .catch(err => bot.emit("_minethon:guiDropDone", _err(err)));
+    },
+
     snapshotEntities(bot) {
         const result = [];
         const entities = bot.entities;

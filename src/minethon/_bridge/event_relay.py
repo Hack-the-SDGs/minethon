@@ -23,6 +23,8 @@ from minethon._bridge._events import (
     ElytraFlyDoneEvent,
     EquipDoneEvent,
     FishDoneEvent,
+    GuiDropDoneEvent,
+    GuiQueryDoneEvent,
     LookAtDoneEvent,
     LookDoneEvent,
     MoveSlotItemDoneEvent,
@@ -1792,6 +1794,32 @@ class EventRelay:
                 AutoShotStoppedEvent, AutoShotStoppedEvent(target=target)
             )
 
+        # -- GUI (mineflayer-gui) done events --
+
+        @on_fn(js_bot, "_minethon:guiQueryDone")
+        def _on_gui_query_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> GuiQueryDoneEvent:
+                return GuiQueryDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=bool(result) if result is not None else False,
+                )
+
+            self._post_built(js_bot, GuiQueryDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "_minethon:guiDropDone")
+        def _on_gui_drop_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> GuiDropDoneEvent:
+                return GuiDropDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=bool(result) if result is not None else False,
+                )
+
+            self._post_built(js_bot, GuiDropDoneEvent, builder, *args)
+
         # ================================================================
         # Throttled high-frequency events (raw dispatch only)
         # ================================================================
@@ -2037,6 +2065,9 @@ class EventRelay:
                 # Panorama done events
                 _on_panorama_done,
                 _on_picture_done,
+                # GUI done events
+                _on_gui_query_done,
+                _on_gui_drop_done,
                 # Throttled
                 *throttled_handlers,
             ]

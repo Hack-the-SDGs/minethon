@@ -88,6 +88,7 @@ pylint.max-statements = 65
 ]
 # files outside _bridge/ that still interface directly with JS proxies
 "src/minethon/api/observe.py" = ["ANN401"]   # js_bot / on_fn params are JS proxies
+"src/minethon/api/gui.py" = ["ANN401"]       # raw_query escape hatch returns JS proxy
 "src/minethon/api/panorama.py" = ["ANN401"]  # JPEG stream is a raw JS proxy
 "src/minethon/raw.py" = ["ANN401"]           # explicit raw escape hatch, Any by design
 "src/minethon/_bridge/runtime.py" = [

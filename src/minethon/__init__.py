@@ -3,6 +3,7 @@
 from minethon.api.armor import ArmorAPI
 from minethon.api.combat import CombatAPI
 from minethon.api.dashboard import DashboardAPI
+from minethon.api.gui import GuiAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.panorama import PanoramaAPI
@@ -64,6 +65,7 @@ __all__ = [
     "GameState",
     "GoalFailedEvent",
     "GoalReachedEvent",
+    "GuiAPI",
     "HealthChangedEvent",
     "InventoryError",
     "ItemStack",

@@ -406,6 +406,25 @@ class WebInvStopDoneEvent:
     error: str | None = None
 
 
+# -- GUI (mineflayer-gui) --
+
+
+@dataclass(frozen=True, slots=True)
+class GuiQueryDoneEvent:
+    """GUI query (click) operation finished."""
+
+    error: str | None = None
+    result: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class GuiDropDoneEvent:
+    """GUI drop operation finished."""
+
+    error: str | None = None
+    result: bool = False
+
+
 # -- Panorama plugin --
 
 

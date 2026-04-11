@@ -58,6 +58,7 @@ from minethon._bridge.services.web_inventory import WebInventoryService
 from minethon.api.armor import ArmorAPI
 from minethon.api.combat import CombatAPI
 from minethon.api.dashboard import DashboardAPI
+from minethon.api.gui import GuiAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.panorama import PanoramaAPI
@@ -217,6 +218,7 @@ class Bot:
         self._navigation: NavigationAPI | None = None
         self._armor: ArmorAPI | None = None
         self._combat: CombatAPI | None = None
+        self._gui: GuiAPI | None = None
         self._panorama: PanoramaAPI | None = None
         self._dashboard: DashboardAPI | None = None
         self._tool: ToolAPI | None = None
@@ -662,6 +664,7 @@ class Bot:
         self._navigation = None
         self._armor = None
         self._combat = None
+        self._gui = None
         self._panorama = None
         self._dashboard = None
         self._tool = None
@@ -1370,6 +1373,37 @@ class Bot:
             )
         self._armor = ArmorAPI(bridge, self._relay)
         return self._armor
+
+    @property
+    def gui(self) -> GuiAPI:
+        """GUI item management API (mineflayer-gui).
+
+        Provides convenience methods for clicking and dropping items
+        via the mineflayer-gui Query builder.
+
+        Requires ``mineflayer-gui`` to be loaded first::
+
+            await bot.plugins.load("mineflayer-gui")
+            await bot.gui.click_item("diamond_sword")
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the gui plugin is not loaded.
+
+        Ref: mineflayer-gui/src/query.js — Query builder pattern
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._gui is not None:
+            return self._gui
+        bridge = self._registry.get_gui()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "gui plugin is not loaded. "
+                'Call await bot.plugins.load("mineflayer-gui") first.'
+            )
+        self._gui = GuiAPI(bridge, self._relay)
+        return self._gui
 
     @property
     def dashboard(self) -> DashboardAPI:
