@@ -1589,7 +1589,7 @@ class Bot:
         """Web inventory viewer (mineflayer-web-inventory).
 
         Type B service -- lazily created on first access.
-        Call ``await bot.inventory_viewer.initialize()`` before using
+        Call ``bot.inventory_viewer.initialize()`` before using
         ``start()``/``stop()``.
 
         Ref: mineflayer-web-inventory/index.js

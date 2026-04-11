@@ -56,7 +56,7 @@ class WebInventoryService:
             self._helpers = self._runtime.require(str(helpers_path))
         return self._helpers
 
-    async def initialize(
+    def initialize(
         self,
         port: int = _DEFAULT_PORT,
     ) -> None:
@@ -64,6 +64,10 @@ class WebInventoryService:
 
         The HTTP server is **not** started automatically.  Call
         :meth:`start` after initialisation to begin serving.
+
+        This is a **synchronous blocking** call because JSPyBridge is
+        thread-affine.  The first call may take a while if Node.js
+        needs to install the npm package.
 
         Args:
             port: TCP port for the web inventory UI.  Fixed at

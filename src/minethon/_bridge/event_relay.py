@@ -352,6 +352,9 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         # Web inventory service
         "_minethon:webInvStartDone",
         "_minethon:webInvStopDone",
+        # GUI done events
+        "_minethon:guiQueryDone",
+        "_minethon:guiDropDone",
     }
 )
 
@@ -1795,15 +1798,19 @@ class EventRelay:
 
         @on_fn(js_bot, "auto_shot_stopped")
         def _on_auto_shot_stopped(*args: Any) -> None:
-            normalized = self._normalize_js_args(js_bot, args)
-            target_js = normalized[0] if normalized else None
-            try:
-                target = (
-                    js_entity_to_entity(target_js) if target_js is not None else None
-                )
-            except Exception:
-                target = None
-            self._post(AutoShotStoppedEvent, AutoShotStoppedEvent(target=target))
+            def builder(*normalized: Any) -> AutoShotStoppedEvent:
+                target_js = normalized[0] if normalized else None
+                try:
+                    target = (
+                        js_entity_to_entity(target_js)
+                        if target_js is not None
+                        else None
+                    )
+                except Exception:
+                    target = None
+                return AutoShotStoppedEvent(target=target)
+
+            self._post_built(js_bot, AutoShotStoppedEvent, builder, *args)
 
         # -- GUI (mineflayer-gui) done events --
 

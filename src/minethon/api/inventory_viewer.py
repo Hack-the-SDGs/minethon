@@ -19,7 +19,7 @@ class InventoryViewerAPI:
     """Web inventory viewer (mineflayer-web-inventory).
 
     Type B service — lazily created on first access via
-    ``bot.inventory_viewer``.  Call ``await bot.inventory_viewer.initialize()``
+    ``bot.inventory_viewer``.  Call ``bot.inventory_viewer.initialize()``
     before using ``start()`` / ``stop()``.
 
     Ref: mineflayer-web-inventory/index.js
@@ -28,11 +28,15 @@ class InventoryViewerAPI:
     def __init__(self, service: WebInventoryService) -> None:
         self._service = service
 
-    async def initialize(self, port: int = 3008) -> None:
+    def initialize(self, port: int = 3008) -> None:
         """Require the npm module and attach it to the bot.
 
         The HTTP server is **not** started automatically.  Call
         :meth:`start` after initialisation to begin serving.
+
+        This is a **synchronous blocking** call because JSPyBridge is
+        thread-affine.  The first call may take a while if Node.js
+        needs to install the npm package.
 
         Args:
             port: TCP port for the web inventory UI.  Fixed at
@@ -45,7 +49,7 @@ class InventoryViewerAPI:
         Ref: mineflayer-web-inventory/index.js:5 —
              ``module.exports = function (bot, options = {})``
         """
-        await self._service.initialize(port=port)
+        self._service.initialize(port=port)
 
     async def start(self) -> None:
         """Start the web inventory HTTP server.

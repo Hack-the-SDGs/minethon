@@ -77,29 +77,26 @@ class TestWebInventoryServiceInit:
         assert service.is_running is False
         assert service.port is None
 
-    @pytest.mark.asyncio
-    async def test_initialize_does_not_auto_start(self) -> None:
+    def test_initialize_does_not_auto_start(self) -> None:
         service, rt, _js_bot, _ = _make_service()
-        await service.initialize(port=9000)
+        service.initialize(port=9000)
 
         assert service.is_initialized is True
         assert service.is_running is False
         assert service.port == 9000
         rt.require.assert_called_with("mineflayer-web-inventory")
 
-    @pytest.mark.asyncio
-    async def test_initialize_default_port(self) -> None:
+    def test_initialize_default_port(self) -> None:
         service, _, _, _ = _make_service()
-        await service.initialize()
+        service.initialize()
         assert service.port == 3008
 
-    @pytest.mark.asyncio
-    async def test_double_initialize_raises(self) -> None:
+    def test_double_initialize_raises(self) -> None:
         service, _, _, _ = _make_service()
-        await service.initialize()
+        service.initialize()
 
         with pytest.raises(BridgeError, match="already initialised"):
-            await service.initialize()
+            service.initialize()
 
 
 class TestWebInventoryServiceStart:
@@ -114,7 +111,7 @@ class TestWebInventoryServiceStart:
     @pytest.mark.asyncio
     async def test_start_already_running_raises(self) -> None:
         service, _, _, _relay = _make_service()
-        await service.initialize()
+        service.initialize()
         # Manually set running to simulate a prior successful start
         service._running = True  # pyright: ignore[reportPrivateUsage]
 
@@ -125,7 +122,7 @@ class TestWebInventoryServiceStart:
     async def test_start_success(self) -> None:
         service, _, _, relay = _make_service()
         relay.set_loop(asyncio.get_running_loop())
-        await service.initialize()
+        service.initialize()
 
         async def post_done() -> None:
             await asyncio.sleep(0.01)
@@ -140,7 +137,7 @@ class TestWebInventoryServiceStart:
     async def test_start_error_from_js(self) -> None:
         service, _, _, relay = _make_service()
         relay.set_loop(asyncio.get_running_loop())
-        await service.initialize()
+        service.initialize()
 
         async def post_error() -> None:
             await asyncio.sleep(0.01)
@@ -168,7 +165,7 @@ class TestWebInventoryServiceStop:
     @pytest.mark.asyncio
     async def test_stop_not_running_raises(self) -> None:
         service, _, _, _ = _make_service()
-        await service.initialize()
+        service.initialize()
 
         with pytest.raises(BridgeError, match="not running"):
             await service.stop()
@@ -177,7 +174,7 @@ class TestWebInventoryServiceStop:
     async def test_stop_success(self) -> None:
         service, _, _, relay = _make_service()
         relay.set_loop(asyncio.get_running_loop())
-        await service.initialize()
+        service.initialize()
         service._running = (
             True  # simulate prior start  # pyright: ignore[reportPrivateUsage]
         )
@@ -195,7 +192,7 @@ class TestWebInventoryServiceStop:
     async def test_stop_error_from_js(self) -> None:
         service, _, _, relay = _make_service()
         relay.set_loop(asyncio.get_running_loop())
-        await service.initialize()
+        service.initialize()
         service._running = (
             True  # simulate prior start  # pyright: ignore[reportPrivateUsage]
         )
