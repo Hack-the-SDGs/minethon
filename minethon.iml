@@ -5,6 +5,11 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
+      <excludeFolder url="file://$MODULE_DIR$/.claude/worktrees/agent-a108f66e/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.claude/worktrees/agent-a57a4b3a/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.claude/worktrees/agent-a7ffe9c3/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.claude/worktrees/agent-ab8eba35/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.claude/worktrees/agent-acfe9173/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
     </content>
     <orderEntry type="inheritedJdk" />

@@ -54,6 +54,7 @@ from minethon._bridge.marshalling import (
 from minethon._bridge.plugin_registry import PluginRegistry
 from minethon._bridge.runtime import BridgeRuntime
 from minethon._bridge.services.viewer import ViewerService
+from minethon._bridge.services.web_inventory import WebInventoryService
 from minethon.api.armor import ArmorAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
@@ -214,6 +215,7 @@ class Bot:
         self._armor: ArmorAPI | None = None
         self._tool: ToolAPI | None = None
         self._viewer_service: ViewerService | None = None
+        self._web_inventory_service: WebInventoryService | None = None
         self._on_end_handler: object | None = None
         # Serialize long-running operations that use global completion
         # events, preventing concurrent calls from stealing each other's
@@ -642,6 +644,9 @@ class Bot:
         if self._viewer_service is not None:
             self._viewer_service.stop()
             self._viewer_service = None
+        if self._web_inventory_service is not None:
+            # Best-effort cleanup; service state is discarded on disconnect.
+            self._web_inventory_service = None
         if self._registry is not None:
             self._registry.teardown_all()
         if self._controller is not None:
@@ -1419,6 +1424,25 @@ class Bot:
             assert self._runtime is not None
             self._viewer_service = ViewerService(self._runtime, ctrl.js_bot)
         return self._viewer_service
+
+    @property
+    def web_inventory(self) -> WebInventoryService:
+        """Web inventory viewer (mineflayer-web-inventory).
+
+        Type B service -- lazily created on first access.
+        Call ``await bot.web_inventory.initialize()`` before using
+        ``start()``/``stop()``.
+
+        Ref: mineflayer-web-inventory/index.js
+        """
+        ctrl = self._ensure_connected()
+        if self._web_inventory_service is None:
+            self._web_inventory_service = WebInventoryService(
+                self._runtime,  # type: ignore[arg-type]
+                ctrl.js_bot,
+                self._relay,
+            )
+        return self._web_inventory_service
 
     # -- Sleep / Wake --
 

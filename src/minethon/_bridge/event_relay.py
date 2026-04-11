@@ -44,6 +44,8 @@ from minethon._bridge._events import (
     UnequipDoneEvent,
     WaitForTicksDoneEvent,
     WakeDoneEvent,
+    WebInvStartDoneEvent,
+    WebInvStopDoneEvent,
     WriteBookDoneEvent,
 )
 from minethon._bridge.marshalling import js_entity_to_entity, js_item_to_item_stack
@@ -334,6 +336,9 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         "_minethon:placeEntityDone",
         "_minethon:armorEquipDone",
         "_minethon:toolEquipDone",
+        # Web inventory service
+        "_minethon:webInvStartDone",
+        "_minethon:webInvStopDone",
     }
 )
 
@@ -1690,6 +1695,26 @@ class EventRelay:
                 )
 
             self._post_built(js_bot, ToolEquipDoneEvent, builder, *args)
+
+        # -- Web inventory service done events --
+
+        @on_fn(js_bot, "_minethon:webInvStartDone")
+        def _on_web_inv_start_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> WebInvStartDoneEvent:
+                return WebInvStartDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, WebInvStartDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "_minethon:webInvStopDone")
+        def _on_web_inv_stop_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> WebInvStopDoneEvent:
+                return WebInvStopDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, WebInvStopDoneEvent, builder, *args)
 
         # ================================================================
         # Throttled high-frequency events (raw dispatch only)
