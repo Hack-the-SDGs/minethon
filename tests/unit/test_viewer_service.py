@@ -129,7 +129,7 @@ class TestBotViewerProperty:
     async def test_viewer_cleared_after_disconnect(self) -> None:
         bot = Bot(host="localhost")
         service = MagicMock()
-        bot._viewer_service = service  # pyright: ignore[reportAttributeAccessIssue]
+        bot._viewer_svc = service  # pyright: ignore[reportAttributeAccessIssue]
         await bot.disconnect()
         service.stop.assert_called_once()
-        assert bot._viewer_service is None  # pyright: ignore[reportAttributeAccessIssue]
+        assert bot._viewer_svc is None  # pyright: ignore[reportAttributeAccessIssue]

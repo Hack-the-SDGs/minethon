@@ -24,10 +24,13 @@ class PanoramaAPI:
     .. warning:: **Experimental.** Requires native ``node-canvas-webgl``.
        mineflayer-panorama 0.0.1 — API may be unstable.
 
+    All capture methods are **raw escape hatches** — they return
+    JS proxy objects (JPEG stream), not typed Python values.
+
     Example::
 
         await bot.plugins.load("mineflayer-panorama")
-        stream = await bot.panorama.take_panorama()
+        stream = await bot.panorama.raw_take_panorama()
 
     Ref: mineflayer-panorama/index.js
     """
@@ -42,17 +45,20 @@ class PanoramaAPI:
         self._panorama_lock = asyncio.Lock()
         self._picture_lock = asyncio.Lock()
 
-    async def take_panorama(
+    async def raw_take_panorama(
         self, camera_height: float | None = None
     ) -> Any:
-        """Take a 360-degree panorama. Returns JPEG stream proxy.
+        """**Raw escape hatch.** Take a 360-degree panorama.
+
+        Returns a raw JS JPEG stream proxy — caller is responsible
+        for consuming or disposing the stream.
 
         Args:
             camera_height: Camera height above the bot. ``None`` for
                 default (height 10), or a float for custom height.
 
         Returns:
-            The JPEG stream proxy from the JS side.
+            Raw JS JPEG stream proxy (not a typed Python value).
 
         Raises:
             BridgeError: If the capture fails or times out.
@@ -71,15 +77,18 @@ class PanoramaAPI:
                 raise BridgeError(f"panorama capture failed: {event.error}")
             return event.result
 
-    async def take_picture(self, point: Vec3, direction: Vec3) -> Any:
-        """Take a single picture at a point looking in a direction.
+    async def raw_take_picture(self, point: Vec3, direction: Vec3) -> Any:
+        """**Raw escape hatch.** Take a single picture at a point.
+
+        Returns a raw JS JPEG stream proxy — caller is responsible
+        for consuming or disposing the stream.
 
         Args:
             point: Camera position as a Vec3.
             direction: Look direction as a Vec3.
 
         Returns:
-            The JPEG stream proxy from the JS side.
+            Raw JS JPEG stream proxy (not a typed Python value).
 
         Raises:
             BridgeError: If the capture fails or times out.

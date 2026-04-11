@@ -698,16 +698,16 @@ plugin/web-inventory      ← Type B, 中等
 plugin/collectblock       ← Type A, 依賴 tool（雖然內部軟載入，但測試需要 tool bridge 存在）
 ```
 
-### Phase 2：需要 spike 的插件（不直接排進主線）
+### Phase 2：spike 完成，已接入
 
-```
-spike/gui                 ← 需確認 JS comparator 橋接可行性
-spike/statemachine        ← 需確認 Python callable 當 shouldTransition 的可行性
-spike/dashboard           ← 需確認 blessed terminal 與 Python stdout 相容性
-spike/panorama            ← 需確認 node-canvas-webgl native build 在 CI 環境可行性
-```
+| 插件 | 狀態 | 說明 |
+|------|------|------|
+| gui | **stable** | Type A，JS comparator 橋接已解決，`bot.gui` |
+| dashboard | **experimental** | Type D (HOF)，upstream 鎖 `mineflayer ^2.28.1`，blessed terminal 相容性未實際驗證，`bot.dashboard` |
+| panorama | **experimental** | Type A，需 native `node-canvas-webgl`，v0.0.1，capture 方法為 raw escape hatch（`raw_take_panorama` / `raw_take_picture`），`bot.panorama` |
+| statemachine | **raw-only** | Type C，`shouldTransition` 每 tick 呼叫 callable 跨 bridge 風險仍在，僅 `bot.raw.plugin("mineflayer-statemachine")` |
 
-Spike 結果決定後才開正式 `plugin/*` 分支。
+Phase 2 已於 2026-04-11 完成並合入 dev。
 
 ### 衝突最小化
 
@@ -737,6 +737,9 @@ Spike 結果決定後才開正式 `plugin/*` 分支。
 | 2026-04-11 | `NavigationAPI` 不持有 `JSBotController` — entity lookup 下沉到 `PathfinderBridge.follow_player()` |
 | 2026-04-11 | panorama 歸類修正：Type A（走 `PluginRegistry`），不走 service lazy property |
 | 2026-04-11 | 版本矩陣修正：tool/collectblock 為 direct dep `^4.0.0`；statemachine 有異常 `node: ^19.1.0` 依賴 |
+| 2026-04-11 | Phase 2 完成：gui=stable、dashboard=experimental、panorama=experimental、statemachine=raw-only |
+| 2026-04-11 | PanoramaAPI capture 方法改為明確 raw escape hatch（`raw_take_panorama` / `raw_take_picture`）— 回傳 JS proxy 必須標示 raw |
+| 2026-04-11 | Type B 服務改用 `api/` public wrapper（`ViewerAPI`、`InventoryViewerAPI`），`Bot` 不再直接暴露 `_bridge` 類型 |
 
 ---
 

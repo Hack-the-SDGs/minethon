@@ -53,8 +53,8 @@ from minethon._bridge.marshalling import (
 )
 from minethon._bridge.plugin_registry import PluginRegistry
 from minethon._bridge.runtime import BridgeRuntime
-from minethon._bridge.services.viewer import ViewerService
-from minethon._bridge.services.web_inventory import WebInventoryService
+from minethon.api.inventory_viewer import InventoryViewerAPI
+from minethon.api.viewer import ViewerAPI
 from minethon.api.armor import ArmorAPI
 from minethon.api.combat import CombatAPI
 from minethon.api.dashboard import DashboardAPI
@@ -222,8 +222,10 @@ class Bot:
         self._panorama: PanoramaAPI | None = None
         self._dashboard: DashboardAPI | None = None
         self._tool: ToolAPI | None = None
-        self._viewer_service: ViewerService | None = None
-        self._web_inventory_service: WebInventoryService | None = None
+        self._viewer_api: ViewerAPI | None = None
+        self._viewer_svc: Any = None  # _bridge.services.viewer.ViewerService
+        self._inv_viewer_api: InventoryViewerAPI | None = None
+        self._inv_viewer_svc: Any = None  # _bridge.services.web_inventory.WebInventoryService
         self._on_end_handler: object | None = None
         # Serialize long-running operations that use global completion
         # events, preventing concurrent calls from stealing each other's
@@ -649,12 +651,14 @@ class Bot:
             self._on_end_handler = None
         self._relay.reset()
         self._observe._reset_state()  # pyright: ignore[reportPrivateUsage]
-        if self._viewer_service is not None:
-            self._viewer_service.stop()
-            self._viewer_service = None
-        if self._web_inventory_service is not None:
-            self._web_inventory_service.force_stop()
-            self._web_inventory_service = None
+        if self._viewer_svc is not None:
+            self._viewer_svc.stop()
+            self._viewer_svc = None
+            self._viewer_api = None
+        if self._inv_viewer_svc is not None:
+            self._inv_viewer_svc.force_stop()
+            self._inv_viewer_svc = None
+            self._inv_viewer_api = None
         if self._registry is not None:
             self._registry.teardown_all()
         if self._controller is not None:
@@ -1481,7 +1485,7 @@ class Bot:
         Requires ``mineflayer-panorama`` to be loaded first::
 
             await bot.plugins.load("mineflayer-panorama")
-            stream = await bot.panorama.take_panorama()
+            stream = await bot.panorama.raw_take_panorama()
 
         Raises:
             MinethonConnectionError: If the bot is not connected.
@@ -1549,7 +1553,7 @@ class Bot:
         return PluginAPI(self._registry)
 
     @property
-    def viewer(self) -> ViewerService:
+    def viewer(self) -> ViewerAPI:
         """Web 3D viewer (prismarine-viewer).
 
         Type B service -- lazy-initialized on first access.  Call
@@ -1560,15 +1564,18 @@ class Bot:
         Ref: prismarine-viewer/lib/mineflayer.js
         """
         ctrl = self._ensure_connected()
-        if self._viewer_service is None:
+        if self._viewer_api is None:
+            from minethon._bridge.services.viewer import ViewerService
+
             assert self._runtime is not None
-            self._viewer_service = ViewerService(
+            self._viewer_svc = ViewerService(
                 self._runtime, ctrl.js_bot, self._relay,
             )
-        return self._viewer_service
+            self._viewer_api = ViewerAPI(self._viewer_svc)
+        return self._viewer_api
 
     @property
-    def inventory_viewer(self) -> WebInventoryService:
+    def inventory_viewer(self) -> InventoryViewerAPI:
         """Web inventory viewer (mineflayer-web-inventory).
 
         Type B service -- lazily created on first access.
@@ -1578,13 +1585,18 @@ class Bot:
         Ref: mineflayer-web-inventory/index.js
         """
         ctrl = self._ensure_connected()
-        if self._web_inventory_service is None:
-            self._web_inventory_service = WebInventoryService(
+        if self._inv_viewer_api is None:
+            from minethon._bridge.services.web_inventory import (
+                WebInventoryService,
+            )
+
+            self._inv_viewer_svc = WebInventoryService(
                 self._runtime,  # type: ignore[arg-type]
                 ctrl.js_bot,
                 self._relay,
             )
-        return self._web_inventory_service
+            self._inv_viewer_api = InventoryViewerAPI(self._inv_viewer_svc)
+        return self._inv_viewer_api
 
     # -- Sleep / Wake --
 

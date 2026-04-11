@@ -190,11 +190,11 @@ class TestPictureDoneEvent:
 # ---------------------------------------------------------------------------
 
 
-class TestPanoramaAPITakePanorama:
-    """PanoramaAPI.take_panorama async method."""
+class TestPanoramaAPIRawTakePanorama:
+    """PanoramaAPI.raw_take_panorama async method (raw escape hatch)."""
 
     @pytest.mark.asyncio
-    async def test_take_panorama_success(self) -> None:
+    async def test_raw_take_panorama_success(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
         stream_proxy = MagicMock()
@@ -205,12 +205,12 @@ class TestPanoramaAPITakePanorama:
 
         relay.wait_for = _wait_for
         api = PanoramaAPI(bridge, relay)
-        result = await api.take_panorama()
+        result = await api.raw_take_panorama()
         assert result is stream_proxy
         bridge.start_take_panorama.assert_called_once_with(None)
 
     @pytest.mark.asyncio
-    async def test_take_panorama_with_height(self) -> None:
+    async def test_raw_take_panorama_with_height(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
         success_event = PanoramaDoneEvent(error=None, result="stream")
@@ -220,11 +220,11 @@ class TestPanoramaAPITakePanorama:
 
         relay.wait_for = _wait_for
         api = PanoramaAPI(bridge, relay)
-        await api.take_panorama(camera_height=50.0)
+        await api.raw_take_panorama(camera_height=50.0)
         bridge.start_take_panorama.assert_called_once_with(50.0)
 
     @pytest.mark.asyncio
-    async def test_take_panorama_error_raises(self) -> None:
+    async def test_raw_take_panorama_error_raises(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
         error_event = PanoramaDoneEvent(error="canvas not available")
@@ -235,10 +235,10 @@ class TestPanoramaAPITakePanorama:
         relay.wait_for = _wait_for
         api = PanoramaAPI(bridge, relay)
         with pytest.raises(BridgeError, match="panorama capture failed"):
-            await api.take_panorama()
+            await api.raw_take_panorama()
 
     @pytest.mark.asyncio
-    async def test_take_panorama_timeout_raises(self) -> None:
+    async def test_raw_take_panorama_timeout_raises(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
 
@@ -248,11 +248,11 @@ class TestPanoramaAPITakePanorama:
         relay.wait_for = _timeout
         api = PanoramaAPI(bridge, relay)
         with pytest.raises(BridgeError, match="panorama capture timed out"):
-            await api.take_panorama()
+            await api.raw_take_panorama()
 
     @pytest.mark.asyncio
-    async def test_take_panorama_serialized_by_lock(self) -> None:
-        """Concurrent take_panorama calls are serialized by the lock."""
+    async def test_raw_take_panorama_serialized_by_lock(self) -> None:
+        """Concurrent raw_take_panorama calls are serialized by the lock."""
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
         call_count = 0
@@ -267,15 +267,17 @@ class TestPanoramaAPITakePanorama:
 
         relay.wait_for = _mock_wait_for
         api = PanoramaAPI(bridge, relay)
-        await asyncio.gather(api.take_panorama(), api.take_panorama())
+        await asyncio.gather(
+            api.raw_take_panorama(), api.raw_take_panorama()
+        )
         assert bridge.start_take_panorama.call_count == 2
 
 
-class TestPanoramaAPITakePicture:
-    """PanoramaAPI.take_picture async method."""
+class TestPanoramaAPIRawTakePicture:
+    """PanoramaAPI.raw_take_picture async method (raw escape hatch)."""
 
     @pytest.mark.asyncio
-    async def test_take_picture_success(self) -> None:
+    async def test_raw_take_picture_success(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
         stream_proxy = MagicMock()
@@ -288,14 +290,14 @@ class TestPanoramaAPITakePicture:
         api = PanoramaAPI(bridge, relay)
         point = Vec3(10.0, 20.0, 30.0)
         direction = Vec3(0.0, -1.0, 0.0)
-        result = await api.take_picture(point, direction)
+        result = await api.raw_take_picture(point, direction)
         assert result is stream_proxy
         bridge.start_take_picture.assert_called_once_with(
             10.0, 20.0, 30.0, 0.0, -1.0, 0.0
         )
 
     @pytest.mark.asyncio
-    async def test_take_picture_error_raises(self) -> None:
+    async def test_raw_take_picture_error_raises(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
         error_event = PictureDoneEvent(error="render crash")
@@ -306,10 +308,10 @@ class TestPanoramaAPITakePicture:
         relay.wait_for = _wait_for
         api = PanoramaAPI(bridge, relay)
         with pytest.raises(BridgeError, match="picture capture failed"):
-            await api.take_picture(Vec3(0, 0, 0), Vec3(1, 0, 0))
+            await api.raw_take_picture(Vec3(0, 0, 0), Vec3(1, 0, 0))
 
     @pytest.mark.asyncio
-    async def test_take_picture_timeout_raises(self) -> None:
+    async def test_raw_take_picture_timeout_raises(self) -> None:
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
 
@@ -319,11 +321,11 @@ class TestPanoramaAPITakePicture:
         relay.wait_for = _timeout
         api = PanoramaAPI(bridge, relay)
         with pytest.raises(BridgeError, match="picture capture timed out"):
-            await api.take_picture(Vec3(0, 0, 0), Vec3(1, 0, 0))
+            await api.raw_take_picture(Vec3(0, 0, 0), Vec3(1, 0, 0))
 
     @pytest.mark.asyncio
-    async def test_take_picture_serialized_by_lock(self) -> None:
-        """Concurrent take_picture calls are serialized by the lock."""
+    async def test_raw_take_picture_serialized_by_lock(self) -> None:
+        """Concurrent raw_take_picture calls are serialized by the lock."""
         bridge = MagicMock(spec=PanoramaBridge)
         relay = MagicMock()
 
@@ -337,5 +339,7 @@ class TestPanoramaAPITakePicture:
         api = PanoramaAPI(bridge, relay)
         p = Vec3(0, 0, 0)
         d = Vec3(1, 0, 0)
-        await asyncio.gather(api.take_picture(p, d), api.take_picture(p, d))
+        await asyncio.gather(
+            api.raw_take_picture(p, d), api.raw_take_picture(p, d)
+        )
         assert bridge.start_take_picture.call_count == 2
