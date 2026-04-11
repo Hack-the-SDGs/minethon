@@ -1395,6 +1395,11 @@ class Bot:
         return self._combat
 
     @property
+    def hawkeye(self) -> CombatAPI:
+        """Alias for :attr:`combat`."""
+        return self.combat
+
+    @property
     def tool(self) -> ToolAPI:
         """Tool-equip API (mineflayer-tool).
 
@@ -1460,11 +1465,11 @@ class Bot:
         return self._viewer_service
 
     @property
-    def web_inventory(self) -> WebInventoryService:
+    def inventory_viewer(self) -> WebInventoryService:
         """Web inventory viewer (mineflayer-web-inventory).
 
         Type B service -- lazily created on first access.
-        Call ``await bot.web_inventory.initialize()`` before using
+        Call ``await bot.inventory_viewer.initialize()`` before using
         ``start()``/``stop()``.
 
         Ref: mineflayer-web-inventory/index.js
