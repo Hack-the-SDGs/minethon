@@ -290,6 +290,14 @@ module.exports = {
             .catch(err => bot.emit("_minethon:placeEntityDone", _err(err)));
     },
 
+    // -- Plugin: mineflayer-tool --
+
+    startToolEquipForBlock(bot, block, options) {
+        bot.tool.equipForBlock(block, options)
+            .then(() => bot.emit("_minethon:toolEquipDone"))
+            .catch(err => bot.emit("_minethon:toolEquipDone", _err(err)));
+    },
+
     /**
      * Serialise all tracked entities into a plain array in one JS call,
      * avoiding per-entity bridge round-trips from Python.

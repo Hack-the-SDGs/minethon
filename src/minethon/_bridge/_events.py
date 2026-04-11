@@ -310,3 +310,16 @@ class PlaceEntityDoneEvent:
 
     error: str | None = None
     result: Any = None
+
+
+# -- Plugin: mineflayer-tool --
+
+
+@dataclass(frozen=True, slots=True)
+class ToolEquipDoneEvent:
+    """Tool equip-for-block operation finished.
+
+    Ref: mineflayer-tool/lib/Tool.js — ``equipForBlock``
+    """
+
+    error: str | None = None
