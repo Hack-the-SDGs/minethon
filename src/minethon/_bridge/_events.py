@@ -301,6 +301,16 @@ class CreativeClearInventoryDoneEvent:
     error: str | None = None
 
 
+# -- Armor Manager --
+
+
+@dataclass(frozen=True, slots=True)
+class ArmorEquipDoneEvent:
+    """ArmorManager equipAll operation finished."""
+
+    error: str | None = None
+
+
 # -- Entity placement --
 
 
@@ -310,3 +320,106 @@ class PlaceEntityDoneEvent:
 
     error: str | None = None
     result: Any = None
+
+
+# -- Plugin: mineflayer-tool --
+
+
+@dataclass(frozen=True, slots=True)
+class ToolEquipDoneEvent:
+    """Tool equip-for-block operation finished.
+
+    Ref: mineflayer-tool/lib/Tool.js — ``equipForBlock``
+    """
+
+    error: str | None = None
+
+
+# -- Panorama --
+
+
+@dataclass(frozen=True, slots=True)
+class PanoramaDoneEvent:
+    """Panorama capture finished (result is JPEG stream proxy on success).
+
+    Ref: mineflayer-panorama/lib/camera.js — ``panoramaImage``
+    """
+
+    error: str | None = None
+    result: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class PictureDoneEvent:
+    """Single picture capture finished (result is JPEG stream proxy on success).
+
+    Ref: mineflayer-panorama/lib/camera.js — ``takePicture``
+    """
+
+    error: str | None = None
+    result: Any = None
+
+
+# -- HawkEye --
+
+
+@dataclass(frozen=True, slots=True)
+class SimplyShotDoneEvent:
+    """SimplyShot operation finished."""
+
+    error: str | None = None
+
+
+# -- Viewer service --
+
+
+@dataclass(frozen=True, slots=True)
+class ViewerStartDoneEvent:
+    """Viewer initialisation finished.
+
+    Ref: prismarine-viewer/lib/mineflayer.js — module.exports
+    """
+
+    error: str | None = None
+
+
+# -- Web inventory service --
+
+
+@dataclass(frozen=True, slots=True)
+class WebInvStartDoneEvent:
+    """Web inventory start() finished.
+
+    Ref: mineflayer-web-inventory/index.js — start()
+    """
+
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WebInvStopDoneEvent:
+    """Web inventory stop() finished.
+
+    Ref: mineflayer-web-inventory/index.js — stop()
+    """
+
+    error: str | None = None
+
+
+# -- GUI (mineflayer-gui) --
+
+
+@dataclass(frozen=True, slots=True)
+class GuiQueryDoneEvent:
+    """GUI query (click) operation finished."""
+
+    error: str | None = None
+    result: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class GuiDropDoneEvent:
+    """GUI drop operation finished."""
+
+    error: str | None = None
+    result: bool = False

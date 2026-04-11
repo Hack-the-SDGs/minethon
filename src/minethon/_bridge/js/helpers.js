@@ -282,6 +282,14 @@ module.exports = {
             .catch(err => bot.emit("_minethon:creativeClearInventoryDone", _err(err)));
     },
 
+    // -- Armor Manager --
+
+    startArmorEquipAll(bot) {
+        bot.armorManager.equipAll()
+            .then(() => bot.emit("_minethon:armorEquipDone"))
+            .catch(err => bot.emit("_minethon:armorEquipDone", _err(err)));
+    },
+
     // -- Entity Placement (value-returning) --
 
     startPlaceEntity(bot, refBlock, faceVec) {
@@ -290,15 +298,79 @@ module.exports = {
             .catch(err => bot.emit("_minethon:placeEntityDone", _err(err)));
     },
 
+    // -- Plugin: mineflayer-tool --
+
+    startToolEquipForBlock(bot, block, options) {
+        bot.tool.equipForBlock(block, options)
+            .then(() => bot.emit("_minethon:toolEquipDone"))
+            .catch(err => bot.emit("_minethon:toolEquipDone", _err(err)));
+    },
+
+    // -- HawkEye (minecrafthawkeye) --
+
+    startSimplyShot(bot, yaw, pitch) {
+        bot.hawkEye.simplyShot(yaw, pitch)
+            .then(() => bot.emit("_minethon:simplyShotDone"))
+            .catch(err => bot.emit("_minethon:simplyShotDone", _err(err)));
+    },
+
+    // -- Viewer Service (Type B) --
+
     /**
-     * Serialise all tracked entities into a plain array in one JS call,
-     * avoiding per-entity bridge round-trips from Python.
+     * Start prismarine-viewer.  The caller (Python) passes the
+     * already-resolved mineflayer function so we don't need to
+     * require() from this repo-local file.
      *
-     * @returns {Array<{id:number, name:string|null, username:string|null,
-     *   type:string|null, position:{x:number,y:number,z:number},
-     *   velocity:{x:number,y:number,z:number}|null,
-     *   health:number|null}>}
+     * mineflayer() is sync — Express http.listen() is async.
+     * EADDRINUSE fires later on the Node event loop; the current
+     * upstream API does not expose the http server object, so
+     * async bind errors are not detectable here.
+     *
+     * @param {object} bot        - JS mineflayer bot
+     * @param {function} viewerFn - require('prismarine-viewer').mineflayer
+     * @param {object} options    - { viewDistance, firstPerson, port }
      */
+    startViewer(bot, viewerFn, options) {
+        try {
+            viewerFn(bot, options);
+            if (bot.viewer) {
+                bot.emit("_minethon:viewerStartDone");
+            } else {
+                bot.emit("_minethon:viewerStartDone", "viewer was not created");
+            }
+        } catch (err) {
+            bot.emit("_minethon:viewerStartDone", _err(err));
+        }
+    },
+
+    // -- Web Inventory Service (Type B) --
+
+    startWebInventory(bot) {
+        bot.webInventory.start()
+            .then(() => bot.emit("_minethon:webInvStartDone"))
+            .catch(err => bot.emit("_minethon:webInvStartDone", _err(err)));
+    },
+
+    stopWebInventory(bot) {
+        bot.webInventory.stop()
+            .then(() => bot.emit("_minethon:webInvStopDone"))
+            .catch(err => bot.emit("_minethon:webInvStopDone", _err(err)));
+    },
+
+    // -- Panorama (mineflayer-panorama) --
+
+    startPanorama(bot, camPos) {
+        bot.panoramaImage.takePanoramaPictures(camPos)
+            .then(stream => bot.emit("_minethon:panoramaDone", null, stream))
+            .catch(err => bot.emit("_minethon:panoramaDone", _err(err)));
+    },
+
+    startPicture(bot, point, direction) {
+        bot.image.takePicture(point, direction)
+            .then(stream => bot.emit("_minethon:pictureDone", null, stream))
+            .catch(err => bot.emit("_minethon:pictureDone", _err(err)));
+    },
+
     /**
      * Serialise all inventory items into a plain array in one JS call,
      * avoiding per-item bridge round-trips from Python.
@@ -332,6 +404,39 @@ module.exports = {
         };
     },
 
+    // -- GUI (mineflayer-gui) --
+
+    guiClickByName(bot, name, useWindow) {
+        const query = bot.gui.Query();
+        const comparator = (_search, item) => item.name === name;
+        if (useWindow) {
+            query.Window(comparator).Click(comparator).close();
+        } else {
+            query.Hotbar(comparator).Equip(comparator).end();
+        }
+        query.run()
+            .then(result => bot.emit("_minethon:guiQueryDone", null, !!result))
+            .catch(err => bot.emit("_minethon:guiQueryDone", _err(err)));
+    },
+
+    guiDropByName(bot, name, count) {
+        const query = bot.gui.Query();
+        const comparator = (_search, item) => item.name === name;
+        query.Window(comparator).Drop(comparator, count).close();
+        query.run()
+            .then(result => bot.emit("_minethon:guiDropDone", null, !!result))
+            .catch(err => bot.emit("_minethon:guiDropDone", _err(err)));
+    },
+
+    /**
+     * Serialise all tracked entities into a plain array in one JS call,
+     * avoiding per-entity bridge round-trips from Python.
+     *
+     * @returns {Array<{id:number, name:string|null, username:string|null,
+     *   type:string|null, position:{x:number,y:number,z:number},
+     *   velocity:{x:number,y:number,z:number}|null,
+     *   health:number|null}>}
+     */
     snapshotEntities(bot) {
         const result = [];
         const entities = bot.entities;

@@ -471,16 +471,16 @@ class TestEventRelayMineflayerParity:
         relay.add_handler(HeldItemChangedEvent, handler)
         item = self._make_item()
         handlers["heldItemChanged"](js_bot, item)
-        item.name = "diamond"
-        item.displayName = "Diamond"
-        item.count = 99
+        # NOTE: js_item_to_item_stack is deferred to the asyncio loop
+        # thread per AGENTS.md callback-thread-minimal-work rule.  With
+        # real JSPyBridge proxies the proxy read goes back to JS, so
+        # mutation before asyncio dispatch is observable.  Only
+        # quickBarSlot (scalar) is snapshot on the callback thread.
         await asyncio.sleep(0.01)
 
         assert len(received) == 1
         assert received[0].item is not None
-        assert received[0].item.name == "stick"
-        assert received[0].item.display_name == "Stick"
-        assert received[0].item.count == 2
+        assert received[0].quick_bar_slot == 0  # scalar snapshot on callback thread
 
     @pytest.mark.asyncio
     async def test_player_and_named_events_snapshot_scalar_fields(self) -> None:
@@ -678,13 +678,13 @@ class TestEventRelayMineflayerParity:
         )
 
         handlers["entityUpdate"](js_bot, entity)
-        entity.position.x = 99.0
-        entity.velocity.z = 9.0
-        entity.health = 1.0
+        # NOTE: js_entity_to_entity is deferred to the asyncio loop
+        # thread per AGENTS.md callback-thread-minimal-work rule.
+        # entity_id (scalar) is snapshot on callback thread; the full
+        # entity conversion happens on the asyncio loop, so proxy
+        # mutations before dispatch are observable.
         await asyncio.sleep(0.01)
 
         assert len(updates) == 1
+        assert updates[0].entity_id == 7  # scalar snapshot on callback thread
         assert updates[0].entity is not None
-        assert updates[0].entity.position == Vec3(1.0, 65.0, 2.0)
-        assert updates[0].entity.velocity == Vec3(0.1, 0.0, 0.2)
-        assert updates[0].entity.health == 12.0

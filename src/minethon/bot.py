@@ -51,11 +51,19 @@ from minethon._bridge.marshalling import (
     js_window_to_window_handle,
     villager_snapshot_to_session,
 )
-from minethon._bridge.plugin_host import PluginHost
+from minethon._bridge.plugin_registry import PluginRegistry
 from minethon._bridge.runtime import BridgeRuntime
+from minethon.api.armor import ArmorAPI
+from minethon.api.combat import CombatAPI
+from minethon.api.dashboard import DashboardAPI
+from minethon.api.gui import GuiAPI
+from minethon.api.inventory_viewer import InventoryViewerAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
+from minethon.api.panorama import PanoramaAPI
 from minethon.api.plugins import PluginAPI
+from minethon.api.tool import ToolAPI
+from minethon.api.viewer import ViewerAPI
 from minethon.config import BotConfig
 from minethon.models import Recipe, VillagerSession, WindowHandle
 from minethon.models.block import Block
@@ -206,8 +214,21 @@ class Bot:
         self._recipe_registry: dict[int, Any] = {}
         self._recipe_counter: int = 0
         self._resolved_username: str | None = None
-        self._plugin_host: PluginHost | None = None
+        self._registry: PluginRegistry | None = None
         self._navigation: NavigationAPI | None = None
+        self._armor: ArmorAPI | None = None
+        self._combat: CombatAPI | None = None
+        self._gui: GuiAPI | None = None
+        self._panorama: PanoramaAPI | None = None
+        self._dashboard: DashboardAPI | None = None
+        self._tool: ToolAPI | None = None
+        self._viewer_api: ViewerAPI | None = None
+        self._viewer_svc: Any = None  # _bridge.services.viewer.ViewerService
+        self._inv_viewer_api: InventoryViewerAPI | None = None
+        self._inv_viewer_svc: Any = (
+            None  # _bridge.services.web_inventory.WebInventoryService
+        )
+        self._plugins_api: PluginAPI | None = None
         self._on_end_handler: object | None = None
         # Serialize long-running operations that use global completion
         # events, preventing concurrent calls from stealing each other's
@@ -577,11 +598,16 @@ class Bot:
         self._controller = JSBotController(self._runtime, self._config)
         self._controller.create_bot()
 
-        self._plugin_host = PluginHost(self._runtime, self._controller.js_bot)
-        self._plugin_host.load_pathfinder()
-        self._navigation = NavigationAPI(
-            self._plugin_host, self._controller, self._relay
+        self._registry = PluginRegistry(
+            self._runtime,
+            self._controller.js_bot,
+            self._relay,
+            self._controller,
         )
+        self._registry.load("mineflayer-pathfinder")
+        pf = self._registry.get_pathfinder()
+        assert pf is not None  # just loaded above
+        self._navigation = NavigationAPI(pf, self._relay)
 
         self._relay.register_js_events(
             self._controller.js_bot,
@@ -625,14 +651,29 @@ class Bot:
             self._on_end_handler = None
         self._relay.reset()
         self._observe._reset_state()  # pyright: ignore[reportPrivateUsage]
-        if self._plugin_host is not None:
-            self._plugin_host.stop_pathfinder()
+        if self._viewer_svc is not None:
+            self._viewer_svc.stop()
+            self._viewer_svc = None
+            self._viewer_api = None
+        if self._inv_viewer_svc is not None:
+            self._inv_viewer_svc.force_stop()
+            self._inv_viewer_svc = None
+            self._inv_viewer_api = None
+        if self._registry is not None:
+            self._registry.teardown_all()
         if self._controller is not None:
             if self._connected:
                 self._controller.quit()
             self._controller = None
         self._navigation = None
-        self._plugin_host = None
+        self._armor = None
+        self._combat = None
+        self._gui = None
+        self._panorama = None
+        self._dashboard = None
+        self._tool = None
+        self._plugins_api = None
+        self._registry = None
         if self._runtime is not None:
             self._runtime.shutdown()
             self._runtime = None
@@ -648,8 +689,10 @@ class Bot:
         await self._observe.wait_for(SpawnEvent, timeout=timeout)
         self._spawned = True
         self._refresh_spawn_state_cache()
-        if self._plugin_host is not None:
-            self._plugin_host.setup_pathfinder_movements()
+        if self._registry is not None:
+            pf = self._registry.get_pathfinder()
+            if pf is not None and pf.is_loaded:
+                pf.setup_movements()
 
     # -- State properties --
 
@@ -1309,6 +1352,190 @@ class Bot:
         return self._navigation
 
     @property
+    def armor(self) -> ArmorAPI:
+        """Armor management API.
+
+        Requires ``mineflayer-armor-manager`` to be loaded first::
+
+            bot.plugins.load("mineflayer-armor-manager")
+            await bot.armor.equip_best()
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the armor-manager plugin is not loaded.
+
+        Ref: mineflayer-armor-manager/dist/index.js — ``bot.armorManager``
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._armor is not None:
+            return self._armor
+        bridge = self._registry.get_armor_manager()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "armor-manager plugin is not loaded. "
+                'Call bot.plugins.load("mineflayer-armor-manager") first.'
+            )
+        self._armor = ArmorAPI(bridge, self._relay)
+        return self._armor
+
+    @property
+    def gui(self) -> GuiAPI:
+        """GUI item management API (mineflayer-gui).
+
+        Provides convenience methods for clicking and dropping items
+        via the mineflayer-gui Query builder.
+
+        Requires ``mineflayer-gui`` to be loaded first::
+
+            bot.plugins.load("mineflayer-gui")
+            await bot.gui.click_item("diamond_sword")
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the gui plugin is not loaded.
+
+        Ref: mineflayer-gui/src/query.js — Query builder pattern
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._gui is not None:
+            return self._gui
+        bridge = self._registry.get_gui()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "gui plugin is not loaded. "
+                'Call bot.plugins.load("mineflayer-gui") first.'
+            )
+        self._gui = GuiAPI(bridge, self._relay)
+        return self._gui
+
+    @property
+    def dashboard(self) -> DashboardAPI:
+        """Dashboard terminal UI API.
+
+        Requires ``@ssmidge/mineflayer-dashboard`` to be loaded first::
+
+            bot.plugins.load("@ssmidge/mineflayer-dashboard")
+            bot.dashboard.log("Hello!")
+
+        .. warning:: **Experimental.** This plugin targets mineflayer
+           ^2.28.1 and uses blessed terminal UI which may conflict with
+           Python's stdout/stderr.
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the dashboard plugin is not loaded.
+
+        Ref: @ssmidge/mineflayer-dashboard/index.js — ``bot.dashboard``
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._dashboard is not None:
+            return self._dashboard
+        bridge = self._registry.get_dashboard()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "dashboard plugin is not loaded. "
+                'Call bot.plugins.load("@ssmidge/mineflayer-dashboard") first.'
+            )
+        self._dashboard = DashboardAPI(bridge)
+        return self._dashboard
+
+    @property
+    def combat(self) -> CombatAPI:
+        """Projectile combat API (minecrafthawkeye).
+
+        Requires ``minecrafthawkeye`` to be loaded first::
+
+            bot.plugins.load("minecrafthawkeye")
+            zombie = await bot.nearest_entity(name="zombie")
+            bot.combat.auto_attack(zombie)
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the hawkeye plugin is not loaded.
+
+        Ref: minecrafthawkeye/dist/hawkEye.js
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._combat is not None:
+            return self._combat
+        bridge = self._registry.get_hawkeye()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "hawkeye plugin is not loaded. "
+                'Call bot.plugins.load("minecrafthawkeye") first.'
+            )
+        self._combat = CombatAPI(bridge, self._relay)
+        return self._combat
+
+    @property
+    def hawkeye(self) -> CombatAPI:
+        """Alias for :attr:`combat`."""
+        return self.combat
+
+    @property
+    def panorama(self) -> PanoramaAPI:
+        """Panorama and image capture API.
+
+        .. warning:: **Experimental.** Requires native ``node-canvas-webgl``.
+           mineflayer-panorama 0.0.1 -- API may be unstable.
+
+        Requires ``mineflayer-panorama`` to be loaded first::
+
+            bot.plugins.load("mineflayer-panorama")
+            stream = await bot.panorama.raw_take_panorama()
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the panorama plugin is not loaded.
+
+        Ref: mineflayer-panorama/index.js
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._panorama is not None:
+            return self._panorama
+        bridge = self._registry.get_panorama()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "panorama plugin is not loaded. "
+                'Call bot.plugins.load("mineflayer-panorama") first.'
+            )
+        self._panorama = PanoramaAPI(bridge, self._relay)
+        return self._panorama
+
+    @property
+    def tool(self) -> ToolAPI:
+        """Tool-equip API (mineflayer-tool).
+
+        Requires ``mineflayer-tool`` to be loaded first::
+
+            bot.plugins.load("mineflayer-tool")
+            await bot.tool.equip_for_block(block)
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the tool plugin is not loaded.
+
+        Ref: mineflayer-tool/lib/Tool.js
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._tool is not None:
+            return self._tool
+        bridge = self._registry.get_tool()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "tool plugin is not loaded. "
+                'Call bot.plugins.load("mineflayer-tool") first.'
+            )
+        self._tool = ToolAPI(bridge, self._relay)
+        return self._tool
+
+    @property
     def observe(self) -> ObserveAPI:
         """Event subscription API."""
         return self._observe
@@ -1325,7 +1552,7 @@ class Bot:
         """
         ctrl = self._ensure_connected()
         plugin_loader = (
-            self._plugin_host.raw_plugin if self._plugin_host is not None else None
+            self._registry.raw_require if self._registry is not None else None
         )
         return RawBotHandle(
             ctrl.js_bot,
@@ -1340,9 +1567,59 @@ class Bot:
 
         Exposes only typed, supported plugin operations.
         """
-        if self._plugin_host is None:
+        if self._registry is None:
             raise MinethonConnectionError("Bot is not connected.")
-        return PluginAPI(self._plugin_host)
+        if self._plugins_api is None:
+            self._plugins_api = PluginAPI(self._registry)
+        return self._plugins_api
+
+    @property
+    def viewer(self) -> ViewerAPI:
+        """Web 3D viewer (prismarine-viewer).
+
+        Type B service -- lazy-initialized on first access.  Call
+        ``await bot.viewer.start()`` to launch the HTTP server and
+        ``bot.viewer.stop()`` to shut it down.  The viewer is
+        automatically stopped on ``disconnect()``.
+
+        Ref: prismarine-viewer/lib/mineflayer.js
+        """
+        ctrl = self._ensure_connected()
+        if self._viewer_api is None:
+            from minethon._bridge.services.viewer import ViewerService  # noqa: PLC0415
+
+            assert self._runtime is not None
+            self._viewer_svc = ViewerService(
+                self._runtime,
+                ctrl.js_bot,
+                self._relay,
+            )
+            self._viewer_api = ViewerAPI(self._viewer_svc)
+        return self._viewer_api
+
+    @property
+    def inventory_viewer(self) -> InventoryViewerAPI:
+        """Web inventory viewer (mineflayer-web-inventory).
+
+        Type B service -- lazily created on first access.
+        Call ``bot.inventory_viewer.initialize()`` before using
+        ``start()``/``stop()``.
+
+        Ref: mineflayer-web-inventory/index.js
+        """
+        ctrl = self._ensure_connected()
+        if self._inv_viewer_api is None:
+            from minethon._bridge.services.web_inventory import (  # noqa: PLC0415 — lazy to avoid circular import
+                WebInventoryService,
+            )
+
+            self._inv_viewer_svc = WebInventoryService(
+                self._runtime,  # type: ignore[arg-type]
+                ctrl.js_bot,
+                self._relay,
+            )
+            self._inv_viewer_api = InventoryViewerAPI(self._inv_viewer_svc)
+        return self._inv_viewer_api
 
     # -- Sleep / Wake --
 

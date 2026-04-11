@@ -3,14 +3,12 @@
 import asyncio
 from typing import TYPE_CHECKING
 
-from minethon.models.entity import EntityKind
 from minethon.models.errors import NavigationError
 from minethon.models.events import GoalFailedEvent, GoalReachedEvent
 
 if TYPE_CHECKING:
     from minethon._bridge.event_relay import EventRelay
-    from minethon._bridge.js_bot import JSBotController
-    from minethon._bridge.plugin_host import PluginHost
+    from minethon._bridge.plugins.pathfinder import PathfinderBridge
 
 
 class NavigationAPI:
@@ -27,12 +25,10 @@ class NavigationAPI:
 
     def __init__(
         self,
-        plugin_host: PluginHost,
-        controller: JSBotController,
+        pathfinder: PathfinderBridge,
         relay: EventRelay,
     ) -> None:
-        self._host = plugin_host
-        self._ctrl = controller
+        self._pf = pathfinder
         self._relay = relay
         self._navigating = False
         self._goto_futs: list[asyncio.Future[object]] = []
@@ -65,7 +61,7 @@ class NavigationAPI:
         )
         self._goto_futs = [reached_fut, failed_fut]
         try:
-            self._host.set_goal_near(x, y, z, radius)
+            self._pf.set_goal_near(x, y, z, radius)
 
             done, pending = await asyncio.wait(
                 [reached_fut, failed_fut],
@@ -85,7 +81,7 @@ class NavigationAPI:
                 exc = reached_fut.exception()
                 if exc is None:
                     return  # goal reached — success
-                self._host.stop_pathfinder()
+                self._pf.stop()
                 if isinstance(exc, asyncio.TimeoutError):
                     raise NavigationError("Navigation timed out") from exc
                 raise NavigationError(f"Navigation failed: {exc}") from exc
@@ -95,18 +91,18 @@ class NavigationAPI:
                     raise NavigationError("Navigation stopped")
                 exc = failed_fut.exception()
                 if exc is not None:
-                    self._host.stop_pathfinder()
+                    self._pf.stop()
                     if isinstance(exc, asyncio.TimeoutError):
                         raise NavigationError("Navigation timed out") from exc
                     raise NavigationError(f"Navigation failed: {exc}") from exc
                 result = failed_fut.result()
                 if isinstance(result, GoalFailedEvent):
-                    self._host.stop_pathfinder()
+                    self._pf.stop()
                     raise NavigationError(f"Navigation failed: {result.reason}")
         except BaseException:
             # Stop the underlying pathfinder goal so the bot doesn't
             # keep navigating after caller cancellation / other errors.
-            self._host.stop_pathfinder()
+            self._pf.stop()
             reached_fut.cancel()
             failed_fut.cancel()
             await asyncio.gather(reached_fut, failed_fut, return_exceptions=True)
@@ -131,10 +127,7 @@ class NavigationAPI:
         if self._navigating:
             await self.stop()
 
-        js_entity = self._ctrl.get_entity_by_filter(username, EntityKind.PLAYER, 1e6)
-        if js_entity is None:
-            raise NavigationError(f"Player '{username}' not found")
-        self._host.set_goal_follow(js_entity, distance)
+        self._pf.follow_player(username, distance)
         self._navigating = True
 
     async def stop(self) -> None:
@@ -143,7 +136,7 @@ class NavigationAPI:
         Cancels any in-flight ``goto()`` waiters so they unblock
         immediately instead of waiting until the timeout.
         """
-        self._host.stop_pathfinder()
+        self._pf.stop()
         for fut in self._goto_futs:
             if not fut.done():
                 fut.cancel()

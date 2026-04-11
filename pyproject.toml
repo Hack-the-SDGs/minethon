@@ -87,7 +87,9 @@ pylint.max-statements = 65
     "N806",    # JS camelCase local variables (e.g. displayName, tradeDisabled)
 ]
 # files outside _bridge/ that still interface directly with JS proxies
-"src/minethon/api/observe.py" = ["ANN401"]  # js_bot / on_fn params are JS proxies
+"src/minethon/api/observe.py" = ["ANN401"]   # js_bot / on_fn params are JS proxies
+"src/minethon/api/gui.py" = ["ANN401"]       # raw_query escape hatch returns JS proxy
+"src/minethon/api/panorama.py" = ["ANN401"]  # JPEG stream is a raw JS proxy
 "src/minethon/raw.py" = ["ANN401"]           # explicit raw escape hatch, Any by design
 "src/minethon/_bridge/runtime.py" = [
     "PLC0415", # delayed `import javascript` for conditional bridge loading
@@ -95,7 +97,6 @@ pylint.max-statements = 65
     "PLR2004", # magic value 22 for Node.js minimum version
 ]
 "src/minethon/_bridge/js_bot.py" = ["S110", "FBT003"]
-"src/minethon/_bridge/plugin_host.py" = ["FBT003"]
 
 # bot.py — large orchestration class with known structural exceptions
 "src/minethon/bot.py" = [

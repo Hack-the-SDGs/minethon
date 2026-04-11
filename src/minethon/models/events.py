@@ -841,3 +841,21 @@ class ParticleEvent:
     particle_name: str
     position: Vec3
     count: int
+
+
+# -- Combat (HawkEye) --
+
+
+@dataclass(frozen=True, slots=True)
+class AutoShotStoppedEvent:
+    """HawkEye auto-attack has stopped.
+
+    Emitted by the ``minecrafthawkeye`` plugin on the JS bot when
+    auto-attacking finishes (either because the target was hit or
+    auto-attack was cancelled).
+
+    Ref: minecrafthawkeye/dist/hawkEye.js — ``stop()`` emits
+         ``auto_shot_stopped``
+    """
+
+    target: Entity | None = None

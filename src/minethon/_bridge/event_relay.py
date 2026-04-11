@@ -10,6 +10,7 @@ from minethon._bridge._events import (
     ActivateBlockDoneEvent,
     ActivateEntityAtDoneEvent,
     ActivateEntityDoneEvent,
+    ArmorEquipDoneEvent,
     ChunksLoadedDoneEvent,
     ClickWindowDoneEvent,
     ConsumeDoneEvent,
@@ -22,6 +23,8 @@ from minethon._bridge._events import (
     ElytraFlyDoneEvent,
     EquipDoneEvent,
     FishDoneEvent,
+    GuiDropDoneEvent,
+    GuiQueryDoneEvent,
     LookAtDoneEvent,
     LookDoneEvent,
     MoveSlotItemDoneEvent,
@@ -30,25 +33,31 @@ from minethon._bridge._events import (
     OpenEnchantmentTableDoneEvent,
     OpenFurnaceDoneEvent,
     OpenVillagerDoneEvent,
+    PanoramaDoneEvent,
+    PictureDoneEvent,
     PlaceDoneEvent,
     PlaceEntityDoneEvent,
     PutAwayDoneEvent,
+    SimplyShotDoneEvent,
     SleepDoneEvent,
     TabCompleteDoneEvent,
+    ToolEquipDoneEvent,
     TossDoneEvent,
     TossStackDoneEvent,
     TradeDoneEvent,
     TransferDoneEvent,
     UnequipDoneEvent,
+    ViewerStartDoneEvent,
     WaitForTicksDoneEvent,
     WakeDoneEvent,
+    WebInvStartDoneEvent,
+    WebInvStopDoneEvent,
     WriteBookDoneEvent,
 )
 from minethon._bridge.marshalling import js_entity_to_entity, js_item_to_item_stack
 from minethon.models.events import (
-    # Chat/Message
     ActionBarEvent,
-    # Digging
+    AutoShotStoppedEvent,
     BlockBreakProgressEndEvent,
     BlockBreakProgressObservedEvent,
     # Block events
@@ -330,6 +339,22 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         "_minethon:creativeClearSlotDone",
         "_minethon:creativeClearInventoryDone",
         "_minethon:placeEntityDone",
+        "_minethon:armorEquipDone",
+        "_minethon:toolEquipDone",
+        # Panorama
+        "_minethon:panoramaDone",
+        "_minethon:pictureDone",
+        # HawkEye
+        "_minethon:simplyShotDone",
+        "auto_shot_stopped",
+        # Viewer service
+        "_minethon:viewerStartDone",
+        # Web inventory service
+        "_minethon:webInvStartDone",
+        "_minethon:webInvStopDone",
+        # GUI done events
+        "_minethon:guiQueryDone",
+        "_minethon:guiDropDone",
     }
 )
 
@@ -413,23 +438,40 @@ class EventRelay:
             *args: Any,
             include_entity: bool = False,
         ) -> None:
+            # Snapshot entity_id (scalar, cheap) on callback thread.
+            # Defer heavy js_entity_to_entity traversal to asyncio loop
+            # per AGENTS.md callback-thread-minimal-work rule.
             normalized = self._normalize_js_args(js_bot, args)
             entity = normalized[0] if normalized else None
             if entity is None:
                 return
             try:
-                payload: dict[str, Any] = {"entity_id": int(entity.id)}
-                if include_entity:
-                    payload["entity"] = js_entity_to_entity(entity)
-                self._post(event_type, event_type(**payload))
+                entity_id = int(entity.id)  # scalar — safe on callback thread
             except Exception:
                 _log.debug(
-                    "Failed to snapshot %s from JS entity payload",
+                    "Failed to snapshot %s entity_id",
                     event_type.__name__,
                     exc_info=True,
                 )
+                return
+            if not include_entity:
+                self._post(event_type, event_type(entity_id=entity_id))
+            else:
+                # Heavy conversion deferred to asyncio loop thread.
+                def _build_with_entity(*_norm: Any) -> object | None:
+                    ent = _norm[0] if _norm else None
+                    if ent is None:
+                        return None
+                    return event_type(
+                        entity_id=entity_id,
+                        entity=js_entity_to_entity(ent),
+                    )
+
+                self._post_built(js_bot, event_type, _build_with_entity, *args)
 
         def _post_player_event(event_type: type, *args: Any) -> None:
+            # All reads are scalar properties (username, uuid, ping, etc.)
+            # — safe on callback thread per AGENTS.md minimal-work rule.
             # Ref: mineflayer/docs/api.md — player object has
             # username, uuid, displayName, gamemode, ping, entity.
             normalized = self._normalize_js_args(js_bot, args)
@@ -701,25 +743,23 @@ class EventRelay:
 
         @on_fn(js_bot, "heldItemChanged")
         def _on_held_item_changed(*args: Any) -> None:
-            normalized = self._normalize_js_args(js_bot, args)
-            held_item = normalized[0] if normalized else None
+            # Snapshot quickBarSlot (scalar, cheap) on callback thread.
+            # Defer heavy js_item_to_item_stack traversal to asyncio loop
+            # per AGENTS.md callback-thread-minimal-work rule.
+            # Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
             try:
-                item = None if held_item is None else js_item_to_item_stack(held_item)
-                # Read quickBarSlot here on the JS callback thread so the
-                # asyncio handler doesn't need a bridge call.
-                # Ref: mineflayer/lib/plugins/inventory.js:43 — bot.quickBarSlot
                 slot = (
                     int(js_bot.quickBarSlot) if js_bot.quickBarSlot is not None else 0
                 )
-                self._post(
-                    HeldItemChangedEvent,
-                    HeldItemChangedEvent(item=item, quick_bar_slot=slot),
-                )
             except Exception:
-                _log.debug(
-                    "Failed to snapshot HeldItemChangedEvent from JS payload",
-                    exc_info=True,
-                )
+                slot = 0
+
+            def _build(*normalized: Any) -> HeldItemChangedEvent:
+                held_item = normalized[0] if normalized else None
+                item = None if held_item is None else js_item_to_item_stack(held_item)
+                return HeldItemChangedEvent(item=item, quick_bar_slot=slot)
+
+            self._post_built(js_bot, HeldItemChangedEvent, _build, *args)
 
         # ================================================================
         # Movement
@@ -1665,6 +1705,139 @@ class EventRelay:
 
             self._post_built(js_bot, PlaceEntityDoneEvent, builder, *args)
 
+        # -- Armor Manager done event --
+
+        @on_fn(js_bot, "_minethon:armorEquipDone")
+        def _on_armor_equip_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> ArmorEquipDoneEvent:
+                return ArmorEquipDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, ArmorEquipDoneEvent, builder, *args)
+
+        # -- Plugin: mineflayer-tool --
+
+        @on_fn(js_bot, "_minethon:toolEquipDone")
+        def _on_tool_equip_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> ToolEquipDoneEvent:
+                return ToolEquipDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, ToolEquipDoneEvent, builder, *args)
+
+        # -- Viewer service done event --
+
+        @on_fn(js_bot, "_minethon:viewerStartDone")
+        def _on_viewer_start_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> ViewerStartDoneEvent:
+                return ViewerStartDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, ViewerStartDoneEvent, builder, *args)
+
+        # -- Web inventory service done events --
+
+        @on_fn(js_bot, "_minethon:webInvStartDone")
+        def _on_web_inv_start_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> WebInvStartDoneEvent:
+                return WebInvStartDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, WebInvStartDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "_minethon:webInvStopDone")
+        def _on_web_inv_stop_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> WebInvStopDoneEvent:
+                return WebInvStopDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, WebInvStopDoneEvent, builder, *args)
+
+        # -- Panorama (mineflayer-panorama) --
+        # -- Panorama plugin done events --
+
+        @on_fn(js_bot, "_minethon:panoramaDone")
+        def _on_panorama_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> PanoramaDoneEvent:
+                return PanoramaDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=result,
+                )
+
+            self._post_built(js_bot, PanoramaDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "_minethon:pictureDone")
+        def _on_picture_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> PictureDoneEvent:
+                return PictureDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=result,
+                )
+
+            self._post_built(js_bot, PictureDoneEvent, builder, *args)
+
+        # -- HawkEye --
+
+        @on_fn(js_bot, "_minethon:simplyShotDone")
+        def _on_simply_shot_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> SimplyShotDoneEvent:
+                return SimplyShotDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, SimplyShotDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "auto_shot_stopped")
+        def _on_auto_shot_stopped(*args: Any) -> None:
+            def builder(*normalized: Any) -> AutoShotStoppedEvent:
+                target_js = normalized[0] if normalized else None
+                try:
+                    target = (
+                        js_entity_to_entity(target_js)
+                        if target_js is not None
+                        else None
+                    )
+                except Exception:
+                    target = None
+                return AutoShotStoppedEvent(target=target)
+
+            self._post_built(js_bot, AutoShotStoppedEvent, builder, *args)
+
+        # -- GUI (mineflayer-gui) done events --
+
+        @on_fn(js_bot, "_minethon:guiQueryDone")
+        def _on_gui_query_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> GuiQueryDoneEvent:
+                return GuiQueryDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=bool(result) if result is not None else False,
+                )
+
+            self._post_built(js_bot, GuiQueryDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "_minethon:guiDropDone")
+        def _on_gui_drop_done(*args: Any) -> None:
+            def builder(
+                error: Any | None = None, result: Any | None = None
+            ) -> GuiDropDoneEvent:
+                return GuiDropDoneEvent(
+                    error=str(error) if error is not None else None,
+                    result=bool(result) if result is not None else False,
+                )
+
+            self._post_built(js_bot, GuiDropDoneEvent, builder, *args)
+
         # ================================================================
         # Throttled high-frequency events (raw dispatch only)
         # ================================================================
@@ -1695,6 +1868,8 @@ class EventRelay:
                             _log.debug("Failed to snapshot move payload", exc_info=True)
                     elif evt == "entityMoved":
                         normalized = self._normalize_js_args(js_bot, _args)
+                        # Scalar reads (id, position.x/y/z) — safe on
+                        # callback thread per AGENTS.md minimal-work rule.
                         entity = normalized[0] if normalized else None
                         if entity is not None:
                             try:
@@ -1898,6 +2073,21 @@ class EventRelay:
                 _on_open_villager_done,
                 _on_tab_complete_done,
                 _on_place_entity_done,
+                # HawkEye
+                _on_simply_shot_done,
+                _on_auto_shot_stopped,
+                # Plugin done events (Phase 1a)
+                _on_armor_equip_done,
+                _on_tool_equip_done,
+                _on_viewer_start_done,
+                _on_web_inv_start_done,
+                _on_web_inv_stop_done,
+                # Panorama done events
+                _on_panorama_done,
+                _on_picture_done,
+                # GUI done events
+                _on_gui_query_done,
+                _on_gui_drop_done,
                 # Throttled
                 *throttled_handlers,
             ]

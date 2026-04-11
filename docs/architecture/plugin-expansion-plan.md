@@ -7,7 +7,7 @@
 
 1. [現狀評估](#1-現狀評估)
 2. [插件分類：四種整合模式](#2-插件分類四種整合模式)
-3. [Phase 0：最小 Registry 重構](#3-phase-0最小-registry-重構)
+3. [Phase 0：最小 Registry 重構（已完成）](#3-phase-0最小-registry-重構已完成)
 4. [各插件設計規格（Source-Verified）](#4-各插件設計規格source-verified)
 5. [Async 完成策略：Promise vs 自訂事件](#5-async-完成策略promise-vs-自訂事件)
 6. [版本相容性矩陣](#6-版本相容性矩陣)
@@ -34,11 +34,11 @@ Node 版本已對齊：AGENTS.md 和 runtime.py 都要求 Node.js 22+。
 
 零分歧。可直接從 main 開分支。
 
-### 1.3 `bot.raw.plugin()` 路徑
+### 1.3 `bot.raw.plugin()` 路徑（Phase 0 已完成）
 
-目前 `bot.raw` 的 `plugin_loader` 來自 `PluginHost.raw_plugin`
-（`bot.py:1311` → `plugin_host.py:121`）。Phase 0 刪除 `plugin_host.py` 時**必須**保留此路徑，
-改由 `PluginRegistry` 或 `BridgeRuntime.require()` 直接提供。
+`bot.raw` 的 `plugin_loader` 現在由 `PluginRegistry.raw_require()`
+（`plugin_registry.py`）提供，透過 `bot.py` 的 `raw` property 連接。
+舊的 `PluginHost` 已刪除。
 
 ---
 
@@ -108,67 +108,29 @@ Node 版本已對齊：AGENTS.md 和 runtime.py 都要求 Node.js 22+。
 
 ---
 
-## 3. Phase 0：最小 Registry 重構
+## 3. Phase 0：最小 Registry 重構（已完成）
 
-### 範圍（嚴格限縮）
+### 實際完成內容
 
-1. 新增 `_bridge/plugin_registry.py` + `_bridge/plugins/_base.py`
-2. 新增 `_bridge/plugins/pathfinder.py`（從 `plugin_host.py` 搬出）
-3. 修改 `bot.py`：connect/disconnect/wait_until_spawned 改用 registry
-4. 修改 `api/plugins.py`：改用 PluginRegistry
-5. 修改 `api/navigation.py`：接收 PathfinderBridge
-6. **保留 `bot.raw.plugin()` 路徑**：registry 內部透過 `runtime.require()` 實作
-7. 刪除 `plugin_host.py`
-8. 更新所有現有測試
-9. CI 全綠
+1. ✅ `_bridge/plugins/_base.py`：`PluginBridge` ABC
+2. ✅ `_bridge/plugins/pathfinder.py`：`PathfinderBridge`（含 `follow_player()` 使 raw entity lookup 留在 bridge 層）
+3. ✅ `_bridge/plugin_registry.py`：`PluginRegistry`（依賴解析、teardown、`raw_require`）
+4. ✅ `bot.py`：connect/disconnect/wait_until_spawned 改用 registry
+5. ✅ `api/plugins.py`：委派給 `PluginRegistry`
+6. ✅ `api/navigation.py`：只接收 `PathfinderBridge` + `EventRelay`，不持有 `JSBotController`
+7. ✅ `bot.raw.plugin()` 路徑：透過 `registry.raw_require()` 實作
+8. ✅ 刪除 `plugin_host.py` + 相關 pyproject.toml per-file ignore
+9. ✅ 新增 `test_pathfinder_bridge.py` + `test_plugin_registry.py`，更新所有既有測試
+10. ✅ 183 unit tests pass, ruff clean
 
-### PluginBridge ABC（修正版）
+### PluginBridge ABC
 
-```python
-class PluginBridge(ABC):
-    """Base class for Type A (bot.loadPlugin) plugin bridges."""
-    NPM_NAME: ClassVar[str]
-    DEPENDS_ON: ClassVar[tuple[str, ...]] = ()
-
-    def __init__(self, runtime: BridgeRuntime, js_bot: Any, relay: EventRelay) -> None:
-        self._runtime = runtime
-        self._js_bot = js_bot
-        self._relay = relay
-        self._loaded = False
-
-    @property
-    def is_loaded(self) -> bool:
-        return self._loaded
-
-    @abstractmethod
-    def _do_load(self) -> None: ...
-
-    def load(self) -> None:
-        if self._loaded:
-            return
-        self._do_load()
-        self._loaded = True
-
-    def teardown(self) -> None:
-        """Override for cleanup on disconnect."""
-```
+見 `_bridge/plugins/_base.py`。
 
 **不強制 `setup_after_spawn()`**。
 原審閱正確指出：armor-manager（`dist/index.js:17`）和 collectblock（`lib/CollectBlock.js:186`）
 都不需要 spawn 後初始化。只有 pathfinder 的 `Movements` 需要 spawn 後設定（因為讀 `bot.registry`），
 這是 pathfinder 自己的特殊邏輯，不應泛化成 ABC 的 hook。
-
-### `bot.raw.plugin()` 保留策略
-
-```python
-# bot.py — raw property 改為：
-plugin_loader = self._registry.raw_require if self._registry else None
-
-# plugin_registry.py
-def raw_require(self, name: str) -> Any:
-    """Escape hatch: load any npm module. Replaces old PluginHost.raw_plugin()."""
-    return self._runtime.require(name)
-```
 
 ### 兩套管理路徑
 
@@ -177,11 +139,15 @@ def raw_require(self, name: str) -> Any:
 - 負責依賴解析、lifecycle、teardown
 - 不涵蓋 service 類
 
-**`bot.<service>` lazy property** — 管理 Type B / Type C（server / class library）
-- viewer、web-inventory、panorama 透過 `bot.viewer`、`bot.inventory_viewer`、`bot.panorama` lazy 建立
+**`bot.<service>` lazy property** — 管理 Type B（server / service）
+- viewer、web-inventory 透過 `bot.viewer`、`bot.inventory_viewer` lazy 建立
 - 不走 `bot.plugins.load()`，各自有 `start()`/`stop()` 生命週期
-- statemachine 的 raw access 走 `bot.raw.plugin("mineflayer-statemachine")`，不另設 `require_module()`
 - Service 的 teardown 由 `Bot.disconnect()` 統一呼叫
+
+**注意**：panorama 是 Type A（`bot.loadPlugin(mod.panoramaImage)`），走 `PluginRegistry`，
+不走 service lazy property。先前 §3 將其列入 service 路徑是矛盾的，已修正。
+
+**Type C（class library）**：statemachine 走 `bot.raw.plugin("mineflayer-statemachine")`
 
 ---
 
@@ -464,27 +430,18 @@ Events: bot.viewer.emit('blockClicked', block, face, button)
 依賴: 無
 ```
 
-**Bridge（Type B — 不繼承 PluginBridge）：**
-```python
-class ViewerService:
-    """Web 3D viewer. Not a bot.loadPlugin() plugin — standalone service."""
-    def __init__(self, runtime, js_bot):
-        self._runtime = runtime
-        self._js_bot = js_bot
-        self._started = False
+**Bridge（Type B — 不繼承 PluginBridge，已實作）：**
 
-    def start(self, port: int = 3007, view_distance: int = 6, first_person: bool = False):
-        mod = self._runtime.require("prismarine-viewer")
-        mod.mineflayer(self._js_bot, {
-            "viewDistance": view_distance, "firstPerson": first_person, "port": port
-        })
-        self._started = True
+見 `_bridge/services/viewer.py`。
 
-    def stop(self):
-        if self._started:
-            self._js_bot.viewer.close()
-            self._started = False
-```
+- `__init__` 接收 `runtime`, `js_bot`, `relay`
+- `async start()` 透過 `helpers.startViewer(bot, viewerFn, opts)` 啟動，
+  `viewerFn` 由 Python 端 `runtime.require("prismarine-viewer").mineflayer` 預先解析，
+  不在 repo-local helpers.js 內直接 `require()`。
+  啟動後 await `ViewerStartDoneEvent` 確認 sync 錯誤；
+  **已知限制**：`EADDRINUSE` 等 async bind error 無法偵測（upstream API 不暴露 HTTP server）
+- `stop()` 同步呼叫 `bot.viewer.close()`，best-effort
+- 公開路徑：`bot.viewer`（lazy property）
 
 ### 4.7 web-inventory
 
@@ -503,42 +460,20 @@ Events: 無（Socket.IO 內部處理）
 依賴: 無
 ```
 
-**Bridge（Type B）：**
-```python
-class WebInventoryService:
-    """Web inventory viewer. Port fixed at init time."""
-    def __init__(self, runtime, js_bot):
-        self._runtime = runtime
-        self._js_bot = js_bot
-        self._initialized = False
+**Bridge（Type B — 已實作）：**
 
-    def init_and_start(self, port: int = 3008):
-        """Initialize with port and start. Port cannot be changed after init."""
-        mod = self._runtime.require("mineflayer-web-inventory")
-        mod(self._js_bot, {"port": port, "startOnLoad": True})
-        self._initialized = True
+見 `_bridge/services/web_inventory.py`。
 
-    def init_without_start(self, port: int = 3008):
-        """Initialize with port but don't start."""
-        mod = self._runtime.require("mineflayer-web-inventory")
-        mod(self._js_bot, {"port": port, "startOnLoad": False})
-        self._initialized = True
+- `__init__` 接收 `runtime`, `js_bot`, `relay`
+- `async initialize(port=3008)` — 呼叫 JS module，**固定 `startOnLoad=False`**，
+  不自動啟動 HTTP server。Port 在此時固定
+- `async start()` — 透過 `helpers.startWebInventory()` + `WebInvStartDoneEvent` 確認成功
+- `async stop()` — 透過 `helpers.stopWebInventory()` + `WebInvStopDoneEvent` 確認成功
+- `force_stop()` — sync best-effort teardown，用於 `Bot.disconnect()`
+- 公開路徑：`bot.inventory_viewer`（lazy property）
 
-    def start_server(self) -> None:
-        """Non-blocking: triggers start; resolves via _minethon:webInvStartDone."""
-        self._helpers.startWebInventory(self._js_bot)
-
-    def stop_server(self) -> None:
-        """Non-blocking: triggers stop; resolves via _minethon:webInvStopDone."""
-        self._helpers.stopWebInventory(self._js_bot)
-
-    # Caller (bridge/service layer):
-    # async def start(self) -> None:
-    #     self._bridge.start_server()
-    #     event = await self._relay.wait_for(WebInvStartDoneEvent, timeout=10.0)
-    #     if event.error is not None:
-    #         raise BridgeError(f"web-inventory start failed: {event.error}")
-```
+`Bot.disconnect()` 會呼叫 `force_stop()` 做明確清理（fire-and-forget JS stop + reset Python state），
+不依賴 upstream plugin 的 `bot.once('end', stop)` 作為唯一收尾機制。
 
 ### 4.8 statemachine
 
@@ -707,7 +642,7 @@ class PanoramaBridge(PluginBridge):
 | hawkeye | `autoAttack()` → boolean (sync) | 同步呼叫，不需要 helpers.js wrapper |
 | hawkeye | `bot.emit('auto_shot_stopped')` | bind_raw_js_event 監聽 |
 | web-inventory | `start()`/`stop()` → Promise | helpers.js wrapper + `_minethon:webInvStartDone` / `webInvStopDone` |
-| viewer | sync void | 同步呼叫，無需等待 |
+| viewer | `mineflayer()` sync（http.listen async） | helpers.js wrapper + `_minethon:viewerStartDone`；**已知限制**：EADDRINUSE 等 async bind error 無法偵測（upstream 不暴露 http server） |
 | panorama | `takePanoramaPictures()` → Promise\<Stream\> | helpers.js wrapper + `_minethon:panoramaDone`（帶 result） |
 | statemachine | EventEmitter `stateChanged` | bind_raw_js_event 或 raw 操作 |
 
@@ -720,26 +655,30 @@ hawkeye 的 `auto_shot_stopped` 和 collectblock 的 `collectBlock_finished` 是
 
 ## 6. 版本相容性矩陣
 
-| 插件 | 版本 | mineflayer 相容 | Node engines | 風險 |
-|------|------|-----------------|-------------|------|
-| armor-manager | 2.0.1 | peer: ^4.10.0 | >=18 | 低 |
-| tool | 1.2.0 | 無宣告 | 無宣告 | 低 |
-| collectblock | 1.6.0 | 無宣告 | 無宣告 | 低 |
-| gui | 4.0.2 | 無宣告 | 無宣告 | 中（comparator 橋接） |
-| hawkeye | 1.3.9 | dev: ^4.20.1 | 無宣告 | 低 |
-| statemachine | 1.7.0 | 無宣告 | 無宣告 | 高（callable 橋接） |
-| web-inventory | 1.8.5 | dev: ^4.20.0 | 無宣告 | 低 |
-| prismarine-viewer | 1.33.0 | dev: ^4.0.0 | 無宣告 | 低 |
-| **dashboard** | **2.0.0** | **dev: ^2.28.1** | >=12 | **高（大版本差距）** |
-| **panorama** | **0.0.1** | dev: ^4.3.0 | 無宣告 | **高（native 依賴 + 早期版本）** |
+| 插件 | 版本 | mineflayer 依賴 | 其他特殊依賴 | Node engines | 風險 |
+|------|------|-----------------|-------------|-------------|------|
+| armor-manager | 2.0.1 | peer: ^4.10.0 | — | >=18 | 低 |
+| tool | 1.2.0 | dep: ^4.0.0 | pathfinder ^2.1.1 | 無宣告 | 低 |
+| collectblock | 1.6.0 | dep: ^4.0.0 | pathfinder ^2.1.1, tool ^1.1.0 | 無宣告 | 低 |
+| gui | 4.0.2 | 無宣告 | — | 無宣告 | 中（comparator 橋接） |
+| hawkeye | 1.3.9 | dev: ^4.20.1 | — | 無宣告 | 低 |
+| **statemachine** | **1.7.0** | **dep: ^4.4.0** | **node: ^19.1.0（異常）**, pathfinder ^2.3.1 | 無宣告 | **高（callable 橋接 + node 依賴異常）** |
+| web-inventory | 1.8.5 | dev: ^4.20.0 | — | 無宣告 | 低 |
+| prismarine-viewer | 1.33.0 | dev: ^4.0.0 | — | 無宣告 | 低 |
+| **dashboard** | **2.0.0** | **dev: ^2.28.1** | — | >=12 | **高（大版本差距）** |
+| **panorama** | **0.0.1** | dev: ^4.3.0 | node-canvas-webgl（native） | 無宣告 | **高（native 依賴 + 早期版本）** |
+
+> **注意**：tool 和 collectblock 的 mineflayer 依賴是 direct dependency（`dependencies`），
+> 不是 peer 或 dev。statemachine 的 `node: ^19.1.0` 出現在 `dependencies` 裡是異常的
+> （npm package 不應直接依賴 `node` 包），需要在 spike 時確認這是否影響 runtime。
 
 ---
 
 ## 7. 分支策略與合併計畫
 
-### Phase 0：`refactor/plugin-registry`（先 merge）
+### Phase 0：`refactor/plugin-registry`（已完成）
 
-範圍：§3 所述最小重構。CI 全綠後 merge 到 main。
+見 §3。已在 `refactor/plugin-registry` 分支完成，待 merge 到 main。
 
 ### Phase 1a：主線插件（並行開發）
 
@@ -759,16 +698,16 @@ plugin/web-inventory      ← Type B, 中等
 plugin/collectblock       ← Type A, 依賴 tool（雖然內部軟載入，但測試需要 tool bridge 存在）
 ```
 
-### Phase 2：需要 spike 的插件（不直接排進主線）
+### Phase 2：spike 完成，已接入
 
-```
-spike/gui                 ← 需確認 JS comparator 橋接可行性
-spike/statemachine        ← 需確認 Python callable 當 shouldTransition 的可行性
-spike/dashboard           ← 需確認 blessed terminal 與 Python stdout 相容性
-spike/panorama            ← 需確認 node-canvas-webgl native build 在 CI 環境可行性
-```
+| 插件 | 狀態 | 說明 |
+|------|------|------|
+| gui | **stable** | Type A，JS comparator 橋接已解決，`bot.gui` |
+| dashboard | **experimental** | Type D (HOF)，upstream 鎖 `mineflayer ^2.28.1`，blessed terminal 相容性未實際驗證，`bot.dashboard` |
+| panorama | **experimental** | Type A，需 native `node-canvas-webgl`，v0.0.1，capture 方法為 raw escape hatch（`raw_take_panorama` / `raw_take_picture`），`bot.panorama` |
+| statemachine | **raw-only** | Type C，`shouldTransition` 每 tick 呼叫 callable 跨 bridge 風險仍在，僅 `bot.raw.plugin("mineflayer-statemachine")` |
 
-Spike 結果決定後才開正式 `plugin/*` 分支。
+Phase 2 已於 2026-04-11 完成並合入 dev。
 
 ### 衝突最小化
 
@@ -794,6 +733,13 @@ Spike 結果決定後才開正式 `plugin/*` 分支。
 | 2026-04-11 | Public API 層不直接碰 `_js_bot` — 一律透過 bridge method |
 | 2026-04-11 | PluginRegistry 只管 Type A/D；Type B/C 用 bot lazy property，不走 `bot.plugins.load()` |
 | 2026-04-11 | statemachine raw fallback 走 `bot.raw.plugin()`，不另設 `require_module()` |
+| 2026-04-11 | Phase 0 完成 — `PluginHost` 已刪除，`PluginRegistry` + `PathfinderBridge` 已落地 |
+| 2026-04-11 | `NavigationAPI` 不持有 `JSBotController` — entity lookup 下沉到 `PathfinderBridge.follow_player()` |
+| 2026-04-11 | panorama 歸類修正：Type A（走 `PluginRegistry`），不走 service lazy property |
+| 2026-04-11 | 版本矩陣修正：tool/collectblock 為 direct dep `^4.0.0`；statemachine 有異常 `node: ^19.1.0` 依賴 |
+| 2026-04-11 | Phase 2 完成：gui=stable、dashboard=experimental、panorama=experimental、statemachine=raw-only |
+| 2026-04-11 | PanoramaAPI capture 方法改為明確 raw escape hatch（`raw_take_panorama` / `raw_take_picture`）— 回傳 JS proxy 必須標示 raw |
+| 2026-04-11 | Type B 服務改用 `api/` public wrapper（`ViewerAPI`、`InventoryViewerAPI`），`Bot` 不再直接暴露 `_bridge` 類型 |
 
 ---
 
