@@ -87,13 +87,6 @@ class ToolBridge(PluginBridge):
             raise BridgeError(
                 f"start_equip_for_block failed: no block at ({x}, {y}, {z})"
             )
-        try:
-            options = {"requireHarvest": require_harvest}
-            self._controller._helpers.startToolEquipForBlock(
-                self._js_bot, js_block, options,
-            )
-        except Exception as exc:
-            raise BridgeError(
-                f"start_equip_for_block failed: {exc}",
-                js_stack=extract_js_stack(exc),
-            ) from exc
+        self._controller.start_tool_equip_for_block(
+            js_block, require_harvest=require_harvest,
+        )

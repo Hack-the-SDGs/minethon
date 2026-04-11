@@ -1,15 +1,17 @@
 """Typed public API for the mineflayer-tool plugin."""
 
+from __future__ import annotations
+
 import asyncio
 from typing import TYPE_CHECKING
 
 from minethon._bridge._events import ToolEquipDoneEvent
-from minethon.models.block import Block
 from minethon.models.errors import BridgeError
 
 if TYPE_CHECKING:
     from minethon._bridge.event_relay import EventRelay
     from minethon._bridge.plugins.tool_plugin import ToolBridge
+    from minethon.models.block import Block
 
 
 class ToolAPI:

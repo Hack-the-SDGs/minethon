@@ -1366,6 +1366,28 @@ class JSBotController:
                 f"start_place_entity failed: {exc}", js_stack=extract_js_stack(exc)
             ) from exc
 
+    # -- Plugin: mineflayer-tool --
+
+    def start_tool_equip_for_block(
+        self, js_block: Any, *, require_harvest: bool = False,
+    ) -> None:
+        """Start equipping the best tool for a block without blocking.
+
+        Completion via ``_minethon:toolEquipDone``.
+
+        Ref: mineflayer-tool/lib/Tool.js — ``equipForBlock``
+        """
+        try:
+            options = {"requireHarvest": require_harvest}
+            self._helpers.startToolEquipForBlock(
+                self._js_bot, js_block, options,
+            )
+        except Exception as exc:
+            raise BridgeError(
+                f"start_tool_equip_for_block failed: {exc}",
+                js_stack=extract_js_stack(exc),
+            ) from exc
+
     # -- Lifecycle --
 
     def quit(self) -> None:

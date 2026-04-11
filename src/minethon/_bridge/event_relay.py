@@ -34,8 +34,8 @@ from minethon._bridge._events import (
     PlaceEntityDoneEvent,
     PutAwayDoneEvent,
     SleepDoneEvent,
-    ToolEquipDoneEvent,
     TabCompleteDoneEvent,
+    ToolEquipDoneEvent,
     TossDoneEvent,
     TossStackDoneEvent,
     TradeDoneEvent,
@@ -331,7 +331,6 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         "_minethon:creativeClearSlotDone",
         "_minethon:creativeClearInventoryDone",
         "_minethon:placeEntityDone",
-        # Plugin: mineflayer-tool
         "_minethon:toolEquipDone",
     }
 )
