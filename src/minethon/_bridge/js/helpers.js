@@ -306,6 +306,14 @@ module.exports = {
             .catch(err => bot.emit("_minethon:toolEquipDone", _err(err)));
     },
 
+    // -- HawkEye (minecrafthawkeye) --
+
+    startSimplyShot(bot, yaw, pitch) {
+        bot.hawkEye.simplyShot(yaw, pitch)
+            .then(() => bot.emit("_minethon:simplyShotDone"))
+            .catch(err => bot.emit("_minethon:simplyShotDone", _err(err)));
+    },
+
     // -- Web Inventory Service (Type B) --
 
     startWebInventory(bot) {

@@ -34,6 +34,7 @@ from minethon._bridge._events import (
     PlaceDoneEvent,
     PlaceEntityDoneEvent,
     PutAwayDoneEvent,
+    SimplyShotDoneEvent,
     SleepDoneEvent,
     TabCompleteDoneEvent,
     ToolEquipDoneEvent,
@@ -50,9 +51,8 @@ from minethon._bridge._events import (
 )
 from minethon._bridge.marshalling import js_entity_to_entity, js_item_to_item_stack
 from minethon.models.events import (
-    # Chat/Message
     ActionBarEvent,
-    # Digging
+    AutoShotStoppedEvent,
     BlockBreakProgressEndEvent,
     BlockBreakProgressObservedEvent,
     # Block events
@@ -336,6 +336,9 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         "_minethon:placeEntityDone",
         "_minethon:armorEquipDone",
         "_minethon:toolEquipDone",
+        # HawkEye
+        "_minethon:simplyShotDone",
+        "auto_shot_stopped",
         # Web inventory service
         "_minethon:webInvStartDone",
         "_minethon:webInvStopDone",
@@ -1716,6 +1719,33 @@ class EventRelay:
 
             self._post_built(js_bot, WebInvStopDoneEvent, builder, *args)
 
+        # -- HawkEye --
+
+        @on_fn(js_bot, "_minethon:simplyShotDone")
+        def _on_simply_shot_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> SimplyShotDoneEvent:
+                return SimplyShotDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, SimplyShotDoneEvent, builder, *args)
+
+        @on_fn(js_bot, "auto_shot_stopped")
+        def _on_auto_shot_stopped(*args: Any) -> None:
+            normalized = self._normalize_js_args(js_bot, args)
+            target_js = normalized[0] if normalized else None
+            try:
+                target = (
+                    js_entity_to_entity(target_js)
+                    if target_js is not None
+                    else None
+                )
+            except Exception:
+                target = None
+            self._post(
+                AutoShotStoppedEvent, AutoShotStoppedEvent(target=target)
+            )
+
         # ================================================================
         # Throttled high-frequency events (raw dispatch only)
         # ================================================================
@@ -1949,6 +1979,9 @@ class EventRelay:
                 _on_open_villager_done,
                 _on_tab_complete_done,
                 _on_place_entity_done,
+                # HawkEye
+                _on_simply_shot_done,
+                _on_auto_shot_stopped,
                 # Throttled
                 *throttled_handlers,
             ]

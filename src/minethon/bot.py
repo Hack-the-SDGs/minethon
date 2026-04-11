@@ -56,6 +56,7 @@ from minethon._bridge.runtime import BridgeRuntime
 from minethon._bridge.services.viewer import ViewerService
 from minethon._bridge.services.web_inventory import WebInventoryService
 from minethon.api.armor import ArmorAPI
+from minethon.api.combat import CombatAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.plugins import PluginAPI
@@ -213,6 +214,7 @@ class Bot:
         self._registry: PluginRegistry | None = None
         self._navigation: NavigationAPI | None = None
         self._armor: ArmorAPI | None = None
+        self._combat: CombatAPI | None = None
         self._tool: ToolAPI | None = None
         self._viewer_service: ViewerService | None = None
         self._web_inventory_service: WebInventoryService | None = None
@@ -655,6 +657,7 @@ class Bot:
             self._controller = None
         self._navigation = None
         self._armor = None
+        self._combat = None
         self._tool = None
         self._registry = None
         if self._runtime is not None:
@@ -1361,6 +1364,35 @@ class Bot:
             )
         self._armor = ArmorAPI(bridge, self._relay)
         return self._armor
+
+    @property
+    def combat(self) -> CombatAPI:
+        """Projectile combat API (minecrafthawkeye).
+
+        Requires ``minecrafthawkeye`` to be loaded first::
+
+            await bot.plugins.load("minecrafthawkeye")
+            zombie = await bot.nearest_entity(name="zombie")
+            bot.combat.auto_attack(zombie)
+
+        Raises:
+            MinethonConnectionError: If the bot is not connected.
+            BridgeError: If the hawkeye plugin is not loaded.
+
+        Ref: minecrafthawkeye/dist/hawkEye.js
+        """
+        if self._registry is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        if self._combat is not None:
+            return self._combat
+        bridge = self._registry.get_hawkeye()
+        if bridge is None or not bridge.is_loaded:
+            raise BridgeError(
+                "hawkeye plugin is not loaded. "
+                'Call await bot.plugins.load("minecrafthawkeye") first.'
+            )
+        self._combat = CombatAPI(bridge, self._relay)
+        return self._combat
 
     @property
     def tool(self) -> ToolAPI:

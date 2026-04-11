@@ -335,6 +335,16 @@ class ToolEquipDoneEvent:
     error: str | None = None
 
 
+# -- HawkEye --
+
+
+@dataclass(frozen=True, slots=True)
+class SimplyShotDoneEvent:
+    """SimplyShot operation finished."""
+
+    error: str | None = None
+
+
 # -- Web inventory service --
 
 

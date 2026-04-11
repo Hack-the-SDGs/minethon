@@ -1,6 +1,7 @@
 """minethon -- A Python-first Mineflayer SDK."""
 
 from minethon.api.armor import ArmorAPI
+from minethon.api.combat import CombatAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.plugins import PluginAPI
@@ -18,6 +19,7 @@ from minethon.models.errors import (
     PluginError,
 )
 from minethon.models.events import (
+    AutoShotStoppedEvent,
     BlockBrokenEvent,
     ChatEvent,
     CollectCompletedEvent,
@@ -37,17 +39,20 @@ from minethon.models.player_info import PlayerInfo
 from minethon.models.recipe import Recipe
 from minethon.models.time_state import TimeState
 from minethon.models.vec3 import Vec3
+from minethon.models.weapon import Weapon
 from minethon.models.window import TradeOffer, VillagerSession, WindowHandle
 from minethon.raw import RawBotHandle
 
 __all__ = [
     "ArmorAPI",
+    "AutoShotStoppedEvent",
     "Block",
     "BlockBrokenEvent",
     "Bot",
     "BridgeError",
     "ChatEvent",
     "CollectCompletedEvent",
+    "CombatAPI",
     "DeathEvent",
     "EndEvent",
     "Entity",
@@ -77,6 +82,7 @@ __all__ = [
     "TradeOffer",
     "Vec3",
     "VillagerSession",
+    "Weapon",
     "WhisperEvent",
     "WindowHandle",
 ]
