@@ -36,6 +36,7 @@ from minethon._bridge._events import (
     PutAwayDoneEvent,
     SleepDoneEvent,
     TabCompleteDoneEvent,
+    ToolEquipDoneEvent,
     TossDoneEvent,
     TossStackDoneEvent,
     TradeDoneEvent,
@@ -332,6 +333,7 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         "_minethon:creativeClearInventoryDone",
         "_minethon:placeEntityDone",
         "_minethon:armorEquipDone",
+        "_minethon:toolEquipDone",
     }
 )
 
@@ -1677,6 +1679,17 @@ class EventRelay:
                 )
 
             self._post_built(js_bot, ArmorEquipDoneEvent, builder, *args)
+
+        # -- Plugin: mineflayer-tool --
+
+        @on_fn(js_bot, "_minethon:toolEquipDone")
+        def _on_tool_equip_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> ToolEquipDoneEvent:
+                return ToolEquipDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, ToolEquipDoneEvent, builder, *args)
 
         # ================================================================
         # Throttled high-frequency events (raw dispatch only)

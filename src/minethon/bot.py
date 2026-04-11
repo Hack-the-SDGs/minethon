@@ -57,6 +57,7 @@ from minethon.api.armor import ArmorAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
 from minethon.api.plugins import PluginAPI
+from minethon.api.tool import ToolAPI
 from minethon.config import BotConfig
 from minethon.models import Recipe, VillagerSession, WindowHandle
 from minethon.models.block import Block
@@ -210,6 +211,7 @@ class Bot:
         self._registry: PluginRegistry | None = None
         self._navigation: NavigationAPI | None = None
         self._armor: ArmorAPI | None = None
+        self._tool: ToolAPI | None = None
         self._on_end_handler: object | None = None
         # Serialize long-running operations that use global completion
         # events, preventing concurrent calls from stealing each other's
@@ -588,6 +590,11 @@ class Bot:
         assert pf is not None  # just loaded above
         self._navigation = NavigationAPI(pf, self._relay)
 
+        self._registry.load("mineflayer-tool")
+        tool_bridge = self._registry.get_tool()
+        assert tool_bridge is not None  # just loaded above
+        self._tool = ToolAPI(tool_bridge, self._relay)
+
         self._relay.register_js_events(
             self._controller.js_bot,
             self._runtime.js_module.On,
@@ -638,6 +645,7 @@ class Bot:
             self._controller = None
         self._navigation = None
         self._armor = None
+        self._tool = None
         self._registry = None
         if self._runtime is not None:
             self._runtime.shutdown()
@@ -1343,6 +1351,16 @@ class Bot:
             )
         self._armor = ArmorAPI(bridge, self._relay)
         return self._armor
+
+    @property
+    def tool(self) -> ToolAPI:
+        """Tool-equip API (mineflayer-tool).
+
+        Ref: mineflayer-tool/lib/Tool.js
+        """
+        if self._tool is None:
+            raise MinethonConnectionError("Bot is not connected.")
+        return self._tool
 
     @property
     def observe(self) -> ObserveAPI:
