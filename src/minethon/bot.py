@@ -44,6 +44,7 @@ from minethon._bridge._events import (
 )
 from minethon._bridge.event_relay import EventRelay
 from minethon._bridge.js_bot import JSBotController
+from minethon._bridge.services.web_inventory import WebInventoryService
 from minethon._bridge.marshalling import (
     js_block_to_block,
     js_entity_to_entity,
@@ -208,6 +209,7 @@ class Bot:
         self._resolved_username: str | None = None
         self._plugin_host: PluginHost | None = None
         self._navigation: NavigationAPI | None = None
+        self._web_inventory_service: WebInventoryService | None = None
         self._on_end_handler: object | None = None
         # Serialize long-running operations that use global completion
         # events, preventing concurrent calls from stealing each other's
@@ -625,6 +627,9 @@ class Bot:
             self._on_end_handler = None
         self._relay.reset()
         self._observe._reset_state()  # pyright: ignore[reportPrivateUsage]
+        if self._web_inventory_service is not None:
+            # Best-effort cleanup; service state is discarded on disconnect.
+            self._web_inventory_service = None
         if self._plugin_host is not None:
             self._plugin_host.stop_pathfinder()
         if self._controller is not None:
@@ -1343,6 +1348,25 @@ class Bot:
         if self._plugin_host is None:
             raise MinethonConnectionError("Bot is not connected.")
         return PluginAPI(self._plugin_host)
+
+    @property
+    def web_inventory(self) -> WebInventoryService:
+        """Web inventory viewer (mineflayer-web-inventory).
+
+        Type B service -- lazily created on first access.
+        Call ``await bot.web_inventory.initialize()`` before using
+        ``start()``/``stop()``.
+
+        Ref: mineflayer-web-inventory/index.js
+        """
+        ctrl = self._ensure_connected()
+        if self._web_inventory_service is None:
+            self._web_inventory_service = WebInventoryService(
+                self._runtime,  # type: ignore[arg-type]
+                ctrl.js_bot,
+                self._relay,
+            )
+        return self._web_inventory_service
 
     # -- Sleep / Wake --
 
