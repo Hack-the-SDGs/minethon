@@ -95,7 +95,6 @@ pylint.max-statements = 65
     "PLR2004", # magic value 22 for Node.js minimum version
 ]
 "src/minethon/_bridge/js_bot.py" = ["S110", "FBT003"]
-"src/minethon/_bridge/plugin_host.py" = ["FBT003"]
 
 # bot.py — large orchestration class with known structural exceptions
 "src/minethon/bot.py" = [

@@ -18,7 +18,7 @@ class TestPluginRegistryBasics:
         relay = MagicMock()
         pf_mod = MagicMock()
         runtime.require.return_value = pf_mod
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         return registry, runtime, js_bot
 
     def test_supported_includes_pathfinder(self) -> None:
@@ -59,7 +59,7 @@ class TestPluginRegistryGetPathfinder:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.return_value = MagicMock()
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         pf = registry.get_pathfinder()
         assert isinstance(pf, PathfinderBridge)
 
@@ -68,7 +68,7 @@ class TestPluginRegistryGetPathfinder:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.return_value = MagicMock()
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         bridge = registry.get("mineflayer-pathfinder")
         assert isinstance(bridge, PathfinderBridge)
 
@@ -77,7 +77,7 @@ class TestPluginRegistryGetPathfinder:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.return_value = MagicMock()
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         assert registry.get("nonexistent") is None
 
 
@@ -89,7 +89,7 @@ class TestPluginRegistryTeardown:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.return_value = MagicMock()
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         registry.load("mineflayer-pathfinder")
         registry.teardown_all()
         # pathfinder.stop() sets goal to None
@@ -100,7 +100,7 @@ class TestPluginRegistryTeardown:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.return_value = MagicMock()
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         # not loaded — should not raise
         registry.teardown_all()
         js_bot.pathfinder.setGoal.assert_not_called()
@@ -110,7 +110,7 @@ class TestPluginRegistryTeardown:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.return_value = MagicMock()
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         registry.load("mineflayer-pathfinder")
         js_bot.pathfinder.setGoal.side_effect = RuntimeError("boom")
         # should not raise
@@ -126,7 +126,7 @@ class TestPluginRegistryRawRequire:
         relay = MagicMock()
         fake_mod = MagicMock()
         runtime.require.return_value = fake_mod
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         result = registry.raw_require("some-npm-package")
         runtime.require.assert_called_with("some-npm-package")
         assert result is fake_mod
@@ -136,6 +136,6 @@ class TestPluginRegistryRawRequire:
         js_bot = MagicMock()
         relay = MagicMock()
         runtime.require.side_effect = Exception("npm error")
-        registry = PluginRegistry(runtime, js_bot, relay)
+        registry = PluginRegistry(runtime, js_bot, relay, MagicMock())
         with pytest.raises(BridgeError, match="raw_require"):
             registry.raw_require("bad-package")

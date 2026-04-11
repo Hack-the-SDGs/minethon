@@ -16,6 +16,7 @@ from minethon.models.errors import BridgeError, PluginError
 
 if TYPE_CHECKING:
     from minethon._bridge.event_relay import EventRelay
+    from minethon._bridge.js_bot import JSBotController
     from minethon._bridge.plugins._base import PluginBridge
     from minethon._bridge.runtime import BridgeRuntime
 
@@ -33,19 +34,29 @@ class PluginRegistry:
         runtime: BridgeRuntime,
         js_bot: Any,
         relay: EventRelay,
+        controller: JSBotController,
     ) -> None:
         self._runtime = runtime
         self._js_bot = js_bot
         self._relay = relay
+        self._controller = controller
         self._bridges: dict[str, PluginBridge] = {}
         self._register_builtins()
 
     def _register_builtins(self) -> None:
-        """Register all built-in plugin bridges."""
-        self._register(PathfinderBridge)
+        """Register all built-in plugin bridges.
+
+        Bridges that need extra dependencies (e.g. PathfinderBridge
+        needs controller for entity lookup) are constructed directly.
+        Simple bridges use :meth:`_register`.
+        """
+        pf = PathfinderBridge(
+            self._runtime, self._js_bot, self._relay, self._controller,
+        )
+        self._bridges[pf.NPM_NAME] = pf
 
     def _register(self, bridge_cls: type[PluginBridge]) -> None:
-        """Register a plugin bridge class by its NPM_NAME."""
+        """Register a simple plugin bridge by its NPM_NAME."""
         name = bridge_cls.NPM_NAME
         bridge = bridge_cls(self._runtime, self._js_bot, self._relay)
         self._bridges[name] = bridge

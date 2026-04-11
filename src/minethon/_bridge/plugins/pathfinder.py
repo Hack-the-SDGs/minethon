@@ -3,11 +3,17 @@
 Ref: mineflayer-pathfinder — ``pathfinder.js``, ``goals.js``
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from minethon._bridge._util import extract_js_stack
 from minethon._bridge.plugins._base import PluginBridge
-from minethon.models.errors import BridgeError
+from minethon.models.entity import EntityKind
+from minethon.models.errors import BridgeError, NavigationError
+
+if TYPE_CHECKING:
+    from minethon._bridge.js_bot import JSBotController
 
 
 class PathfinderBridge(PluginBridge):
@@ -21,8 +27,15 @@ class PathfinderBridge(PluginBridge):
 
     NPM_NAME = "mineflayer-pathfinder"
 
-    def __init__(self, runtime: Any, js_bot: Any, relay: Any) -> None:
+    def __init__(
+        self,
+        runtime: Any,
+        js_bot: Any,
+        relay: Any,
+        controller: JSBotController,
+    ) -> None:
         super().__init__(runtime, js_bot, relay)
+        self._controller = controller
         self._pf_goals: Any = None
 
     def _do_load(self) -> None:
@@ -101,6 +114,27 @@ class PathfinderBridge(PluginBridge):
                 f"set_goal_follow failed: {exc}",
                 js_stack=extract_js_stack(exc),
             ) from exc
+
+    def follow_player(self, username: str, distance: float) -> None:
+        """Find a player entity by name and start following.
+
+        Keeps the raw JS entity proxy entirely within the bridge layer.
+
+        Args:
+            username: Name of the player to follow.
+            distance: Desired follow distance in blocks.
+
+        Raises:
+            NavigationError: If the player entity is not found.
+
+        Ref: mineflayer-pathfinder/lib/goals.js — ``GoalFollow``
+        """
+        js_entity = self._controller.get_entity_by_filter(
+            username, EntityKind.PLAYER, 1e6
+        )
+        if js_entity is None:
+            raise NavigationError(f"Player '{username}' not found")
+        self.set_goal_follow(js_entity, distance)
 
     def stop(self) -> None:
         """Clear the current pathfinder goal.  Best-effort cleanup.

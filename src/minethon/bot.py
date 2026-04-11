@@ -578,12 +578,13 @@ class Bot:
         self._controller.create_bot()
 
         self._registry = PluginRegistry(
-            self._runtime, self._controller.js_bot, self._relay
+            self._runtime, self._controller.js_bot, self._relay,
+            self._controller,
         )
         self._registry.load("mineflayer-pathfinder")
         pf = self._registry.get_pathfinder()
         assert pf is not None  # just loaded above
-        self._navigation = NavigationAPI(pf, self._controller, self._relay)
+        self._navigation = NavigationAPI(pf, self._relay)
 
         self._relay.register_js_events(
             self._controller.js_bot,

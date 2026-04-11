@@ -3,13 +3,11 @@
 import asyncio
 from typing import TYPE_CHECKING
 
-from minethon.models.entity import EntityKind
 from minethon.models.errors import NavigationError
 from minethon.models.events import GoalFailedEvent, GoalReachedEvent
 
 if TYPE_CHECKING:
     from minethon._bridge.event_relay import EventRelay
-    from minethon._bridge.js_bot import JSBotController
     from minethon._bridge.plugins.pathfinder import PathfinderBridge
 
 
@@ -28,11 +26,9 @@ class NavigationAPI:
     def __init__(
         self,
         pathfinder: PathfinderBridge,
-        controller: JSBotController,
         relay: EventRelay,
     ) -> None:
         self._pf = pathfinder
-        self._ctrl = controller
         self._relay = relay
         self._navigating = False
         self._goto_futs: list[asyncio.Future[object]] = []
@@ -131,10 +127,7 @@ class NavigationAPI:
         if self._navigating:
             await self.stop()
 
-        js_entity = self._ctrl.get_entity_by_filter(username, EntityKind.PLAYER, 1e6)
-        if js_entity is None:
-            raise NavigationError(f"Player '{username}' not found")
-        self._pf.set_goal_follow(js_entity, distance)
+        self._pf.follow_player(username, distance)
         self._navigating = True
 
     async def stop(self) -> None:
