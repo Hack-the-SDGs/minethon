@@ -345,6 +345,19 @@ class SimplyShotDoneEvent:
     error: str | None = None
 
 
+# -- Viewer service --
+
+
+@dataclass(frozen=True, slots=True)
+class ViewerStartDoneEvent:
+    """Viewer initialisation finished.
+
+    Ref: prismarine-viewer/lib/mineflayer.js — module.exports
+    """
+
+    error: str | None = None
+
+
 # -- Web inventory service --
 
 

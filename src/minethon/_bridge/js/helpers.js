@@ -314,6 +314,25 @@ module.exports = {
             .catch(err => bot.emit("_minethon:simplyShotDone", _err(err)));
     },
 
+    // -- Viewer Service (Type B) --
+
+    startViewer(bot, options) {
+        try {
+            const { mineflayer } = require('prismarine-viewer');
+            mineflayer(bot, options);
+            // mineflayer() is sync — Express server bind is async.
+            // Confirm bot.viewer was created; EADDRINUSE fires later
+            // on the Node event loop and cannot be caught here.
+            if (bot.viewer) {
+                bot.emit("_minethon:viewerStartDone");
+            } else {
+                bot.emit("_minethon:viewerStartDone", "viewer was not created");
+            }
+        } catch (err) {
+            bot.emit("_minethon:viewerStartDone", _err(err));
+        }
+    },
+
     // -- Web Inventory Service (Type B) --
 
     startWebInventory(bot) {

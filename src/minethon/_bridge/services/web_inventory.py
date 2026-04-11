@@ -59,19 +59,16 @@ class WebInventoryService:
     async def initialize(
         self,
         port: int = _DEFAULT_PORT,
-        *,
-        start_on_load: bool = True,
     ) -> None:
         """Require the npm module and attach it to the bot.
+
+        The HTTP server is **not** started automatically.  Call
+        :meth:`start` after initialisation to begin serving.
 
         Args:
             port: TCP port for the web inventory UI.  Fixed at
                 initialisation; ``start()``/``stop()`` do not accept a
                 port parameter.
-            start_on_load: When ``True`` (default), the HTTP server is
-                started automatically after initialisation.  Set to
-                ``False`` to defer starting until :meth:`start` is
-                called explicitly.
 
         Raises:
             BridgeError: If already initialised.
@@ -84,15 +81,12 @@ class WebInventoryService:
 
         mod = self._runtime.require("mineflayer-web-inventory")
         # Ref: index.js:11 -- port is fixed to options.port at init
-        mod(self._js_bot, {"port": port, "startOnLoad": start_on_load})
+        # Always startOnLoad=False; user calls await start() for reliable
+        # lifecycle tracking via the done-event pattern.
+        mod(self._js_bot, {"port": port, "startOnLoad": False})
         self._initialized = True
         self._port = port
-
-        if start_on_load:
-            self._running = True
-            _log.info("Web inventory started on port %d (startOnLoad)", port)
-        else:
-            _log.info("Web inventory initialised on port %d (not started)", port)
+        _log.info("Web inventory initialised on port %d (not started)", port)
 
     def _ensure_initialized(self) -> None:
         if not self._initialized:

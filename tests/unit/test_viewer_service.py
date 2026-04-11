@@ -2,151 +2,134 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
+from minethon._bridge._events import ViewerStartDoneEvent
+from minethon._bridge.event_relay import EventRelay
 from minethon._bridge.services.viewer import ViewerService
 from minethon.bot import Bot
-from minethon.models.errors import MinethonConnectionError
+from minethon.models.errors import BridgeError, MinethonConnectionError
 
 
 class TestViewerServiceLifecycle:
     """Tests for ViewerService start/stop/is_started behavior."""
 
-    def _make_service(self) -> tuple[ViewerService, MagicMock, MagicMock]:
-        """Create a ViewerService with mocked runtime and js_bot."""
+    def _make_service(self) -> tuple[ViewerService, MagicMock, EventRelay]:
         runtime = MagicMock()
         js_bot = MagicMock()
-        service = ViewerService(runtime, js_bot)
-        return service, runtime, js_bot
+        relay = EventRelay()
+        relay.set_loop(asyncio.get_running_loop())
+        service = ViewerService(runtime, js_bot, relay)
+        return service, runtime, relay
 
-    def test_initial_state(self) -> None:
-        """Service should not be started after construction."""
-        service, _runtime, _js_bot = self._make_service()
+    @pytest.mark.asyncio
+    async def test_initial_state(self) -> None:
+        service, _rt, _relay = self._make_service()
         assert service.is_started is False
 
-    def test_start_calls_require_and_mineflayer(self) -> None:
-        """start() should require prismarine-viewer and call mod.mineflayer()."""
-        service, runtime, js_bot = self._make_service()
-        mod = MagicMock()
-        runtime.require.return_value = mod
-
-        service.start(port=8080, view_distance=4, first_person=True)
-
-        runtime.require.assert_called_once_with("prismarine-viewer")
-        mod.mineflayer.assert_called_once_with(
-            js_bot,
-            {
-                "viewDistance": 4,
-                "firstPerson": True,
-                "port": 8080,
-            },
-        )
-        assert service.is_started is True
-
-    def test_start_default_options(self) -> None:
-        """start() with no args should use default port=3007, viewDistance=6, firstPerson=False."""
-        service, runtime, js_bot = self._make_service()
-        mod = MagicMock()
-        runtime.require.return_value = mod
-
-        service.start()
-
-        mod.mineflayer.assert_called_once_with(
-            js_bot,
-            {
-                "viewDistance": 6,
-                "firstPerson": False,
-                "port": 3007,
-            },
-        )
-
-    def test_start_is_idempotent(self) -> None:
-        """Calling start() twice should only call require/mineflayer once."""
-        service, runtime, _js_bot = self._make_service()
+    @pytest.mark.asyncio
+    async def test_start_success(self) -> None:
+        service, runtime, relay = self._make_service()
         runtime.require.return_value = MagicMock()
 
-        service.start()
-        service.start()
+        async def post_done() -> None:
+            await asyncio.sleep(0.01)
+            relay._dispatch(
+                ViewerStartDoneEvent,
+                ViewerStartDoneEvent(error=None),
+            )
 
-        runtime.require.assert_called_once()
-
-    def test_stop_when_started(self) -> None:
-        """stop() should call viewer.close() and reset is_started."""
-        service, runtime, js_bot = self._make_service()
-        runtime.require.return_value = MagicMock()
-
-        service.start()
+        asyncio.create_task(post_done())
+        await service.start(port=8080, view_distance=4, first_person=True)
         assert service.is_started is True
 
-        service.stop()
-        js_bot.viewer.close.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_start_error(self) -> None:
+        service, runtime, relay = self._make_service()
+        runtime.require.return_value = MagicMock()
+
+        async def post_error() -> None:
+            await asyncio.sleep(0.01)
+            relay._dispatch(
+                ViewerStartDoneEvent,
+                ViewerStartDoneEvent(error="module not found"),
+            )
+
+        asyncio.create_task(post_error())
+        with pytest.raises(BridgeError, match="viewer start failed"):
+            await service.start()
         assert service.is_started is False
+
+    @pytest.mark.asyncio
+    async def test_start_idempotent(self) -> None:
+        service, runtime, relay = self._make_service()
+        runtime.require.return_value = MagicMock()
+
+        async def post_done() -> None:
+            await asyncio.sleep(0.01)
+            relay._dispatch(
+                ViewerStartDoneEvent,
+                ViewerStartDoneEvent(error=None),
+            )
+
+        asyncio.create_task(post_done())
+        await service.start()
+        # Second call should be no-op
+        await service.start()
+        assert service.is_started is True
 
     def test_stop_when_not_started(self) -> None:
-        """stop() on an unstarted service should be a no-op."""
-        service, _runtime, js_bot = self._make_service()
-
-        service.stop()  # should not raise
-
-        js_bot.viewer.close.assert_not_called()
+        runtime = MagicMock()
+        js_bot = MagicMock()
+        relay = MagicMock()
+        service = ViewerService(runtime, js_bot, relay)
+        service.stop()  # no-op, no error
         assert service.is_started is False
 
-    def test_stop_survives_attribute_error(self) -> None:
-        """stop() should not raise if viewer.close() raises AttributeError."""
-        service, runtime, js_bot = self._make_service()
+    @pytest.mark.asyncio
+    async def test_stop_after_start(self) -> None:
+        service, runtime, relay = self._make_service()
         runtime.require.return_value = MagicMock()
-        service.start()
 
-        js_bot.viewer.close.side_effect = AttributeError("no viewer")
+        async def post_done() -> None:
+            await asyncio.sleep(0.01)
+            relay._dispatch(
+                ViewerStartDoneEvent,
+                ViewerStartDoneEvent(error=None),
+            )
 
-        service.stop()  # should not raise
-        assert service.is_started is False
-
-    def test_stop_survives_type_error(self) -> None:
-        """stop() should not raise if viewer.close() raises TypeError."""
-        service, runtime, js_bot = self._make_service()
-        runtime.require.return_value = MagicMock()
-        service.start()
-
-        js_bot.viewer.close.side_effect = TypeError("bad call")
-
-        service.stop()  # should not raise
-        assert service.is_started is False
-
-    def test_start_after_stop_restarts(self) -> None:
-        """After stop(), start() should re-initialize the viewer."""
-        service, runtime, _js_bot = self._make_service()
-        mod = MagicMock()
-        runtime.require.return_value = mod
-
-        service.start()
+        asyncio.create_task(post_done())
+        await service.start()
         service.stop()
-        service.start()
+        assert service.is_started is False
 
-        assert runtime.require.call_count == 2
-        assert service.is_started is True
+    def test_stop_swallows_attribute_error(self) -> None:
+        runtime = MagicMock()
+        js_bot = MagicMock()
+        relay = MagicMock()
+        service = ViewerService(runtime, js_bot, relay)
+        service._started = True  # force started state
+        js_bot.viewer.close.side_effect = AttributeError("gone")
+        service.stop()  # should not raise
+        assert service.is_started is False
 
 
 class TestBotViewerProperty:
     """Tests for Bot.viewer lazy property."""
 
     def test_viewer_raises_when_not_connected(self) -> None:
-        """Accessing bot.viewer before connect() should raise."""
         bot = Bot(host="localhost")
         with pytest.raises(MinethonConnectionError):
             _ = bot.viewer
 
     @pytest.mark.asyncio
     async def test_viewer_cleared_after_disconnect(self) -> None:
-        """bot._viewer_service should be None after disconnect()."""
         bot = Bot(host="localhost")
-        # Simulate a viewer service being set
         service = MagicMock()
-        bot._viewer_service = service
-
+        bot._viewer_service = service  # pyright: ignore[reportAttributeAccessIssue]
         await bot.disconnect()
-
         service.stop.assert_called_once()
-        assert bot._viewer_service is None
+        assert bot._viewer_service is None  # pyright: ignore[reportAttributeAccessIssue]

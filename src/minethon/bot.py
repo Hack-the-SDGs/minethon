@@ -1445,7 +1445,7 @@ class Bot:
         """Web 3D viewer (prismarine-viewer).
 
         Type B service -- lazy-initialized on first access.  Call
-        ``bot.viewer.start()`` to launch the HTTP server and
+        ``await bot.viewer.start()`` to launch the HTTP server and
         ``bot.viewer.stop()`` to shut it down.  The viewer is
         automatically stopped on ``disconnect()``.
 
@@ -1454,7 +1454,9 @@ class Bot:
         ctrl = self._ensure_connected()
         if self._viewer_service is None:
             assert self._runtime is not None
-            self._viewer_service = ViewerService(self._runtime, ctrl.js_bot)
+            self._viewer_service = ViewerService(
+                self._runtime, ctrl.js_bot, self._relay,
+            )
         return self._viewer_service
 
     @property

@@ -10,10 +10,17 @@ Ref: prismarine-viewer/lib/mineflayer.js — module.exports
 
 from __future__ import annotations
 
+import pathlib
 from typing import TYPE_CHECKING, Any
 
+from minethon._bridge._events import ViewerStartDoneEvent
+from minethon.models.errors import BridgeError
+
 if TYPE_CHECKING:
+    from minethon._bridge.event_relay import EventRelay
     from minethon._bridge.runtime import BridgeRuntime
+
+_OPERATION_TIMEOUT: float = 10.0
 
 
 class ViewerService:
@@ -24,12 +31,26 @@ class ViewerService:
     Ref: prismarine-viewer/lib/mineflayer.js
     """
 
-    def __init__(self, runtime: BridgeRuntime, js_bot: Any) -> None:
+    def __init__(
+        self,
+        runtime: BridgeRuntime,
+        js_bot: Any,
+        relay: EventRelay,
+    ) -> None:
         self._runtime = runtime
         self._js_bot = js_bot
+        self._relay = relay
+        self._helpers: Any | None = None
         self._started = False
 
-    def start(
+    def _ensure_helpers(self) -> Any:
+        """Lazy-load helpers.js and cache the reference."""
+        if self._helpers is None:
+            helpers_path = pathlib.Path(__file__).parent.parent / "js" / "helpers.js"
+            self._helpers = self._runtime.require(str(helpers_path))
+        return self._helpers
+
+    async def start(
         self,
         *,
         port: int = 3007,
@@ -46,12 +67,15 @@ class ViewerService:
             view_distance: Render distance in chunks.
             first_person: Enable first-person camera.
 
+        Raises:
+            BridgeError: If the viewer module fails to initialise.
+
         Ref: prismarine-viewer/lib/mineflayer.js — module.exports
         """
         if self._started:
             return
-        mod = self._runtime.require("prismarine-viewer")
-        mod.mineflayer(
+        helpers = self._ensure_helpers()
+        helpers.startViewer(
             self._js_bot,
             {
                 "viewDistance": view_distance,
@@ -59,6 +83,11 @@ class ViewerService:
                 "port": port,
             },
         )
+        event: ViewerStartDoneEvent = await self._relay.wait_for(
+            ViewerStartDoneEvent, timeout=_OPERATION_TIMEOUT
+        )
+        if event.error is not None:
+            raise BridgeError(f"viewer start failed: {event.error}")
         self._started = True
 
     def stop(self) -> None:

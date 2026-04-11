@@ -43,6 +43,7 @@ from minethon._bridge._events import (
     TradeDoneEvent,
     TransferDoneEvent,
     UnequipDoneEvent,
+    ViewerStartDoneEvent,
     WaitForTicksDoneEvent,
     WakeDoneEvent,
     WebInvStartDoneEvent,
@@ -339,6 +340,8 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         # HawkEye
         "_minethon:simplyShotDone",
         "auto_shot_stopped",
+        # Viewer service
+        "_minethon:viewerStartDone",
         # Web inventory service
         "_minethon:webInvStartDone",
         "_minethon:webInvStopDone",
@@ -1698,6 +1701,17 @@ class EventRelay:
                 )
 
             self._post_built(js_bot, ToolEquipDoneEvent, builder, *args)
+
+        # -- Viewer service done event --
+
+        @on_fn(js_bot, "_minethon:viewerStartDone")
+        def _on_viewer_start_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> ViewerStartDoneEvent:
+                return ViewerStartDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, ViewerStartDoneEvent, builder, *args)
 
         # -- Web inventory service done events --
 
