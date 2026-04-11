@@ -404,3 +404,8 @@ class WebInvStopDoneEvent:
     """
 
     error: str | None = None
+
+
+# -- Panorama plugin --
+
+

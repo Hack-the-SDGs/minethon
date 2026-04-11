@@ -1739,6 +1739,7 @@ class EventRelay:
             self._post_built(js_bot, WebInvStopDoneEvent, builder, *args)
 
         # -- Panorama (mineflayer-panorama) --
+        # -- Panorama plugin done events --
 
         @on_fn(js_bot, "_minethon:panoramaDone")
         def _on_panorama_done(*args: Any) -> None:
@@ -2033,6 +2034,9 @@ class EventRelay:
                 _on_viewer_start_done,
                 _on_web_inv_start_done,
                 _on_web_inv_stop_done,
+                # Panorama done events
+                _on_panorama_done,
+                _on_picture_done,
                 # Throttled
                 *throttled_handlers,
             ]
