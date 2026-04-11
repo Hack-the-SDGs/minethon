@@ -4,6 +4,7 @@ from minethon.api.armor import ArmorAPI
 from minethon.api.combat import CombatAPI
 from minethon.api.navigation import NavigationAPI
 from minethon.api.observe import ObserveAPI
+from minethon.api.panorama import PanoramaAPI
 from minethon.api.plugins import PluginAPI
 from minethon.api.tool import ToolAPI
 from minethon.bot import Bot
@@ -71,6 +72,7 @@ __all__ = [
     "NavigationError",
     "NotSpawnedError",
     "ObserveAPI",
+    "PanoramaAPI",
     "PlayerInfo",
     "PluginAPI",
     "PluginError",

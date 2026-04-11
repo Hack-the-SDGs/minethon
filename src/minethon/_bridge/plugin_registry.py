@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from minethon._bridge._util import extract_js_stack
 from minethon._bridge.plugins.armor_manager import ArmorManagerBridge
 from minethon._bridge.plugins.hawkeye import HawkEyeBridge
+from minethon._bridge.plugins.panorama import PanoramaBridge
 from minethon._bridge.plugins.pathfinder import PathfinderBridge
 from minethon._bridge.plugins.tool_plugin import ToolBridge
 from minethon.models.errors import BridgeError, PluginError
@@ -58,6 +59,7 @@ class PluginRegistry:
         )
         self._bridges[pf.NPM_NAME] = pf
         self._register(ArmorManagerBridge)
+        self._register(PanoramaBridge)
 
         tool = ToolBridge(
             self._runtime, self._js_bot, self._relay, self._controller,
@@ -134,6 +136,13 @@ class PluginRegistry:
         """Convenience: return the HawkEyeBridge if registered."""
         bridge = self._bridges.get(HawkEyeBridge.NPM_NAME)
         if isinstance(bridge, HawkEyeBridge):
+            return bridge
+        return None
+
+    def get_panorama(self) -> PanoramaBridge | None:
+        """Convenience: return the PanoramaBridge if registered."""
+        bridge = self._bridges.get(PanoramaBridge.NPM_NAME)
+        if isinstance(bridge, PanoramaBridge):
             return bridge
         return None
 
