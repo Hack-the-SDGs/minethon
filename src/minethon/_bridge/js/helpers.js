@@ -316,13 +316,23 @@ module.exports = {
 
     // -- Viewer Service (Type B) --
 
-    startViewer(bot, options) {
+    /**
+     * Start prismarine-viewer.  The caller (Python) passes the
+     * already-resolved mineflayer function so we don't need to
+     * require() from this repo-local file.
+     *
+     * mineflayer() is sync — Express http.listen() is async.
+     * EADDRINUSE fires later on the Node event loop; the current
+     * upstream API does not expose the http server object, so
+     * async bind errors are not detectable here.
+     *
+     * @param {object} bot        - JS mineflayer bot
+     * @param {function} viewerFn - require('prismarine-viewer').mineflayer
+     * @param {object} options    - { viewDistance, firstPerson, port }
+     */
+    startViewer(bot, viewerFn, options) {
         try {
-            const { mineflayer } = require('prismarine-viewer');
-            mineflayer(bot, options);
-            // mineflayer() is sync — Express server bind is async.
-            // Confirm bot.viewer was created; EADDRINUSE fires later
-            // on the Node event loop and cannot be caught here.
+            viewerFn(bot, options);
             if (bot.viewer) {
                 bot.emit("_minethon:viewerStartDone");
             } else {

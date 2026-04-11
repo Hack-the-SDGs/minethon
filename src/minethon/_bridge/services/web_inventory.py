@@ -155,6 +155,24 @@ class WebInventoryService:
 
     # -- Properties --
 
+    def force_stop(self) -> None:
+        """Best-effort sync teardown for ``Bot.disconnect()``.
+
+        Fires the JS ``stop()`` without awaiting the done event,
+        then resets Python-side state.  The upstream plugin also
+        registers its own ``bot.once('end', stop)`` as a safety net.
+
+        Ref: mineflayer-web-inventory/index.js:179
+        """
+        if not self._running:
+            return
+        try:
+            helpers = self._ensure_helpers()
+            helpers.stopWebInventory(self._js_bot)
+        except Exception:  # noqa: S110
+            pass  # Best-effort: don't mask disconnect errors
+        self._running = False
+
     @property
     def is_running(self) -> bool:
         """Whether the web inventory HTTP server is currently running.

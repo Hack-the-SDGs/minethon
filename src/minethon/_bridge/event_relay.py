@@ -1996,6 +1996,12 @@ class EventRelay:
                 # HawkEye
                 _on_simply_shot_done,
                 _on_auto_shot_stopped,
+                # Plugin done events (Phase 1a)
+                _on_armor_equip_done,
+                _on_tool_equip_done,
+                _on_viewer_start_done,
+                _on_web_inv_start_done,
+                _on_web_inv_stop_done,
                 # Throttled
                 *throttled_handlers,
             ]

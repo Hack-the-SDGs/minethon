@@ -647,7 +647,7 @@ class Bot:
             self._viewer_service.stop()
             self._viewer_service = None
         if self._web_inventory_service is not None:
-            # Best-effort cleanup; service state is discarded on disconnect.
+            self._web_inventory_service.force_stop()
             self._web_inventory_service = None
         if self._registry is not None:
             self._registry.teardown_all()

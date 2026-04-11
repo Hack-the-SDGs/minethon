@@ -74,9 +74,12 @@ class ViewerService:
         """
         if self._started:
             return
+        # Resolve through JSPyBridge's node_modules (not repo-local)
+        mod = self._runtime.require("prismarine-viewer")
         helpers = self._ensure_helpers()
         helpers.startViewer(
             self._js_bot,
+            mod.mineflayer,
             {
                 "viewDistance": view_distance,
                 "firstPerson": first_person,

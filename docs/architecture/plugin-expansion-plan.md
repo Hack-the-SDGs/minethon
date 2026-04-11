@@ -430,27 +430,18 @@ Events: bot.viewer.emit('blockClicked', block, face, button)
 依賴: 無
 ```
 
-**Bridge（Type B — 不繼承 PluginBridge）：**
-```python
-class ViewerService:
-    """Web 3D viewer. Not a bot.loadPlugin() plugin — standalone service."""
-    def __init__(self, runtime, js_bot):
-        self._runtime = runtime
-        self._js_bot = js_bot
-        self._started = False
+**Bridge（Type B — 不繼承 PluginBridge，已實作）：**
 
-    def start(self, port: int = 3007, view_distance: int = 6, first_person: bool = False):
-        mod = self._runtime.require("prismarine-viewer")
-        mod.mineflayer(self._js_bot, {
-            "viewDistance": view_distance, "firstPerson": first_person, "port": port
-        })
-        self._started = True
+見 `_bridge/services/viewer.py`。
 
-    def stop(self):
-        if self._started:
-            self._js_bot.viewer.close()
-            self._started = False
-```
+- `__init__` 接收 `runtime`, `js_bot`, `relay`
+- `async start()` 透過 `helpers.startViewer(bot, viewerFn, opts)` 啟動，
+  `viewerFn` 由 Python 端 `runtime.require("prismarine-viewer").mineflayer` 預先解析，
+  不在 repo-local helpers.js 內直接 `require()`。
+  啟動後 await `ViewerStartDoneEvent` 確認 sync 錯誤；
+  **已知限制**：`EADDRINUSE` 等 async bind error 無法偵測（upstream API 不暴露 HTTP server）
+- `stop()` 同步呼叫 `bot.viewer.close()`，best-effort
+- 公開路徑：`bot.viewer`（lazy property）
 
 ### 4.7 web-inventory
 
@@ -469,42 +460,20 @@ Events: 無（Socket.IO 內部處理）
 依賴: 無
 ```
 
-**Bridge（Type B）：**
-```python
-class WebInventoryService:
-    """Web inventory viewer. Port fixed at init time."""
-    def __init__(self, runtime, js_bot):
-        self._runtime = runtime
-        self._js_bot = js_bot
-        self._initialized = False
+**Bridge（Type B — 已實作）：**
 
-    def init_and_start(self, port: int = 3008):
-        """Initialize with port and start. Port cannot be changed after init."""
-        mod = self._runtime.require("mineflayer-web-inventory")
-        mod(self._js_bot, {"port": port, "startOnLoad": True})
-        self._initialized = True
+見 `_bridge/services/web_inventory.py`。
 
-    def init_without_start(self, port: int = 3008):
-        """Initialize with port but don't start."""
-        mod = self._runtime.require("mineflayer-web-inventory")
-        mod(self._js_bot, {"port": port, "startOnLoad": False})
-        self._initialized = True
+- `__init__` 接收 `runtime`, `js_bot`, `relay`
+- `async initialize(port=3008)` — 呼叫 JS module，**固定 `startOnLoad=False`**，
+  不自動啟動 HTTP server。Port 在此時固定
+- `async start()` — 透過 `helpers.startWebInventory()` + `WebInvStartDoneEvent` 確認成功
+- `async stop()` — 透過 `helpers.stopWebInventory()` + `WebInvStopDoneEvent` 確認成功
+- `force_stop()` — sync best-effort teardown，用於 `Bot.disconnect()`
+- 公開路徑：`bot.inventory_viewer`（lazy property）
 
-    def start_server(self) -> None:
-        """Non-blocking: triggers start; resolves via _minethon:webInvStartDone."""
-        self._helpers.startWebInventory(self._js_bot)
-
-    def stop_server(self) -> None:
-        """Non-blocking: triggers stop; resolves via _minethon:webInvStopDone."""
-        self._helpers.stopWebInventory(self._js_bot)
-
-    # Caller (bridge/service layer):
-    # async def start(self) -> None:
-    #     self._bridge.start_server()
-    #     event = await self._relay.wait_for(WebInvStartDoneEvent, timeout=10.0)
-    #     if event.error is not None:
-    #         raise BridgeError(f"web-inventory start failed: {event.error}")
-```
+`Bot.disconnect()` 會呼叫 `force_stop()` 做明確清理（fire-and-forget JS stop + reset Python state），
+不依賴 upstream plugin 的 `bot.once('end', stop)` 作為唯一收尾機制。
 
 ### 4.8 statemachine
 
@@ -673,7 +642,7 @@ class PanoramaBridge(PluginBridge):
 | hawkeye | `autoAttack()` → boolean (sync) | 同步呼叫，不需要 helpers.js wrapper |
 | hawkeye | `bot.emit('auto_shot_stopped')` | bind_raw_js_event 監聽 |
 | web-inventory | `start()`/`stop()` → Promise | helpers.js wrapper + `_minethon:webInvStartDone` / `webInvStopDone` |
-| viewer | sync void | 同步呼叫，無需等待 |
+| viewer | `mineflayer()` sync（http.listen async） | helpers.js wrapper + `_minethon:viewerStartDone`；**已知限制**：EADDRINUSE 等 async bind error 無法偵測（upstream 不暴露 http server） |
 | panorama | `takePanoramaPictures()` → Promise\<Stream\> | helpers.js wrapper + `_minethon:panoramaDone`（帶 result） |
 | statemachine | EventEmitter `stateChanged` | bind_raw_js_event 或 raw 操作 |
 
