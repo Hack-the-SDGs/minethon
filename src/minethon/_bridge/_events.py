@@ -301,6 +301,16 @@ class CreativeClearInventoryDoneEvent:
     error: str | None = None
 
 
+# -- Armor Manager --
+
+
+@dataclass(frozen=True, slots=True)
+class ArmorEquipDoneEvent:
+    """ArmorManager equipAll operation finished."""
+
+    error: str | None = None
+
+
 # -- Entity placement --
 
 

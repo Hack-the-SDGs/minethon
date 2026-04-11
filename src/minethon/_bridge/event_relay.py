@@ -10,6 +10,7 @@ from minethon._bridge._events import (
     ActivateBlockDoneEvent,
     ActivateEntityAtDoneEvent,
     ActivateEntityDoneEvent,
+    ArmorEquipDoneEvent,
     ChunksLoadedDoneEvent,
     ClickWindowDoneEvent,
     ConsumeDoneEvent,
@@ -330,6 +331,7 @@ _STATIC_BRIDGED_EVENTS: frozenset[str] = frozenset(
         "_minethon:creativeClearSlotDone",
         "_minethon:creativeClearInventoryDone",
         "_minethon:placeEntityDone",
+        "_minethon:armorEquipDone",
     }
 )
 
@@ -1664,6 +1666,17 @@ class EventRelay:
                 )
 
             self._post_built(js_bot, PlaceEntityDoneEvent, builder, *args)
+
+        # -- Armor Manager done event --
+
+        @on_fn(js_bot, "_minethon:armorEquipDone")
+        def _on_armor_equip_done(*args: Any) -> None:
+            def builder(error: Any | None = None) -> ArmorEquipDoneEvent:
+                return ArmorEquipDoneEvent(
+                    error=str(error) if error is not None else None
+                )
+
+            self._post_built(js_bot, ArmorEquipDoneEvent, builder, *args)
 
         # ================================================================
         # Throttled high-frequency events (raw dispatch only)

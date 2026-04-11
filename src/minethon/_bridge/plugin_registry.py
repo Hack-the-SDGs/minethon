@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from minethon._bridge._util import extract_js_stack
+from minethon._bridge.plugins.armor_manager import ArmorManagerBridge
 from minethon._bridge.plugins.pathfinder import PathfinderBridge
 from minethon.models.errors import BridgeError, PluginError
 
@@ -54,6 +55,7 @@ class PluginRegistry:
             self._runtime, self._js_bot, self._relay, self._controller,
         )
         self._bridges[pf.NPM_NAME] = pf
+        self._register(ArmorManagerBridge)
 
     def _register(self, bridge_cls: type[PluginBridge]) -> None:
         """Register a simple plugin bridge by its NPM_NAME."""
@@ -99,6 +101,13 @@ class PluginRegistry:
         """Convenience: return the PathfinderBridge if registered."""
         bridge = self._bridges.get(PathfinderBridge.NPM_NAME)
         if isinstance(bridge, PathfinderBridge):
+            return bridge
+        return None
+
+    def get_armor_manager(self) -> ArmorManagerBridge | None:
+        """Convenience: return the ArmorManagerBridge if registered."""
+        bridge = self._bridges.get(ArmorManagerBridge.NPM_NAME)
+        if isinstance(bridge, ArmorManagerBridge):
             return bridge
         return None
 

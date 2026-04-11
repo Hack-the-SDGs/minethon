@@ -282,6 +282,14 @@ module.exports = {
             .catch(err => bot.emit("_minethon:creativeClearInventoryDone", _err(err)));
     },
 
+    // -- Armor Manager --
+
+    startArmorEquipAll(bot) {
+        bot.armorManager.equipAll()
+            .then(() => bot.emit("_minethon:armorEquipDone"))
+            .catch(err => bot.emit("_minethon:armorEquipDone", _err(err)));
+    },
+
     // -- Entity Placement (value-returning) --
 
     startPlaceEntity(bot, refBlock, faceVec) {
