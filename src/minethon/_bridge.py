@@ -17,8 +17,13 @@ from javascript import require as _js_require
 
 # Pinned — bumped by humans, never `latest`.
 # Ref: mineflayer package.json engines.node >= 22
-MINEFLAYER_VERSION = "4.37.0"
-VEC3_VERSION = "0.1.10"
+BUNDLED_VERSIONS: dict[str, str] = {
+    "mineflayer": "4.37.0",
+    "vec3": "0.1.10",
+    "mineflayer-pathfinder": "2.4.5",
+}
+MINEFLAYER_VERSION = BUNDLED_VERSIONS["mineflayer"]
+VEC3_VERSION = BUNDLED_VERSIONS["vec3"]
 
 
 def get_mineflayer() -> Any:

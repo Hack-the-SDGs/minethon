@@ -6,8 +6,8 @@ use for completion of event names, callback signatures, and
 properties like `bot.health`, `bot.entity.position`, etc.
 
 Pure synchronous callback model — no asyncio. Long-running JS work
-(dig, goto, ...) reports completion via events registered with
-`@bot.on(event)`.
+(dig, goto, ...) reports completion via handlers registered with
+`@bot.on(BotEvent.X)` or `@bot.on_x`.
 """
 
 from __future__ import annotations
@@ -20,12 +20,32 @@ from typing import Any, TypeVar
 
 from javascript import On, Once, require
 
-from minethon._bridge import get_mineflayer
+from minethon import _type_shells
+from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
+from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
+from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+globals().update(
+    {name: getattr(_type_shells, name) for name in _type_shells.TYPE_SHELL_NAMES}
+)
 
-def _normalize_handler(func: Callable[..., Any]) -> Callable[..., Any]:
+
+def _require_event(method: str, event: object) -> BotEvent:
+    if isinstance(event, BotEvent):
+        return event
+    msg = (
+        f"bot.{method}(...) 只接受 BotEvent。"
+        "請改用 @bot.on_<event> / @bot.once_<event>，"
+        "或傳入 BotEvent.CHAT 這種 enum 成員。"
+    )
+    raise TypeError(msg)
+
+
+def _normalize_handler(
+    func: Callable[..., Any], *, emitter: Any | None = None
+) -> Callable[..., Any]:
     """Adapt a user handler to mineflayer's loose event-arity conventions.
 
     Mineflayer's TypeScript typings sometimes declare trailing callback
@@ -37,15 +57,15 @@ def _normalize_handler(func: Callable[..., Any]) -> Callable[..., Any]:
 
     This wrapper:
 
+    * drops the leading emitter arg when JSPyBridge injects it
     * pads missing trailing positional args with ``None``
     * truncates any excess positional args JS emits
-    * returns ``func`` untouched when it already accepts ``*args``
 
     Ref: mineflayer/lib/plugins/chat.js:85 — chat event emit arity
+    Ref: javascript/__init__.py:78 — optional emitter injection in `On` / `Once`
     """
     params = list(inspect.signature(func).parameters.values())
-    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
-        return func
+    accepts_varargs = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params)
     slots = sum(
         1
         for p in params
@@ -55,6 +75,10 @@ def _normalize_handler(func: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if emitter is not None and args and args[0] is emitter:
+            args = args[1:]
+        if accepts_varargs:
+            return func(*args, **kwargs)
         if len(args) < slots:
             args = (*args, *([None] * (slots - len(args))))
         return func(*args[:slots], **kwargs)
@@ -96,9 +120,26 @@ class Bot:
         """
         if name.startswith("_"):
             raise AttributeError(name)
-        return getattr(self._js, name)
+        if name.startswith("on_"):
+            event = EVENT_ATTRIBUTE_MAP.get(name[3:])
+            if event is not None:
+                return self.on(event)
+        if name.startswith("once_"):
+            event = EVENT_ATTRIBUTE_MAP.get(name[5:])
+            if event is not None:
+                return self.once(event)
+        try:
+            return getattr(self._js, name)
+        except AttributeError as exc:
+            if name == "pathfinder":
+                msg = (
+                    "pathfinder 尚未載入。先呼叫 "
+                    "bot.load_plugin('mineflayer-pathfinder')。"
+                )
+                raise PluginNotInstalledError(msg) from exc
+            raise
 
-    def on(self, event: str) -> Callable[[F], F]:
+    def on(self, event: BotEvent) -> Callable[[F], F]:
         """Register a handler for a mineflayer event.
 
         Per-event typed overloads live in `bot.pyi`; at runtime this is a
@@ -112,14 +153,15 @@ class Bot:
         Ref: mineflayer/index.d.ts — Bot extends EventEmitter, see `on()`
         """
         js_bot = self._js
+        event_name = _require_event("on", event).value
 
         def decorator(func: F) -> F:
-            On(js_bot, event)(_normalize_handler(func))
+            On(js_bot, event_name)(_normalize_handler(func, emitter=js_bot))
             return func
 
         return decorator
 
-    def once(self, event: str) -> Callable[[F], F]:
+    def once(self, event: BotEvent) -> Callable[[F], F]:
         """Register a one-shot event handler.
 
         Same arity-normalization rules apply as ``on()``.
@@ -127,9 +169,10 @@ class Bot:
         Ref: mineflayer/index.d.ts — Bot.once (from EventEmitter)
         """
         js_bot = self._js
+        event_name = _require_event("once", event).value
 
         def decorator(func: F) -> F:
-            Once(js_bot, event)(_normalize_handler(func))
+            Once(js_bot, event_name)(_normalize_handler(func, emitter=js_bot))
             return func
 
         return decorator
@@ -146,9 +189,9 @@ class Bot:
 
         Args:
             name: npm package name (e.g. ``"mineflayer-pathfinder"``).
-            version: pinned version string, or None to use whatever is
-                already installed in the bridge's node_modules. Pass this
-                explicitly in production scripts so behavior is reproducible.
+            version: pinned version string. Bundled plugins may omit this and
+                use minethon's pinned default; all other packages must pass an
+                explicit version so npm resolution stays reproducible.
             export_key: which attribute of the loaded module holds the
                 plugin installer function. Pass this for packages whose
                 installer is a named export (e.g. pathfinder's ``pathfinder``).
@@ -163,7 +206,8 @@ class Bot:
 
         Ref: mineflayer/index.d.ts — Bot.loadPlugin (expects a ``(bot, options) => void`` function)
         """
-        module = require(name, version)
+        resolved_version = _resolve_package_version(name, version)
+        module = require(name, resolved_version)
         key = export_key or _PLUGIN_EXPORT_KEY.get(name)
         plugin_fn = getattr(module, key) if key else module
         if options:
@@ -181,14 +225,16 @@ class Bot:
 
         Args:
             name: npm package name.
-            version: pinned version or None.
+            version: pinned version. Pass this unless the package is one of
+                minethon's bundled defaults.
 
         Returns:
             The raw JS module proxy — everything on it is untyped.
 
         Ref: javascript.require (JSPyBridge)
         """
-        return require(name, version)
+        resolved_version = _resolve_package_version(name, version)
+        return require(name, resolved_version)
 
     def run_forever(self) -> None:
         """Block the calling thread until the bot disconnects.
@@ -197,6 +243,9 @@ class Bot:
         Python thread alive while JSPyBridge's event thread drives the
         bot. Exits cleanly on `end` event or Ctrl-C.
 
+        Uses `Once` so repeated calls don't accumulate listeners on the
+        underlying JS EventEmitter.
+
         Ref: mineflayer/index.d.ts — Bot.on('end', reason)
         """
         done = threading.Event()
@@ -204,7 +253,9 @@ class Bot:
         def _on_end(*_a: Any, **_kw: Any) -> None:
             done.set()
 
-        self.on("end")(_on_end)
+        Once(self._js, BotEvent.END.value)(
+            _normalize_handler(_on_end, emitter=self._js)
+        )
         try:
             done.wait()
         except KeyboardInterrupt:
@@ -233,3 +284,17 @@ def _to_camel(snake: str) -> str:
     """snake_case → camelCase (auth_server → authServer)."""
     head, *tail = snake.split("_")
     return head + "".join(part.capitalize() for part in tail)
+
+
+def _resolve_package_version(name: str, version: str | None) -> str:
+    if version is not None:
+        return version
+    default = BUNDLED_VERSIONS.get(name)
+    if default is not None:
+        return default
+    msg = (
+        f"`{name}` 需要顯式版本號。請改成 "
+        f"`bot.require({name!r}, 'x.y.z')` 或 "
+        f"`bot.load_plugin({name!r}, 'x.y.z')`。"
+    )
+    raise VersionPinRequiredError(msg)
