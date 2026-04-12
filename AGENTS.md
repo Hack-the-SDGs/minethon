@@ -87,6 +87,7 @@ def on_chat(...): ...
   - `mineflayer-pathfinder`
 - 對 bundled package，可省略版本
 - 對其他 npm 套件，`bot.load_plugin(...)` / `bot.require(...)` 必須顯式版本
+- Python 端的 `javascript` (JSPyBridge) 套件在 `pyproject.toml` 用 minor 級 ceiling 鎖（目前 `>=1!1.2.6,<1!1.3`）。理由：minethon 依賴 `On`/`Once` 的 emitter 注入與 Promise `await`-before-return 行為，這兩件事是實作細節不是正式契約；升 minor 前要先跑 `./scripts/format.sh` 與 integration smoke。
 
 理由：
 
