@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from minethon import _type_shells
 from minethon._events import BotEvent as BotEvent
+from minethon._type_shells import BotOptions as BotOptions
 from minethon.errors import (
     MinethonError as MinethonError,
 )

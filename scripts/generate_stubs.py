@@ -1824,7 +1824,8 @@ def render_events_module(
         [
             "}",
             "",
-            '__all__ = ["BotEvent", "EVENT_ATTRIBUTE_MAP"]',
+            # Order matches ruff's RUF022 sort (ALL_CAPS before CamelCase).
+            '__all__ = ["EVENT_ATTRIBUTE_MAP", "BotEvent"]',
             "",
         ]
     )
@@ -1849,9 +1850,11 @@ def render_handlers_runtime(
     for _event, _alias, args in event_callbacks:
         for _name, py_type in args:
             for ident in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", py_type):
-                if ident[:1].isupper() or ident in {"chatPatternOptions",
-                                                    "creativeMethods",
-                                                    "simpleClick"}:
+                if ident[:1].isupper() or ident in {
+                    "chatPatternOptions",
+                    "creativeMethods",
+                    "simpleClick",
+                }:
                     referenced.add(ident)
 
     shell_imports = sorted(referenced & set(_type_shell_names()))
@@ -1872,18 +1875,16 @@ def render_handlers_runtime(
         '"""',
         "from __future__ import annotations",
         "",
-        "from typing import TYPE_CHECKING",
-        "",
     ]
+    # Combine `typing` imports; order matches ruff I001 (ALL_CAPS first).
+    typing_imports = ["TYPE_CHECKING"]
     if uses_message_position:
-        lines.extend(
-            [
-                "from typing import Literal",
-                "",
-                'MessagePosition = Literal["chat", "system", "game_info"]',
-                "",
-            ]
-        )
+        typing_imports.append("Literal")
+    lines.append(f"from typing import {', '.join(typing_imports)}")
+    lines.append("")
+    if uses_message_position:
+        lines.append('MessagePosition = Literal["chat", "system", "game_info"]')
+        lines.append("")
     if shell_imports:
         lines.append("if TYPE_CHECKING:")
         lines.append("    from minethon._type_shells import (")
@@ -1904,9 +1905,7 @@ def render_handlers_runtime(
     for event, _alias, args in event_callbacks:
         attr = _event_attr_name(event, prefix="on")
         if args:
-            sig = ", ".join(
-                ["self"] + [f"{name}: {py_type}" for name, py_type in args]
-            )
+            sig = ", ".join(["self"] + [f"{name}: {py_type}" for name, py_type in args])
         else:
             sig = "self"
         lines.append(f"    def {attr}({sig}) -> None: ...")
@@ -1917,19 +1916,61 @@ def render_handlers_runtime(
 def _type_shell_names() -> tuple[str, ...]:
     """Source-of-truth shell names — kept in sync with `_type_shells.py`."""
     return (
-        "Vec3", "ChatMessageScore", "ChatMessage", "Effect", "Entity",
-        "Block", "Item", "Window", "Recipe", "Move", "Goal", "GoalBlock",
-        "GoalNear", "GoalXZ", "GoalNearXZ", "GoalY", "GoalGetToBlock",
-        "GoalFollow", "GoalCompositeAll", "GoalCompositeAny", "GoalInvert",
-        "GoalPlaceBlock", "GoalLookAtBlock", "GoalBreakBlock", "Goals",
-        "Movements", "Pathfinder", "ComputedPath", "PartiallyComputedPath",
-        "PathfinderModule", "Player", "ChatPattern", "SkinParts",
-        "GameSettings", "GameState", "Experience", "PhysicsOptions", "Time",
-        "ControlStateStatus", "Instrument", "FindBlockOptions",
-        "TransferOptions", "creativeMethods", "simpleClick", "Tablist",
-        "chatPatternOptions", "CommandBlockOptions", "VillagerTrade",
-        "Enchantment", "Chest", "Dispenser", "Furnace", "EnchantmentTable",
-        "Anvil", "Villager",
+        "Vec3",
+        "ChatMessageScore",
+        "ChatMessage",
+        "Effect",
+        "Entity",
+        "Block",
+        "Item",
+        "Window",
+        "Recipe",
+        "Move",
+        "Goal",
+        "GoalBlock",
+        "GoalNear",
+        "GoalXZ",
+        "GoalNearXZ",
+        "GoalY",
+        "GoalGetToBlock",
+        "GoalFollow",
+        "GoalCompositeAll",
+        "GoalCompositeAny",
+        "GoalInvert",
+        "GoalPlaceBlock",
+        "GoalLookAtBlock",
+        "GoalBreakBlock",
+        "Goals",
+        "Movements",
+        "Pathfinder",
+        "ComputedPath",
+        "PartiallyComputedPath",
+        "PathfinderModule",
+        "Player",
+        "ChatPattern",
+        "SkinParts",
+        "GameSettings",
+        "GameState",
+        "Experience",
+        "PhysicsOptions",
+        "Time",
+        "ControlStateStatus",
+        "Instrument",
+        "FindBlockOptions",
+        "TransferOptions",
+        "creativeMethods",
+        "simpleClick",
+        "Tablist",
+        "chatPatternOptions",
+        "CommandBlockOptions",
+        "VillagerTrade",
+        "Enchantment",
+        "Chest",
+        "Dispenser",
+        "Furnace",
+        "EnchantmentTable",
+        "Anvil",
+        "Villager",
     )
 
 
@@ -1941,7 +1982,7 @@ def render_handlers_stub(
         "",
         "class BotHandlers:",
         '    """Class-based handler base. Subclass, override `on_<event>`, '
-        'then call `bot.bind(handlers)`.',
+        "then call `bot.bind(handlers)`.",
         "",
         '    Typed signatures are provided here so IDE "Override methods" '
         "auto-fill produces the correct parameter list.",
@@ -1950,9 +1991,7 @@ def render_handlers_stub(
     for event, _alias, args in event_callbacks:
         attr = _event_attr_name(event, prefix="on")
         if args:
-            sig = ", ".join(
-                ["self"] + [f"{name}: {py_type}" for name, py_type in args]
-            )
+            sig = ", ".join(["self"] + [f"{name}: {py_type}" for name, py_type in args])
         else:
             sig = "self"
         lines.append(f"    def {attr}({sig}) -> None: ...")

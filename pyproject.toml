@@ -62,9 +62,30 @@ pylint.max-statements = 65
     "ANN401",  # Bot.__init__ / __getattr__ / create_bot expose Any for JS proxy interop
 ]
 
-# Generated type overlays — mirror upstream camelCase / TypeScript names verbatim
-"src/minethon/*.pyi" = [
-    "ALL",  # .pyi is 1:1 with index.d.ts; style rules don't apply
+# Generated type overlays — mirror upstream TypeScript surface verbatim.
+# Stay specific per user-requested policy (AGENTS.md): disable only the
+# families that genuinely don't fit stub files, not blanket `ALL`.
+# Pattern uses `**` so nested packages like `models/__init__.pyi` are covered.
+"src/minethon/**/*.pyi" = [
+    "N",        # N801/N802/N803/N815 — stub mirrors JS camelCase identifiers
+    "A",        # builtin shadowing — JS APIs legitimately use `type`, `list`, `id`
+    "ANN",      # .pyi is entirely annotations; no missing-annotation rules apply
+    "ARG",      # stub method params are declarative; "unused" by nature
+    "PLR",      # pylint-refactor metrics (too many methods/args/branches) don't apply
+    "PYI",      # some stub-specific rules conflict with generated output style
+    "RUF012",   # mutable class defaults are annotation-only in stubs
+    "UP",       # pyupgrade rewrites can break stub typing round-trip
+    "TRY",      # no runtime control flow in stubs
+    "SIM",      # stubs are declarative; "simplify" doesn't apply
+    "TC",       # `.pyi` IS the type-checking surface — TYPE_CHECKING is irrelevant
+    "FIX002",   # TODO markers preserved from upstream docstrings
+    "E741",     # short names (`l`, `i`) inherited from upstream signatures
+    "RUF001",   # ambiguous unicode in zh-TW docstrings (curated by docs/stubs_zh_tw.md)
+    "RUF002",   # same as RUF001 but for docstrings
+    "RUF003",   # same for comments
+    "ERA001",   # generator header comments mention example code fragments
+    "PIE790",   # `def foo(): """doc"""; ...` pattern kept for generator idempotency
+    "I001",     # re-export groupings in `models/__init__.pyi` are curated by hand
 ]
 
 # Build-time code generators — developer-only utilities, relaxed lint
@@ -73,6 +94,7 @@ pylint.max-statements = 65
     "ANN",      # annotations optional
     "T201",     # print() used for warnings
     "S101",     # asserts fine
+    "S603",     # subprocess call — fixed-arg ruff/pyright invocations, no user input
     "PLR",      # all pylint-refactor (return count, branch count, magic values)
     "PLW",      # pylint-warning (loop-var reassign is intentional)
     "C901",     # complexity high in one-off generators
@@ -81,6 +103,7 @@ pylint.max-statements = 65
     "TRY",
     "SIM",      # ternary / simplify — generator readability over style
     "RET",      # return style
+    "PERF401",  # list.extend vs append loop — append loops stay readable
     "FURB171",  # membership in single-item container (explicit vs equality)
 ]
 

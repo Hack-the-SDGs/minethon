@@ -121,15 +121,37 @@ def on_chat(...): ...
 
 ## 檢查指令
 
+一鍵跑完（regen stubs → format → lint → type-check → test）：
+
+```bash
+./scripts/format.sh            # 寫回格式修正
+./scripts/format.sh --check    # 只檢查不寫入（CI 模式）
+```
+
+對應的個別指令（與 `format.sh` 內部順序相同）：
+
 ```bash
 uv run python scripts/generate_stubs.py
-uv run pytest -m "not integration" --tb=short -q
-uv run ruff format --check src/minethon tests/
-uv run ruff check src/minethon tests/
+uv run ruff format src scripts tests
+uv run ruff check src scripts tests
 uv run pyright src/
+uv run pytest -m "not integration" --tb=short -q
 ```
 
 `src/mineflayer/` 是 legacy / scratch 區，不納入目前 package 的 lint 與 pyright 範圍。
+
+## Lint 策略
+
+- `[tool.ruff.lint]` 全域 `select = ["ALL"]`，只對「全案都不適用」的規則做全域忽略。
+- 針對情境的豁免一律走 `[tool.ruff.lint.per-file-ignores]`，不要擴張全域 `ignore`。
+- 已有的 per-file 區塊：
+  - `src/minethon/_bridge.py` / `src/minethon/bot.py` — JSPyBridge proxy 必然是 `Any`，豁免 `ANN401`
+  - `src/minethon/**/*.pyi` — 型別覆蓋層；豁免 `N`（命名）、`A`（遮 builtin）、`ANN`、`ARG`、`PLR`、`PYI`、`UP`、`TRY`、`SIM`、`TC`、`RUF001`-`003`（zh-TW 全形符號）、`ERA001`、`PIE790`、`I001`；rationale 留在 `pyproject.toml` 註解
+  - `scripts/*.py` — 產生器工具；豁免複雜度與風格類
+  - `tests/*` — 允許 magic values、私有存取、硬編 fixtures
+  - `examples/**` — 教學 demo，放寬 `ANN`、`T201`、broad-except 等
+- 新增豁免時：先嘗試用更具體的規則號（`PIE790`、`RUF022`）而不是整個家族（`PYI`、`RUF`）；只在「整個家族都不適用」時才用前綴。
+- generator 輸出要符合 ruff 的規則，`format.sh` 跑完必須 idempotent（第二次跑不再變動）。
 
 ## 當前狀態
 
