@@ -40,26 +40,23 @@ echo "[1/2] syncing Python dependencies via uv..."
 uv sync --quiet
 
 # --- 2/2: pre-install pinned npm packages ---------------------------------
-# JSPyBridge lazily installs missing packages on first require(); we front-
-# load them so the first run isn't network-bound and the versions stay
-# reproducible.
+# JSPyBridge's require() uses aliased package names like
+# `mineflayer--<hex(version)>` (see javascript/js/deps.js:63) so that multiple
+# pinned versions can coexist. A plain `npm install mineflayer@4.37.0` WON'T
+# register that alias, so the very next require() triggers a fresh install.
+#
+# The only reliable prime-the-cache is to call JSPyBridge's own install
+# pipeline via require() from Python — it writes the aliased entry into
+# js/package.json and runs npm with the right args.
 
-JS_DIR=$(uv run --quiet python -c "import javascript, os; print(os.path.join(os.path.dirname(javascript.__file__), 'js'))")
-
-if [ ! -d "$JS_DIR" ]; then
-  echo "error: JSPyBridge bundled js/ dir not found at $JS_DIR." >&2
-  exit 1
-fi
-
-echo "[2/2] installing pinned npm packages into $JS_DIR ..."
+echo "[2/2] priming JSPyBridge module cache with pinned versions..."
+uv run --quiet python -c "
+from javascript import require
 # Versions must match the constants in src/minethon/_bridge.py.
-(
-  cd "$JS_DIR"
-  npm install --silent --no-audit --no-fund \
-    mineflayer@4.37.0 \
-    vec3@0.1.10 \
-    mineflayer-pathfinder@2.4.5
-)
+require('mineflayer', '4.37.0')
+require('vec3', '0.1.10')
+require('mineflayer-pathfinder', '2.4.5')
+"
 
 cat <<'EOF'
 

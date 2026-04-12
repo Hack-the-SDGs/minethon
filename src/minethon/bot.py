@@ -12,8 +12,10 @@ Pure synchronous callback model — no asyncio. Long-running JS work
 
 from __future__ import annotations
 
+import inspect
 import threading
 from collections.abc import Callable
+from functools import wraps
 from typing import Any, TypeVar
 
 from javascript import On, Once, require
@@ -21,6 +23,44 @@ from javascript import On, Once, require
 from minethon._bridge import get_mineflayer
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _normalize_handler(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Adapt a user handler to mineflayer's loose event-arity conventions.
+
+    Mineflayer's TypeScript typings sometimes declare trailing callback
+    parameters that the JS runtime never actually emits (the ``chat`` event's
+    ``matches: string[] | null`` is the canonical example — the type
+    advertises 5 args but ``lib/plugins/chat.js`` only emits 4). A handler
+    written against the declared signature would otherwise crash with
+    ``TypeError: missing positional argument``.
+
+    This wrapper:
+
+    * pads missing trailing positional args with ``None``
+    * truncates any excess positional args JS emits
+    * returns ``func`` untouched when it already accepts ``*args``
+
+    Ref: mineflayer/lib/plugins/chat.js:85 — chat event emit arity
+    """
+    params = list(inspect.signature(func).parameters.values())
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return func
+    slots = sum(
+        1
+        for p in params
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+
+    @wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if len(args) < slots:
+            args = (*args, *([None] * (slots - len(args))))
+        return func(*args[:slots], **kwargs)
+
+    return wrapper
+
 
 # npm package → attribute on the required module that holds the plugin
 # installer function. Most plugins export the installer as the default,
@@ -65,12 +105,16 @@ class Bot:
         generic dispatcher. Handlers run on the JSPyBridge event thread —
         do not block them with long Python work.
 
+        Handler arity is auto-normalized: mineflayer occasionally types
+        more callback params than it emits (the ``chat`` event is the
+        classic case), so missing trailing args are padded with ``None``.
+
         Ref: mineflayer/index.d.ts — Bot extends EventEmitter, see `on()`
         """
         js_bot = self._js
 
         def decorator(func: F) -> F:
-            On(js_bot, event)(func)
+            On(js_bot, event)(_normalize_handler(func))
             return func
 
         return decorator
@@ -78,12 +122,14 @@ class Bot:
     def once(self, event: str) -> Callable[[F], F]:
         """Register a one-shot event handler.
 
+        Same arity-normalization rules apply as ``on()``.
+
         Ref: mineflayer/index.d.ts — Bot.once (from EventEmitter)
         """
         js_bot = self._js
 
         def decorator(func: F) -> F:
-            Once(js_bot, event)(func)
+            Once(js_bot, event)(_normalize_handler(func))
             return func
 
         return decorator
