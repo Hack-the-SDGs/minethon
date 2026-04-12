@@ -11,6 +11,7 @@ from minethon._type_shells import (
     CommandBlockOptions as CommandBlockOptions,
     ComputedPath as ComputedPath,
     ControlStateStatus as ControlStateStatus,
+    CreateBotOptions as CreateBotOptions,
     Dispenser as Dispenser,
     Effect as Effect,
     Enchantment as Enchantment,

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from typing import Literal, Self, TypedDict, overload
+from typing import Literal, Self, TypedDict, Unpack, overload
 
 from minethon._events import BotEvent
 
@@ -1571,7 +1571,12 @@ _OnEvent_path_reset = Callable[
 _OnEvent_path_stop = Callable[[], None]
 
 class BotOptions(TypedDict, total=False):
-    """Options accepted by `create_bot(**opts)`.
+    """Raw mineflayer options (camelCase).
+
+    Matches mineflayer's `BotOptions` exactly — useful when you
+    need to construct options programmatically. For the common
+    keyword-argument path, prefer `create_bot(host=..., auth_server=...)`
+    which is typed by `CreateBotOptions` (snake_case).
 
     Ref: mineflayer/index.d.ts — interface BotOptions
     """
@@ -1602,6 +1607,43 @@ class BotOptions(TypedDict, total=False):
     sessionServer: str
     onMsaCode: Callable[[object], None]
     authTitle: str
+
+class CreateBotOptions(TypedDict, total=False):
+    """Snake-case options accepted by `create_bot(**opts)`.
+
+    Every field mirrors `BotOptions` but uses the Python spelling
+    (`auth_server` instead of `authServer`). `create_bot` converts
+    each key to camelCase before calling mineflayer.
+
+    Ref: mineflayer/index.d.ts — interface BotOptions
+    """
+
+    log_errors: bool
+    hide_errors: bool
+    load_internal_plugins: bool
+    plugins: dict[str, object]
+    chat: ChatLevel
+    colors_enabled: bool
+    view_distance: ViewDistance
+    main_hand: MainHands
+    difficulty: float
+    chat_length_limit: float
+    physics_enabled: bool
+    max_catchup_ticks: float
+    client: object
+    brand: str
+    default_chat_patterns: bool
+    respawn: bool
+    host: str
+    port: float
+    username: str
+    password: str
+    version: str
+    auth: Literal["mojang", "microsoft", "offline"]
+    auth_server: str
+    session_server: str
+    on_msa_code: Callable[[object], None]
+    auth_title: str
 
 class Bot:
     """操縱 Minecraft 機器人的核心物件
@@ -6337,7 +6379,7 @@ class BotHandlers:
     def on_window_open(self, window: Window) -> None:
         pass
 
-def create_bot(**options: object) -> Bot:
+def create_bot(**options: Unpack[CreateBotOptions]) -> Bot:
     """建立並啟動一個 mineflayer 機器人
     常用選項以 `snake_case` 傳入，內部會自動轉成 `camelCase` 給 JS 端
 

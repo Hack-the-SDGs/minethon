@@ -1697,14 +1697,9 @@ def render_bot(
 # --------------------------------------------------------------------------- #
 
 
-def render_bot_options(body: str) -> list[str]:
-    """BotOptions → TypedDict (total=False since most are optional)."""
+def _bot_options_members(body: str) -> list[Member]:
+    """Parse BotOptions body and merge in ClientOptions common fields."""
     members = parse_members(body)
-    lines = [
-        "class BotOptions(TypedDict, total=False):",
-        '    """Options accepted by `create_bot(**opts)`.\n\n'
-        '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """',
-    ]
     # minecraft-protocol ClientOptions (merged in) — surface the common fields
     extras = [
         Member(name="host", ts_type="string"),
@@ -1720,17 +1715,65 @@ def render_bot_options(body: str) -> list[str]:
         Member(name="onMsaCode", ts_type="(data: object) => void", optional=True),
         Member(name="authTitle", ts_type="string", optional=True),
     ]
-    # Merge, preferring parsed body entries
     parsed_names = {m.name for m in members}
     for extra in extras:
         if extra.name not in parsed_names:
             members.append(extra)
+    return members
+
+
+def render_bot_options(body: str) -> list[str]:
+    """BotOptions → TypedDict (total=False since most are optional).
+
+    Mirrors mineflayer's camelCase keys verbatim — power-user surface that
+    lets callers build an options dict and splat it as-is into the JS layer.
+    """
+    members = _bot_options_members(body)
+    lines = [
+        "class BotOptions(TypedDict, total=False):",
+        '    """Raw mineflayer options (camelCase).\n\n'
+        "    Matches mineflayer's `BotOptions` exactly — useful when you\n"
+        "    need to construct options programmatically. For the common\n"
+        "    keyword-argument path, prefer `create_bot(host=..., "
+        "auth_server=...)`\n"
+        "    which is typed by `CreateBotOptions` (snake_case).\n\n"
+        '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """',
+    ]
     for m in members:
         if m.is_method:
             # TypedDict can't hold methods — serialize as callable prop
             continue
         py_type = ts_to_py(m.ts_type)
         lines.append(f"    {m.name}: {py_type}")
+    return lines
+
+
+def render_create_bot_options(body: str) -> list[str]:
+    """CreateBotOptions → TypedDict with snake_case keys.
+
+    Mirrors BotOptions but uses the public snake_case spelling that
+    `create_bot(**opts)` accepts — `bot.py` converts each key to camelCase
+    before handing the dict to `mineflayer.createBot()`.
+    """
+    members = _bot_options_members(body)
+    lines = [
+        "class CreateBotOptions(TypedDict, total=False):",
+        '    """Snake-case options accepted by `create_bot(**opts)`.\n\n'
+        "    Every field mirrors `BotOptions` but uses the Python spelling\n"
+        "    (`auth_server` instead of `authServer`). `create_bot` converts\n"
+        "    each key to camelCase before calling mineflayer.\n\n"
+        '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """',
+    ]
+    emitted: set[str] = set()
+    for m in members:
+        if m.is_method:
+            continue
+        py_name = _py_name(m.name)
+        if py_name in emitted:
+            continue
+        emitted.add(py_name)
+        py_type = ts_to_py(m.ts_type)
+        lines.append(f"    {py_name}: {py_type}")
     return lines
 
 
@@ -1758,7 +1801,7 @@ HEADER = """\
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from typing import Literal, Self, TypedDict, overload
+from typing import Literal, Self, TypedDict, Unpack, overload
 
 from minethon._events import BotEvent
 
@@ -2233,11 +2276,13 @@ def main() -> None:
     out.extend(ev_lines)
     out.append("")
 
-    # BotOptions
+    # BotOptions (camelCase, power-user) and CreateBotOptions (snake_case)
     bot_opts_body = find_interface(mf_text, "BotOptions")
     if bot_opts_body is None:
         raise SystemExit("Cannot find BotOptions interface")
     out.extend(render_bot_options(bot_opts_body))
+    out.append("")
+    out.extend(render_create_bot_options(bot_opts_body))
     out.append("")
 
     # Bot
@@ -2253,7 +2298,7 @@ def main() -> None:
 
     # Module-level factory
     out.append("")
-    out.append("def create_bot(**options: object) -> Bot: ...")
+    out.append("def create_bot(**options: Unpack[CreateBotOptions]) -> Bot: ...")
     out.append("")
 
     raw_text = "\n".join(out)

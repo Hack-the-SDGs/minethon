@@ -323,3 +323,7 @@ TYPE_SHELL_NAMES = (
 
 class BotOptions(dict[str, object]):
     """Runtime shell for the generated `TypedDict` in `bot.pyi`."""
+
+
+class CreateBotOptions(dict[str, object]):
+    """Runtime shell for the snake-case `TypedDict` in `bot.pyi`."""
