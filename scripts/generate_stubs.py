@@ -839,22 +839,71 @@ def parse_method_args(params: str) -> list[tuple[str, str, bool]]:
     return out
 
 
+_PY_KEYWORDS = {
+    # Hard keywords
+    "class",
+    "def",
+    "if",
+    "else",
+    "for",
+    "while",
+    "return",
+    "from",
+    "import",
+    "is",
+    "and",
+    "or",
+    "not",
+    "in",
+    "as",
+    "with",
+    "yield",
+    "lambda",
+    "pass",
+    "raise",
+    "try",
+    "except",
+    "finally",
+    "global",
+    "nonlocal",
+    "assert",
+    "break",
+    "continue",
+    "del",
+    "elif",
+    "True",
+    "False",
+    "None",
+    # Common builtins worth shadowing with a trailing underscore
+    "type",
+    "hash",
+    "id",
+    "list",
+    "dict",
+    "set",
+    "str",
+    "int",
+    "float",
+    "bool",
+    "bytes",
+    "input",
+    "format",
+    "filter",
+    "map",
+    "range",
+    "len",
+    "open",
+    "print",
+}
+
+
 def _py_name(name: str) -> str:
-    """Keep JS camelCase for arg names (students read .pyi against JS docs)."""
-    # Avoid Python reserved words
-    if name in {
-        "class",
-        "def",
-        "if",
-        "else",
-        "for",
-        "while",
-        "return",
-        "from",
-        "import",
-    }:
-        return f"{name}_"
-    return name
+    """Convert JS camelCase → snake_case and dodge Python reserved words."""
+    snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    snake = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", snake).lower()
+    if snake in _PY_KEYWORDS:
+        return f"{snake}_"
+    return snake
 
 
 # --------------------------------------------------------------------------- #
@@ -1787,10 +1836,28 @@ def render_handlers_runtime(
 ) -> str:
     """Emit the runtime ``BotHandlers`` class for `src/minethon/_handlers.py`.
 
-    Every ``on_<event>`` method is a no-op so subclasses only implement the
-    events they care about. The stub class in ``bot.pyi`` carries the typed
-    signatures IDEs use for "Override methods" auto-fill.
+    Every ``on_<event>`` method is a no-op with the same typed signature as
+    the stub class in ``bot.pyi``. Subclasses override just the events they
+    care about; ``bot.bind(handlers)`` wires those up to the JS EventEmitter.
+    Annotations are lazy (`from __future__ import annotations`) so type names
+    only need to resolve for static type checkers, not at import time.
     """
+    # Identifiers referenced in parameter annotations — we TYPE_CHECKING-import
+    # the ones that are published shells so strict type checkers can resolve
+    # them. Builtins (str, list, int, ...) don't need importing.
+    referenced: set[str] = set()
+    for _event, _alias, args in event_callbacks:
+        for _name, py_type in args:
+            for ident in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", py_type):
+                if ident[:1].isupper() or ident in {"chatPatternOptions",
+                                                    "creativeMethods",
+                                                    "simpleClick"}:
+                    referenced.add(ident)
+
+    shell_imports = sorted(referenced & set(_type_shell_names()))
+    # MessagePosition is defined at module scope (Literal alias), not a shell.
+    uses_message_position = "MessagePosition" in referenced
+
     lines = [
         "# GENERATED FROM mineflayer/index.d.ts — DO NOT EDIT MANUALLY.",
         "# Regenerate via: uv run python scripts/generate_stubs.py",
@@ -1799,25 +1866,71 @@ def render_handlers_runtime(
         "Subclass :class:`BotHandlers`, override the ``on_<event>`` methods",
         "you care about, then wire the instance via ``bot.bind(handlers)``.",
         "",
-        "IDEs read the typed signatures from ``bot.pyi`` so 'Override",
-        "methods' auto-fill gives you the correct parameter list and types.",
+        "Method signatures here mirror ``bot.pyi`` so IDE hover, 'Override",
+        "methods', and `inspect.signature` all see the real parameter list.",
+        "Annotations are lazy — imports are only needed by type checkers.",
         '"""',
         "from __future__ import annotations",
         "",
-        '__all__ = ["BotHandlers"]',
-        "",
-        "",
-        "class BotHandlers:",
-        '    """Base class for class-based event handlers."""',
+        "from typing import TYPE_CHECKING",
         "",
     ]
-    for event, _alias, _args in event_callbacks:
-        attr = _event_attr_name(event, prefix="on")
-        lines.append(
-            f"    def {attr}(self, *_args: object, **_kwargs: object) -> None: ..."
+    if uses_message_position:
+        lines.extend(
+            [
+                "from typing import Literal",
+                "",
+                'MessagePosition = Literal["chat", "system", "game_info"]',
+                "",
+            ]
         )
+    if shell_imports:
+        lines.append("if TYPE_CHECKING:")
+        lines.append("    from minethon._type_shells import (")
+        for name in shell_imports:
+            lines.append(f"        {name},")
+        lines.append("    )")
+        lines.append("")
+    lines.extend(
+        [
+            '__all__ = ["BotHandlers"]',
+            "",
+            "",
+            "class BotHandlers:",
+            '    """Base class for class-based event handlers."""',
+            "",
+        ]
+    )
+    for event, _alias, args in event_callbacks:
+        attr = _event_attr_name(event, prefix="on")
+        if args:
+            sig = ", ".join(
+                ["self"] + [f"{name}: {py_type}" for name, py_type in args]
+            )
+        else:
+            sig = "self"
+        lines.append(f"    def {attr}({sig}) -> None: ...")
     lines.append("")
     return "\n".join(lines)
+
+
+def _type_shell_names() -> tuple[str, ...]:
+    """Source-of-truth shell names — kept in sync with `_type_shells.py`."""
+    return (
+        "Vec3", "ChatMessageScore", "ChatMessage", "Effect", "Entity",
+        "Block", "Item", "Window", "Recipe", "Move", "Goal", "GoalBlock",
+        "GoalNear", "GoalXZ", "GoalNearXZ", "GoalY", "GoalGetToBlock",
+        "GoalFollow", "GoalCompositeAll", "GoalCompositeAny", "GoalInvert",
+        "GoalPlaceBlock", "GoalLookAtBlock", "GoalBreakBlock", "Goals",
+        "Movements", "Pathfinder", "ComputedPath", "PartiallyComputedPath",
+        "PathfinderModule", "Player", "ChatPattern", "SkinParts",
+        "GameSettings", "GameState", "Experience", "PhysicsOptions", "Time",
+        "ControlStateStatus", "Instrument", "FindBlockOptions",
+        "TransferOptions", "creativeMethods", "simpleClick", "Tablist",
+        "chatPatternOptions", "CommandBlockOptions", "VillagerTrade",
+        "Enchantment", "Chest", "Dispenser", "Furnace", "EnchantmentTable",
+        "Anvil", "Villager",
+    )
 
 
 def render_handlers_stub(
