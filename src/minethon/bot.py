@@ -16,11 +16,18 @@ import threading
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from javascript import On, Once
+from javascript import On, Once, require
 
 from minethon._bridge import get_mineflayer
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+# npm package → attribute on the required module that holds the plugin
+# installer function. Most plugins export the installer as the default,
+# but a few (pathfinder) expose it on a named property.
+_PLUGIN_EXPORT_KEY: dict[str, str] = {
+    "mineflayer-pathfinder": "pathfinder",
+}
 
 
 class Bot:
@@ -80,6 +87,62 @@ class Bot:
             return func
 
         return decorator
+
+    def load_plugin(
+        self,
+        name: str,
+        version: str | None = None,
+        *,
+        export_key: str | None = None,
+        **options: Any,
+    ) -> Any:
+        """Install a Type A mineflayer plugin in one line.
+
+        Args:
+            name: npm package name (e.g. ``"mineflayer-pathfinder"``).
+            version: pinned version string, or None to use whatever is
+                already installed in the bridge's node_modules. Pass this
+                explicitly in production scripts so behavior is reproducible.
+            export_key: which attribute of the loaded module holds the
+                plugin installer function. Pass this for packages whose
+                installer is a named export (e.g. pathfinder's ``pathfinder``).
+                Overrides the built-in defaults in ``_PLUGIN_EXPORT_KEY``.
+            **options: keyword options forwarded to higher-order plugin
+                factories (e.g. ``@ssmidge/mineflayer-dashboard``). Regular
+                plugins ignore this.
+
+        Returns:
+            The raw JS module — use the result to access classes/constants
+            the plugin exports, e.g. ``pf.goals.GoalNear(x, y, z, 1)``.
+
+        Ref: mineflayer/index.d.ts — Bot.loadPlugin (expects a ``(bot, options) => void`` function)
+        """
+        module = require(name, version)
+        key = export_key or _PLUGIN_EXPORT_KEY.get(name)
+        plugin_fn = getattr(module, key) if key else module
+        if options:
+            plugin_fn = plugin_fn(options)
+        self._js.loadPlugin(plugin_fn)
+        return module
+
+    def require(self, name: str, version: str | None = None) -> Any:
+        """Raw escape hatch — load a JS module and return its proxy.
+
+        Use for Type B/C/D plugins (prismarine-viewer, web-inventory,
+        mineflayer-statemachine, etc.) that don't fit the single-call
+        ``bot.loadPlugin`` pattern. You get the raw module back; initialize
+        it yourself following the package's README.
+
+        Args:
+            name: npm package name.
+            version: pinned version or None.
+
+        Returns:
+            The raw JS module proxy — everything on it is untyped.
+
+        Ref: javascript.require (JSPyBridge)
+        """
+        return require(name, version)
 
     def run_forever(self) -> None:
         """Block the calling thread until the bot disconnects.
