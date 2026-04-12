@@ -61,6 +61,28 @@ pylint.max-statements = 65
     "ANN401",  # Bot.__init__ / __getattr__ / create_bot expose Any for JS proxy interop
 ]
 
+# Generated type overlays — mirror upstream camelCase / TypeScript names verbatim
+"src/minethon/*.pyi" = [
+    "ALL",  # .pyi is 1:1 with index.d.ts; style rules don't apply
+]
+
+# Build-time code generators — developer-only utilities, relaxed lint
+"scripts/*.py" = [
+    "INP001",   # not a package
+    "ANN",      # annotations optional
+    "T201",     # print() used for warnings
+    "S101",     # asserts fine
+    "PLR",      # all pylint-refactor (return count, branch count, magic values)
+    "PLW",      # pylint-warning (loop-var reassign is intentional)
+    "C901",     # complexity high in one-off generators
+    "ERA001",   # commented-out examples OK
+    "BLE001",
+    "TRY",
+    "SIM",      # ternary / simplify — generator readability over style
+    "RET",      # return style
+    "FURB171",  # membership in single-item container (explicit vs equality)
+]
+
 # test suite — relaxed for assertions, magic values, private access
 "tests/*" = [
     "INP001",              # not a namespace package
