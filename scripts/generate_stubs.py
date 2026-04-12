@@ -30,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDORED_DTS_ROOT = REPO_ROOT / "src/mineflayer/js/node_modules"
 OUT_PATH = REPO_ROOT / "src/minethon/bot.pyi"
 OUT_EVENTS_PATH = REPO_ROOT / "src/minethon/_events.py"
+OUT_HANDLERS_PATH = REPO_ROOT / "src/minethon/_handlers.py"
 STUBS_DOC = REPO_ROOT / "docs/stubs_zh_tw.md"
 
 
@@ -354,6 +355,18 @@ TS_NAME_REMAP = {
 EVENT_CALLBACK_OVERRIDES = {
     "message": "Callable[[ChatMessage, MessagePosition], None]",
     "messagestr": "Callable[[str, MessagePosition, ChatMessage], None]",
+}
+
+# Parameter names and types for events whose callback signature comes from
+# EVENT_CALLBACK_OVERRIDES (so there is no parsed arg list to reuse). Kept in
+# parallel with EVENT_CALLBACK_OVERRIDES; used by the BotHandlers stub render.
+EVENT_HANDLER_SIGNATURES: dict[str, list[tuple[str, str]]] = {
+    "message": [("msg", "ChatMessage"), ("position", "MessagePosition")],
+    "messagestr": [
+        ("message", "str"),
+        ("position", "MessagePosition"),
+        ("json_msg", "ChatMessage"),
+    ],
 }
 
 
@@ -780,6 +793,27 @@ def _parse_single_member(raw: str) -> Member | None:
 
     # No match
     return None
+
+
+def _parse_arrow_fn_args(ts_type: str) -> list[tuple[str, str]]:
+    """Extract named params from a TS arrow-function type like ``(a: X) => Y``."""
+    ts_type = ts_type.strip()
+    if not ts_type.startswith("("):
+        return []
+    depth = 0
+    end = -1
+    for i, ch in enumerate(ts_type):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end < 0:
+        return []
+    args = parse_method_args(ts_type[1:end])
+    return [(_py_name(n), py) for n, py, _opt in args]
 
 
 def parse_method_args(params: str) -> list[tuple[str, str, bool]]:
@@ -1374,11 +1408,18 @@ def render_type_alias(name: str, ts_expr: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def render_bot_events(events_body: str) -> tuple[list[str], list[tuple[str, str]]]:
-    """Parse BotEvents body, emit callback type aliases + return [(event, alias)]."""
+def render_bot_events(
+    events_body: str,
+) -> tuple[list[str], list[tuple[str, str, list[tuple[str, str]]]]]:
+    """Parse BotEvents body, emit callback type aliases.
+
+    Returns the alias lines and a list of ``(event, alias, handler_args)``
+    where ``handler_args`` is the ``[(name, py_type)]`` list used to render
+    ``BotHandlers.on_<event>`` signatures.
+    """
     members = parse_members(events_body)
     lines: list[str] = ["# --- Event callback type aliases ---"]
-    event_callbacks: list[tuple[str, str]] = []
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]] = []
     for m in members:
         if not m.is_method and not m.ts_type:
             continue
@@ -1386,13 +1427,15 @@ def render_bot_events(events_body: str) -> tuple[list[str], list[tuple[str, str]
         if override is not None:
             alias = f"_OnEvent_{_sanitize_alias(m.name)}"
             lines.append(f"{alias} = {override}")
-            event_callbacks.append((m.name, alias))
+            handler_args = list(EVENT_HANDLER_SIGNATURES.get(m.name, []))
+            event_callbacks.append((m.name, alias, handler_args))
             continue
         # Each event is declared as a property whose type is a function:
         # `chat: (username: string, message: string, ...) => Promise<void> | void`
         # But our parse_members may emit it as `is_method=True` if we catch the "("...
         # Fix: events body member either has ts_type starting with "(" OR is_method due
         # to our argument-list detection.
+        handler_args: list[tuple[str, str]] = []
         if m.is_method:
             # Build a Callable from params + returns
             args = parse_method_args(m.params)
@@ -1403,11 +1446,15 @@ def render_bot_events(events_body: str) -> tuple[list[str], list[tuple[str, str]
                 if py_args
                 else f"Callable[[], {ret_py}]"
             )
+            handler_args = [(_py_name(n), py) for n, py, _opt in args]
         else:
             cb_type = ts_to_py(m.ts_type)
+            # Property-style event: `chat: (a: X, b: Y) => void`. Recover the
+            # named parameter list so BotHandlers.on_<event> can be fully typed.
+            handler_args = _parse_arrow_fn_args(m.ts_type)
         alias = f"_OnEvent_{_sanitize_alias(m.name)}"
         lines.append(f"{alias} = {cb_type}")
-        event_callbacks.append((m.name, alias))
+        event_callbacks.append((m.name, alias, handler_args))
     return lines, event_callbacks
 
 
@@ -1428,21 +1475,24 @@ def _event_attr_name(event: str, *, prefix: str) -> str:
     return f"{prefix}_{snake}"
 
 
-def render_event_enum(event_callbacks: list[tuple[str, str]]) -> list[str]:
+def render_event_enum(
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+) -> list[str]:
     lines = [
         "class BotEvent(StrEnum):",
         '    """Source-verified mineflayer event names."""',
     ]
-    for event, _ in event_callbacks:
+    for event, _alias, _args in event_callbacks:
         lines.append(f'    {_event_member_name(event)} = "{event}"')
     return lines
 
 
 def render_event_decorator_aliases(
-    event_callbacks: list[tuple[str, str]], method: str
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+    method: str,
 ) -> list[str]:
     lines: list[str] = []
-    for event, alias in event_callbacks:
+    for event, alias, _args in event_callbacks:
         attr_name = _event_attr_name(event, prefix=method)
         member = _event_member_name(event)
         lines.append(f"    {attr_name}: Callable[[{alias}], {alias}]")
@@ -1451,11 +1501,12 @@ def render_event_decorator_aliases(
 
 
 def render_on_overloads(
-    event_callbacks: list[tuple[str, str]], method: str
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+    method: str,
 ) -> list[str]:
     """Emit @overload defs for `on` or `once`."""
     lines: list[str] = []
-    for event, alias in event_callbacks:
+    for event, alias, _args in event_callbacks:
         member = _event_member_name(event)
         lines.append("    @overload")
         lines.append(
@@ -1471,7 +1522,10 @@ def render_on_overloads(
 # --------------------------------------------------------------------------- #
 
 
-def render_bot(bot_body: str, event_callbacks: list[tuple[str, str]]) -> list[str]:
+def render_bot(
+    bot_body: str,
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+) -> list[str]:
     members = parse_members(bot_body)
     lines = ["class Bot:"]
     lines.append(
@@ -1690,7 +1744,9 @@ def extract_type_alias(text: str, name: str) -> str | None:
     return None
 
 
-def render_events_module(event_callbacks: list[tuple[str, str]]) -> str:
+def render_events_module(
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+) -> str:
     lines = [
         "# GENERATED FROM mineflayer/index.d.ts — DO NOT EDIT MANUALLY.",
         "# Regenerate via: uv run python scripts/generate_stubs.py",
@@ -1702,7 +1758,7 @@ def render_events_module(event_callbacks: list[tuple[str, str]]) -> str:
         "class BotEvent(StrEnum):",
         '    """Source-verified event names for `bot.on(...)`."""',
     ]
-    for event, _ in event_callbacks:
+    for event, _alias, _args in event_callbacks:
         lines.append(f'    {_event_member_name(event)} = "{event}"')
     lines.extend(
         [
@@ -1710,7 +1766,7 @@ def render_events_module(event_callbacks: list[tuple[str, str]]) -> str:
             "EVENT_ATTRIBUTE_MAP = {",
         ]
     )
-    for event, _ in event_callbacks:
+    for event, _alias, _args in event_callbacks:
         lines.append(
             f'    "{_event_attr_name(event, prefix="on")[3:]}": '
             f"BotEvent.{_event_member_name(event)},"
@@ -1724,6 +1780,70 @@ def render_events_module(event_callbacks: list[tuple[str, str]]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def render_handlers_runtime(
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+) -> str:
+    """Emit the runtime ``BotHandlers`` class for `src/minethon/_handlers.py`.
+
+    Every ``on_<event>`` method is a no-op so subclasses only implement the
+    events they care about. The stub class in ``bot.pyi`` carries the typed
+    signatures IDEs use for "Override methods" auto-fill.
+    """
+    lines = [
+        "# GENERATED FROM mineflayer/index.d.ts — DO NOT EDIT MANUALLY.",
+        "# Regenerate via: uv run python scripts/generate_stubs.py",
+        '"""Optional class-based event handler base.',
+        "",
+        "Subclass :class:`BotHandlers`, override the ``on_<event>`` methods",
+        "you care about, then wire the instance via ``bot.bind(handlers)``.",
+        "",
+        "IDEs read the typed signatures from ``bot.pyi`` so 'Override",
+        "methods' auto-fill gives you the correct parameter list and types.",
+        '"""',
+        "from __future__ import annotations",
+        "",
+        '__all__ = ["BotHandlers"]',
+        "",
+        "",
+        "class BotHandlers:",
+        '    """Base class for class-based event handlers."""',
+        "",
+    ]
+    for event, _alias, _args in event_callbacks:
+        attr = _event_attr_name(event, prefix="on")
+        lines.append(
+            f"    def {attr}(self, *_args: object, **_kwargs: object) -> None: ..."
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_handlers_stub(
+    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+) -> list[str]:
+    """Emit the typed ``BotHandlers`` class for bot.pyi."""
+    lines = [
+        "",
+        "class BotHandlers:",
+        '    """Class-based handler base. Subclass, override `on_<event>`, '
+        'then call `bot.bind(handlers)`.',
+        "",
+        '    Typed signatures are provided here so IDE "Override methods" '
+        "auto-fill produces the correct parameter list.",
+        '    """',
+    ]
+    for event, _alias, args in event_callbacks:
+        attr = _event_attr_name(event, prefix="on")
+        if args:
+            sig = ", ".join(
+                ["self"] + [f"{name}: {py_type}" for name, py_type in args]
+            )
+        else:
+            sig = "self"
+        lines.append(f"    def {attr}({sig}) -> None: ...")
+    return lines
 
 
 def format_generated_files(*paths: Path) -> None:
@@ -1815,6 +1935,10 @@ def main() -> None:
     out.extend(render_bot(bot_body, event_callbacks))
     out.append("")
 
+    # Class-based handler base (typed stub)
+    out.extend(render_handlers_stub(event_callbacks))
+    out.append("")
+
     # Module-level factory
     out.append("")
     out.append("def create_bot(**options: object) -> Bot: ...")
@@ -1833,11 +1957,15 @@ def main() -> None:
     OUT_PATH.write_text(final_text)
     events_text = render_events_module(event_callbacks)
     OUT_EVENTS_PATH.write_text(events_text)
-    format_generated_files(OUT_PATH, OUT_EVENTS_PATH)
+    handlers_text = render_handlers_runtime(event_callbacks)
+    OUT_HANDLERS_PATH.write_text(handlers_text)
+    format_generated_files(OUT_PATH, OUT_EVENTS_PATH, OUT_HANDLERS_PATH)
     final_text = OUT_PATH.read_text(encoding="utf-8")
     events_text = OUT_EVENTS_PATH.read_text(encoding="utf-8")
+    handlers_text = OUT_HANDLERS_PATH.read_text(encoding="utf-8")
     print(f"Wrote {OUT_PATH} ({len(final_text.splitlines())} lines)")
     print(f"Wrote {OUT_EVENTS_PATH} ({len(events_text.splitlines())} lines)")
+    print(f"Wrote {OUT_HANDLERS_PATH} ({len(handlers_text.splitlines())} lines)")
 
 
 if __name__ == "__main__":
