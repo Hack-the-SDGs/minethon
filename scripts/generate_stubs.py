@@ -774,6 +774,166 @@ class Recipe:
     ingredients: list[object]
     delta: list[object]
     requiresTable: bool
+
+
+# --- mineflayer-pathfinder stubs ---
+# Only pathfinder gets a typed wrapper (AGENTS.md: all other plugins go
+# through `bot.require(...)` and their own README).
+# Ref: node_modules/mineflayer-pathfinder/index.d.ts
+
+class Move:
+    x: float
+    y: float
+    z: float
+    cost: float
+    remainingBlocks: int
+    parkour: bool
+    hash: str
+
+
+class Goal:
+    """Base class for all pathfinder goals."""
+    def hasChanged(self) -> bool: ...
+    def isValid(self) -> bool: ...
+
+
+class GoalBlock(Goal):
+    """Reach this exact block (integer coords)."""
+    x: float
+    y: float
+    z: float
+    def __init__(self, x: float, y: float, z: float) -> None: ...
+
+
+class GoalNear(Goal):
+    """Reach within `range` blocks of (x, y, z)."""
+    x: float
+    y: float
+    z: float
+    rangeSq: float
+    def __init__(self, x: float, y: float, z: float, range: float) -> None: ...
+
+
+class GoalXZ(Goal):
+    """Reach the XZ column, any Y."""
+    x: float
+    z: float
+    def __init__(self, x: float, z: float) -> None: ...
+
+
+class GoalNearXZ(Goal):
+    """Reach within `range` blocks of (x, z) column, any Y."""
+    x: float
+    z: float
+    rangeSq: float
+    def __init__(self, x: float, z: float, range: float) -> None: ...
+
+
+class GoalY(Goal):
+    """Reach the given Y level."""
+    y: float
+    def __init__(self, y: float) -> None: ...
+
+
+class GoalGetToBlock(Goal):
+    """Get adjacent to (not on) the block at (x, y, z) — e.g. reach a chest."""
+    x: float
+    y: float
+    z: float
+    def __init__(self, x: float, y: float, z: float) -> None: ...
+
+
+class GoalFollow(Goal):
+    """Follow an entity, staying within `range` blocks."""
+    x: float
+    y: float
+    z: float
+    entity: Entity
+    rangeSq: float
+    def __init__(self, entity: Entity, range: float) -> None: ...
+
+
+class GoalCompositeAll(Goal):
+    """Only satisfied when ALL sub-goals are reached."""
+    def __init__(self, goals: list[Goal] = ...) -> None: ...
+    def push(self, goal: Goal) -> None: ...
+
+
+class GoalCompositeAny(Goal):
+    """Satisfied when ANY sub-goal is reached."""
+    def __init__(self, goals: list[Goal] = ...) -> None: ...
+    def push(self, goal: Goal) -> None: ...
+
+
+class GoalInvert(Goal):
+    """Avoid another goal (move AWAY from it)."""
+    def __init__(self, goal: Goal) -> None: ...
+
+
+class Goals:
+    """Container exposing pathfinder's goal constructors.
+
+    Accessed via `pf.goals.GoalNear(...)` where
+    `pf = bot.load_plugin('mineflayer-pathfinder')`.
+    """
+    Goal: type[Goal]
+    GoalBlock: type[GoalBlock]
+    GoalNear: type[GoalNear]
+    GoalXZ: type[GoalXZ]
+    GoalNearXZ: type[GoalNearXZ]
+    GoalY: type[GoalY]
+    GoalGetToBlock: type[GoalGetToBlock]
+    GoalFollow: type[GoalFollow]
+    GoalCompositeAll: type[GoalCompositeAll]
+    GoalCompositeAny: type[GoalCompositeAny]
+    GoalInvert: type[GoalInvert]
+
+
+class Movements:
+    """Per-bot pathfinder movement configuration.
+
+    Construct with `pf.Movements(bot)`, tweak flags/costs, then call
+    `bot.pathfinder.setMovements(move)`.
+    """
+    canDig: bool
+    canOpenDoors: bool
+    allow1by1towers: bool
+    allowFreeMotion: bool
+    allowParkour: bool
+    allowSprinting: bool
+    allowEntityDetection: bool
+    digCost: float
+    placeCost: float
+    maxDropDown: int
+    def __init__(self, bot: object) -> None: ...
+
+
+class Pathfinder:
+    """Runtime pathfinder API — attached to the bot as `bot.pathfinder`.
+
+    Only available after `bot.load_plugin('mineflayer-pathfinder')`.
+    Ref: node_modules/mineflayer-pathfinder/index.d.ts — Pathfinder
+    """
+    thinkTimeout: int
+    tickTimeout: int
+    def setGoal(self, goal: Goal | None, dynamic: bool = ...) -> None: ...
+    def setMovements(self, movements: Movements) -> None: ...
+    def goto(self, goal: Goal) -> None: ...
+    def stop(self) -> None: ...
+    def isMoving(self) -> bool: ...
+    def isMining(self) -> bool: ...
+    def isBuilding(self) -> bool: ...
+    def bestHarvestTool(self, block: Block) -> Item | None: ...
+
+
+class PathfinderModule:
+    """The npm module returned by `bot.load_plugin('mineflayer-pathfinder')`.
+
+    Ref: node_modules/mineflayer-pathfinder/index.d.ts — top-level exports
+    """
+    pathfinder: Callable[..., None]
+    goals: Goals
+    Movements: type[Movements]
 '''
 
 
@@ -907,7 +1067,30 @@ def render_bot(bot_body: str, event_callbacks: list[tuple[str, str]]) -> list[st
     lines.append("")
     lines.extend(render_on_overloads(event_callbacks, "once"))
     lines.append("")
-    # run_forever — defined in runtime but we surface it in the stub
+    # Minethon-specific additions — defined in bot.py at runtime.
+    lines.append("    # --- Minethon-specific methods (defined in bot.py) ---")
+    lines.append("    # Populated after bot.load_plugin('mineflayer-pathfinder'):")
+    lines.append("    pathfinder: Pathfinder")
+    lines.append("")
+    lines.append("    @overload")
+    lines.append("    def load_plugin(")
+    lines.append("        self,")
+    lines.append('        name: Literal["mineflayer-pathfinder"],')
+    lines.append("        version: str | None = ...,")
+    lines.append("        *,")
+    lines.append("        export_key: str | None = ...,")
+    lines.append("        **options: object,")
+    lines.append("    ) -> PathfinderModule: ...")
+    lines.append("    @overload")
+    lines.append("    def load_plugin(")
+    lines.append("        self,")
+    lines.append("        name: str,")
+    lines.append("        version: str | None = ...,")
+    lines.append("        *,")
+    lines.append("        export_key: str | None = ...,")
+    lines.append("        **options: object,")
+    lines.append("    ) -> object: ...")
+    lines.append("    def require(self, name: str, version: str | None = ...) -> object: ...")
     lines.append("    def run_forever(self) -> None: ...")
     return lines
 
