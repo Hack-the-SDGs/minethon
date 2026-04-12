@@ -1902,13 +1902,17 @@ def render_handlers_runtime(
             "",
         ]
     )
+    # Runtime methods use `pass` bodies (not stub-style `...`) so ruff format
+    # inserts blank lines between them — otherwise PyCharm's PEP 8 checker
+    # flags every method pair with E301.
     for event, _alias, args in event_callbacks:
         attr = _event_attr_name(event, prefix="on")
         if args:
             sig = ", ".join(["self"] + [f"{name}: {py_type}" for name, py_type in args])
         else:
             sig = "self"
-        lines.append(f"    def {attr}({sig}) -> None: ...")
+        lines.append(f"    def {attr}({sig}) -> None:")
+        lines.append("        pass")
     lines.append("")
     return "\n".join(lines)
 
