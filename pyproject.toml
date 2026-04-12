@@ -53,6 +53,14 @@ pylint.max-branches = 15
 pylint.max-statements = 65
 
 [tool.ruff.lint.per-file-ignores]
+# bridge / public entry — interops with untyped JSPyBridge proxies
+"src/minethon/_bridge.py" = [
+    "ANN401",  # JS proxy return types are Any by necessity
+]
+"src/minethon/bot.py" = [
+    "ANN401",  # Bot.__init__ / __getattr__ / create_bot expose Any for JS proxy interop
+]
+
 # test suite — relaxed for assertions, magic values, private access
 "tests/*" = [
     "INP001",              # not a namespace package
@@ -82,6 +90,12 @@ pylint.max-statements = 65
 [tool.pyright]
 include = ["src"]
 typeCheckingMode = "strict"
+# The `javascript` package (JSPyBridge) ships no type stubs; treat its surface as Any.
+reportMissingTypeStubs = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
