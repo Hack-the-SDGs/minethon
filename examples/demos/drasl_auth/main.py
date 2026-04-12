@@ -25,6 +25,7 @@ async def main() -> None:
 
     await bot.connect()
     await bot.wait_until_spawned()
+
     print(f"Bot spawned at {bot.position}")
     await bot.chat("Hello from minethon!")
 
