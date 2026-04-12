@@ -216,7 +216,8 @@ class Bot:
         self._js.loadPlugin(plugin_fn)
         return module
 
-    def require(self, name: str, version: str | None = None) -> Any:
+    @staticmethod
+    def require(name: str, version: str | None = None) -> Any:
         """Raw escape hatch — load a JS module and return its proxy.
 
         Use for Type B/C/D plugins (prismarine-viewer, web-inventory,
