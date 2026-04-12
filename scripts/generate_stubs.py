@@ -1760,6 +1760,7 @@ def render_bot(
         "    def require(self, name: str, version: str | None = ...) -> object: ..."
     )
     lines.append("    def run_forever(self) -> None: ...")
+    lines.append('    def bind(self, handlers: "BotHandlers") -> "BotHandlers": ...')
     return lines
 
 

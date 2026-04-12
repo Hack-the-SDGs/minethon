@@ -6258,6 +6258,34 @@ class Bot:
         按 Ctrl-C 會乾淨退出
         """
 
+    def bind(self, handlers: "BotHandlers") -> "BotHandlers":
+        """Class-based handler 註冊入口——一次把 `BotHandlers` 子類別上所有被 override 的 `on_<event>` 方法，依對應事件掛到底層 JS EventEmitter 上
+
+        會略過沒有被子類別覆寫的方法（繼承自 base 的 no-op 不會被註冊），所以學生只需要覆寫自己關心的事件
+
+        handler 參數個數不需要跟 d.ts 一模一樣——minethon 的 `_normalize_handler` 會自動補 `None` / 截斷
+
+        ```python
+        from minethon import BotHandlers, create_bot
+
+
+        class My(BotHandlers):
+            def on_chat(self, username, message, *_):
+                print(username, message)
+
+
+        bot = create_bot(host="localhost", username="Student")
+        bot.bind(My())
+        bot.run_forever()
+        ```
+
+        Args:
+            handlers: `BotHandlers` 的實例；會走訪它的類別並把每個 override 過的 `on_<event>` 綁到對應事件
+
+        Returns:
+            傳入的 `handlers` 實例，方便 fluent chain
+        """
+
 class BotHandlers:
     """Class-based handler base. Subclass, override `on_<event>`, then call `bot.bind(handlers)`.
 
