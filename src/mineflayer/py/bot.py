@@ -14,7 +14,7 @@
 # ===========================================================================
 import os
 
-from javascript import require, On, console
+from javascript import On, console, require
 
 mineflayer = require("mineflayer", "latest")
 Vec3 = require("vec3").Vec3
@@ -87,7 +87,7 @@ def say_equipment(username):
         eqText.append(f"wearing a {eq[3].displayName} on your torso")
     if eq[4]:
         eqText.append(f"wearing a {eq[4].displayName} on your head")
-    if len(eqText):
+    if eqText:
         bot.chat(f"You are {', '.join(eqText)}.")
     else:
         bot.chat("You are naked!")

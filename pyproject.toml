@@ -28,6 +28,7 @@ src = ["src"]
 fix = true
 line-length = 88
 target-version = "py314"
+extend-exclude = ["src/mineflayer"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -111,6 +112,7 @@ pylint.max-statements = 65
 
 [tool.pyright]
 include = ["src"]
+exclude = ["src/mineflayer"]
 typeCheckingMode = "strict"
 # The `javascript` package (JSPyBridge) ships no type stubs; treat its surface as Any.
 reportMissingTypeStubs = "none"
