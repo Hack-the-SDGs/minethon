@@ -53,15 +53,18 @@
 ## 架構四層（嚴格分離）
 
 1. **`minethon/__init__.py`** — 使用者入口。`create_bot()` 與 `Bot` class 的原生 Python 方法（`on`、`load_plugin`、`require`、dict-friendly collection 包裝）
-2. **`minethon/_types.pyi`** — IDE 補全來源。`Bot` 方法 / 屬性 / event overload，**由 `index.d.ts` 機械轉換而來**，禁手刻
-3. **`minethon/models/`** — 純 Python `@dataclass`（Vec3、Entity、Block、Item、...）。不依賴 JS，可獨立 import 與測試
-4. **`minethon/plugins/`** — 插件 `.pyi` 宣告。**目前只寫 pathfinder**；其他插件學生透過 `bot.require()` 原生使用
+2. **`minethon/bot.pyi`** — IDE 補全來源。**由 `scripts/generate_stubs.py` 產生**，結合兩個來源：
+   - **結構**（class、method / property 簽名、event overload、外部類欄位）：從 `mineflayer/index.d.ts` 機械轉換，禁手刻
+   - **繁體中文 docstring**：從 `docs/stubs_zh_tw.md` 人工維護的 Google-style 段落注入
+3. **`docs/stubs_zh_tw.md`** — IDE hover 說明的 ground truth。每個 `### heading` 對應一個 symbol，generator 讀完後把內文轉成 Python docstring 注入 `bot.pyi`。
+4. **`minethon/models/`** — 純 Python `@dataclass`（Vec3、Entity、Block、Item、...）。不依賴 JS，可獨立 import 與測試
 
 **硬性規則**：
 - `Bot` class 保持薄。行為委託給 JS，只加 Python 糖衣（decorator、dict iteration）
 - 不為每個 mineflayer 方法寫手工 wrapper；全走 `__getattr__` 代理 + `.pyi` 宣告
 - `.pyi` 中禁止出現 `Any`（raw escape hatch 例外）
 - 不對外暴露 JSPyBridge 的 `Proxy` 類型，除非明確標示 raw
+- **結構和描述兩層分離**：改型別簽名 → 升 mineflayer 版本後重跑 generator；改 hover 說明 → 編輯 `docs/stubs_zh_tw.md` 後重跑 generator。兩層不互相汙染
 
 ## 公開 API 風格
 
@@ -175,6 +178,7 @@ uv run pyright src/
 - [x] Pathfinder typed wrapper：`Pathfinder` / `Goals` / `Movements` / `GoalNear`/`GoalBlock`/`GoalXZ`/... 完整型別；`load_plugin('mineflayer-pathfinder')` 回傳強型別 `PathfinderModule`
 - [x] `setup.sh`：檢查 Node 22+ / uv，執行 `uv sync` 並於 JSPyBridge 的 node_modules 預裝固定版本（mineflayer@4.37.0 / vec3@0.1.10 / mineflayer-pathfinder@2.4.5），避免 lazy install
 - [x] `examples/demos/drasl_auth/main.py` — 以新同步 API 重寫（登入、spawn、chat 觸發字、kicked、end），示範 `bot.entity.position` / `bot.players` / `bot.chat` / `bot.quit` / `bot.run_forever()`
+- [x] `docs/stubs_zh_tw.md` — 523 個 symbol 的繁體中文 IDE hover 說明；generator 注入為 Google-style docstrings
 - [ ] `tests/` 單元測試尚未重建（舊測試已隨舊 facade 刪除）
 - [ ] `bot.players` / `bot.entities` 為 JSPyBridge 原生 proxy；`__iter__`/`__getitem__` 來自 JSPyBridge，尚未包自家 Mapping wrapper
 - [ ] `MinethonError` / `NotSpawnedError` / `PlayerNotFoundError` / `PluginNotInstalledError` 錯誤體系尚未實作
@@ -186,5 +190,6 @@ uv run pyright src/
 2026-04-13 — `_types.pyi` 機械產生，來源六份 `index.d.ts`（mineflayer、vec3、prismarine-entity/block/item/chat/windows/recipe）；禁手刻、禁憑記憶。Pathfinder 的型別就近掛在同一個 `bot.pyi`，保持 single-file 結構。
 2026-04-13 — `bot.on(event)` 不提供 `event: str` fallback overload——強制學生使用 Literal 事件名以取得 IDE 補全；typo 會被 pyright 擋。
 2026-04-13 — Pyright 設定：strict + `reportMissingTypeStubs="none"` + `reportUnknown*="none"` + `reportUnusedFunction="none"`。前三者因 JSPyBridge 無 stub；後者因 `@bot.on()` 裝飾器上的 inner function 會被誤判為 unused。
+2026-04-13 — 描述層獨立：原本 `_types.pyi` 機械轉換只處理型別，無 IDE hover 中文說明。新增 `docs/stubs_zh_tw.md` 作為人工維護的繁體中文 ground truth（523 symbols / 2506 行），generator 讀完後以 Google docstring 格式注入 `bot.pyi`。「型別結構」與「中文描述」從此兩層分離，各自獨立更新。
 2026-04-13 — npm 版本全釘死於 `setup.sh`，`_bridge.py` 宣告 `MINEFLAYER_VERSION`/`VEC3_VERSION` 常數；`require()` 傳入版本參數。lazy install 由 `setup.sh` 預裝規避，不走 runtime check。
 2026-04-13 — `load_plugin` 使用內建 `_PLUGIN_EXPORT_KEY` 對照表處理 pathfinder（模組 export `.pathfinder` 才是 installer）；其他 Type A 插件假設 module 本身就是 installer。支援 `export_key` kwarg 與 `**options`（HOF 模式如 dashboard）。
