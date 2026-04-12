@@ -29,6 +29,246 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DTS_ROOT = REPO_ROOT / "src/mineflayer/js/node_modules"
 MF_INDEX = DTS_ROOT / "mineflayer/index.d.ts"
 OUT_PATH = REPO_ROOT / "src/minethon/bot.pyi"
+STUBS_DOC = REPO_ROOT / "docs/stubs_zh_tw.md"
+
+
+# --------------------------------------------------------------------------- #
+#  Stubs doc parsing & docstring injection
+# --------------------------------------------------------------------------- #
+
+
+def parse_stubs_doc() -> dict[str, str]:
+    """Parse docs/stubs_zh_tw.md into `{lookup_key: description_body}`.
+
+    Heading → key mapping:
+      - ``### bot.chat(message)``         → ``bot.chat``
+      - ``### bot.health``                → ``bot.health``
+      - ``### "chat"``                    → ``event:chat``
+      - ``### Vec3``                      → ``Vec3``
+      - ``### Vec3.offset(dx, dy, dz)``   → ``Vec3.offset``
+      - ``### Entity.position``           → ``Entity.position``
+
+    Sections whose body is empty return an empty string — callers should
+    treat empty body as "no docstring".
+    """
+    if not STUBS_DOC.exists():
+        return {}
+    text = STUBS_DOC.read_text()
+    sections: dict[str, str] = {}
+    current_key: str | None = None
+    current_body: list[str] = []
+
+    def _key_from_heading(heading: str) -> str:
+        t = heading.removeprefix("### ").strip()
+        m = re.match(r'^"([^"]+)"', t)
+        if m:
+            return f"event:{m.group(1)}"
+        # Strip trailing `(...)` argument list
+        m2 = re.match(r"^([^()\s]+)\s*\(", t)
+        if m2:
+            return m2.group(1)
+        return t
+
+    def _finalize(body: list[str]) -> str:
+        # Drop trailing "---" thematic breaks, empty lines, and `## `-level
+        # section separators that belong to file-level layout rather than the
+        # symbol's description.
+        while body:
+            t = body[-1].strip()
+            if not t or t == "---" or t.startswith("## "):
+                body.pop()
+                continue
+            break
+        return "\n".join(body).strip("\n")
+
+    for raw in text.split("\n"):
+        if raw.startswith("### "):
+            if current_key is not None:
+                sections[current_key] = _finalize(current_body)
+            current_key = _key_from_heading(raw)
+            current_body = []
+        elif current_key is not None:
+            current_body.append(raw)
+    if current_key is not None:
+        sections[current_key] = _finalize(current_body)
+    return sections
+
+
+def format_doc_block(body: str, indent: str) -> list[str]:
+    """Format a description body as lines of a triple-quoted Python docstring.
+
+    Returns an empty list if body is empty / whitespace-only.
+    """
+    body = body.strip("\n").rstrip()
+    if not body.strip():
+        return []
+    body_lines = body.split("\n")
+    if len(body_lines) == 1:
+        return [f'{indent}"""{body_lines[0]}"""']
+    out = [f'{indent}"""{body_lines[0]}']
+    out.extend(f"{indent}{bl}" if bl else "" for bl in body_lines[1:])
+    out.append(f'{indent}"""')
+    return out
+
+
+def inject_docstrings(text: str, descriptions: dict[str, str]) -> str:
+    """Post-process the generated `.pyi` text to splice in docstrings."""
+    lines = text.split("\n")
+    out: list[str] = []
+    current_class: str | None = None
+    i = 0
+    n = len(lines)
+
+    def key_for_member(name: str) -> str:
+        if current_class == "Bot":
+            return f"bot.{name}"
+        if current_class:
+            return f"{current_class}.{name}"
+        return name
+
+    while i < n:
+        line = lines[i]
+        indent_prefix = line[: len(line) - len(line.lstrip(" "))]
+        stripped = line.strip()
+
+        # Module-level: detect class end by top-level non-class content
+        if current_class and line and not line.startswith(" "):
+            # Any line at column 0 that isn't blank terminates the class scope
+            if not stripped.startswith(("class ", "#")):
+                current_class = None
+
+        # Class declaration
+        m_cls = re.match(r"^class (\w+)(?:\([^)]*\))?:$", stripped)
+        if m_cls:
+            current_class = m_cls.group(1)
+            out.append(line)
+            # Consume existing docstring (if any) directly below the class line
+            j = i + 1
+            ex_doc_consumed = False
+            if j < n and lines[j].lstrip().startswith('"""'):
+                ex_doc_consumed = True
+                first_ds = lines[j]
+                # Single-line docstring: contains two pairs of triple quotes
+                if first_ds.count('"""') >= 2:
+                    j += 1
+                else:
+                    j += 1
+                    while j < n and '"""' not in lines[j]:
+                        j += 1
+                    if j < n:
+                        j += 1
+            new_doc = descriptions.get(current_class)
+            if new_doc:
+                out.extend(format_doc_block(new_doc, indent_prefix + "    "))
+            elif ex_doc_consumed:
+                out.extend(lines[i + 1 : j])
+            i = j
+            continue
+
+        # @overload followed by def on/once
+        if stripped == "@overload":
+            out.append(line)
+            j = i + 1
+            if j < n:
+                next_line = lines[j]
+                m_ov = re.match(
+                    r'^( +)def (on|once)\(self, event: Literal\["([^"]+)"\]\)'
+                    r"\s*->\s*[^:]+:\s*\.\.\.\s*$",
+                    next_line,
+                )
+                if m_ov:
+                    ov_indent = m_ov.group(1)
+                    event_name = m_ov.group(3)
+                    doc = descriptions.get(f"event:{event_name}")
+                    if doc:
+                        sig_part = next_line[:-4].rstrip()
+                        out.append(sig_part)
+                        out.extend(format_doc_block(doc, ov_indent + "    "))
+                        out.append(f"{ov_indent}    ...")
+                        i = j + 1
+                        continue
+                    out.append(next_line)
+                    i = j + 1
+                    continue
+            i += 1
+            continue
+
+        # Single-line method: `<indent>def name(...) -> T: ...`
+        m_method_single = re.match(
+            r"^( +)def (\w+)\([^)]*\)(?:\s*->\s*[^:]+)?:\s*\.\.\.\s*$", line
+        )
+        if m_method_single:
+            m_indent = m_method_single.group(1)
+            name = m_method_single.group(2)
+            key = key_for_member(name)
+            doc = descriptions.get(key)
+            if doc:
+                sig_part = line[:-4].rstrip()
+                out.append(sig_part)
+                out.extend(format_doc_block(doc, m_indent + "    "))
+                out.append(f"{m_indent}    ...")
+            else:
+                out.append(line)
+            i += 1
+            continue
+
+        # Multi-line method: `<indent>def name(` then continuation lines
+        m_method_start = re.match(r"^( +)def (\w+)\(\s*$", line)
+        if m_method_start:
+            m_indent = m_method_start.group(1)
+            name = m_method_start.group(2)
+            method_lines = [line]
+            j = i + 1
+            while j < n and not method_lines[-1].rstrip().endswith("..."):
+                method_lines.append(lines[j])
+                j += 1
+            last = method_lines[-1]
+            key = key_for_member(name)
+            doc = descriptions.get(key)
+            if doc and last.rstrip().endswith(": ..."):
+                out.extend(method_lines[:-1])
+                out.append(last.rstrip()[:-4].rstrip())
+                out.extend(format_doc_block(doc, m_indent + "    "))
+                out.append(f"{m_indent}    ...")
+            else:
+                out.extend(method_lines)
+            i = j
+            continue
+
+        # Class attribute / property: `    name: Type` (skip type aliases at column 0)
+        m_attr = re.match(r"^( +)(\w+): ", line)
+        if m_attr and current_class:
+            attr_indent = m_attr.group(1)
+            name = m_attr.group(2)
+            key = key_for_member(name)
+            out.append(line)
+            doc = descriptions.get(key)
+            if doc:
+                out.extend(format_doc_block(doc, attr_indent))
+            i += 1
+            continue
+
+        # Module-level function: `def create_bot(...) -> Bot: ...`
+        m_func = re.match(
+            r"^def (\w+)\([^)]*\)(?:\s*->\s*[^:]+)?:\s*\.\.\.\s*$", line
+        )
+        if m_func:
+            name = m_func.group(1)
+            doc = descriptions.get(name)
+            if doc:
+                sig_part = line[:-4].rstrip()
+                out.append(sig_part)
+                out.extend(format_doc_block(doc, "    "))
+                out.append("    ...")
+            else:
+                out.append(line)
+            i += 1
+            continue
+
+        out.append(line)
+        i += 1
+
+    return "\n".join(out)
 
 
 # --------------------------------------------------------------------------- #
@@ -1314,8 +1554,19 @@ def main() -> None:
     out.append("def create_bot(**options: object) -> Bot: ...")
     out.append("")
 
-    OUT_PATH.write_text("\n".join(out))
-    print(f"Wrote {OUT_PATH} ({len(out)} lines)")
+    raw_text = "\n".join(out)
+    descriptions = parse_stubs_doc()
+    if descriptions:
+        final_text = inject_docstrings(raw_text, descriptions)
+        print(
+            f"injected docstrings for {len(descriptions)} symbols "
+            f"from {STUBS_DOC.name}"
+        )
+    else:
+        final_text = raw_text
+        print(f"no stubs doc at {STUBS_DOC}; skipping docstring injection")
+    OUT_PATH.write_text(final_text)
+    print(f"Wrote {OUT_PATH} ({len(final_text.splitlines())} lines)")
 
 
 if __name__ == "__main__":
