@@ -23,6 +23,7 @@ from javascript import On, Once, require
 from minethon import _type_shells
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
 from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
+from minethon._handlers import BotHandlers
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -235,6 +236,33 @@ class Bot:
         """
         resolved_version = _resolve_package_version(name, version)
         return require(name, resolved_version)
+
+    def bind(self, handlers: BotHandlers) -> BotHandlers:
+        """Register every overridden ``on_<event>`` on a `BotHandlers` instance.
+
+        Walks :class:`BotHandlers`' generated method set, finds entries
+        overridden on the concrete subclass, and wires each one to the
+        matching :class:`BotEvent` via :meth:`on`. Handler arity is still
+        normalized by ``_normalize_handler``, so short signatures like
+        ``def on_chat(self, username, message)`` work.
+
+        Returns the handlers instance so calls can chain.
+
+        Example::
+
+            class My(BotHandlers):
+                def on_chat(self, username, message, *_): ...
+
+            bot.bind(My())
+        """
+        for attr, event in EVENT_ATTRIBUTE_MAP.items():
+            method_name = f"on_{attr}"
+            impl = getattr(type(handlers), method_name, None)
+            base_impl = getattr(BotHandlers, method_name, None)
+            if impl is None or impl is base_impl:
+                continue
+            self.on(event)(getattr(handlers, method_name))
+        return handlers
 
     def run_forever(self) -> None:
         """Block the calling thread until the bot disconnects.

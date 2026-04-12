@@ -25,6 +25,7 @@ Typical usage::
 from __future__ import annotations
 
 from minethon._events import BotEvent
+from minethon._handlers import BotHandlers
 from minethon.bot import Bot, create_bot
 from minethon.errors import (
     MinethonError,
@@ -37,6 +38,7 @@ from minethon.errors import (
 __all__ = [
     "Bot",
     "BotEvent",
+    "BotHandlers",
     "MinethonError",
     "NotSpawnedError",
     "PlayerNotFoundError",
