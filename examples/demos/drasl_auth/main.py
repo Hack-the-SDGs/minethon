@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import os
 
-from minethon import create_bot
+from minethon import BotEvent, create_bot
+from minethon.models import ChatMessage
 
 
 def main() -> None:
@@ -28,22 +29,22 @@ def main() -> None:
         session_server=os.environ["MC_SESSION_SERVER"],
     )
 
-    @bot.on("login")
+    @bot.on(BotEvent.LOGIN)
     def on_login() -> None:
         print(f"Logged in as {bot.username}")
 
-    @bot.on("spawn")
+    @bot.on_spawn
     def on_spawn() -> None:
         p = bot.entity.position
         print(f"Spawned at ({p.x:.1f}, {p.y:.1f}, {p.z:.1f})")
         bot.chat("Hello from minethon!")
 
-    @bot.on("chat")
+    @bot.on_chat
     def on_chat(
         username: str,
         message: str,
         translate: str | None,
-        json_msg: object,
+        json_msg: ChatMessage,
         matches: list[str] | None,
     ) -> None:
         if username == bot.username:
@@ -57,11 +58,11 @@ def main() -> None:
             names = list(bot.players)  # dict-like keys
             bot.chat(f"Online: {', '.join(names)}")
 
-    @bot.on("kicked")
+    @bot.on(BotEvent.KICKED)
     def on_kicked(reason: str, logged_in: bool) -> None:
         print(f"Kicked (loggedIn={logged_in}): {reason}")
 
-    @bot.on("end")
+    @bot.on_end
     def on_end(reason: str) -> None:
         print(f"Disconnected: {reason}")
 
