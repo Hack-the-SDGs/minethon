@@ -15,7 +15,7 @@
 
 目前正式決策摘要：
 
-- 公開事件入口同時支援 `@bot.on("chat")`、`@bot.on_chat`、`@bot.on(BotEvent.CHAT)`
+- 公開事件入口同時支援 `@bot.on_chat`、`@bot.on(BotEvent.CHAT)`
 - runtime façade 在 `src/minethon/bot.py`
 - IDE 型別層由 `scripts/generate_stubs.py` 生成 `src/minethon/bot.pyi`
 - `BotEvent` 由 `src/minethon/_events.py` 生成

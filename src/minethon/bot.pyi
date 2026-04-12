@@ -15,7 +15,7 @@
 # Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Literal, Self, TypedDict, overload
 
 from minethon._events import BotEvent
@@ -1051,7 +1051,7 @@ class Player:
     """玩家的遊戲模式數字 ID"""
     ping: float
     """玩家延遲毫秒"""
-    entity: Entity
+    entity: Entity | None
     """玩家的 `Entity` 物件（若該玩家目前在視野內）；否則為 `None`"""
     skinData: object | None
     """玩家膚色貼圖資料 dict（含 `url` 和 `model`），可能為 `None`"""
@@ -1498,7 +1498,7 @@ class Bot:
 
     def __init__(self, js_bot: object) -> None:
         pass
-    username: str
+    username: str | None
     """機器人登入伺服器用的遊戲名稱
     登入前可能還是 `None`
     """
@@ -1508,11 +1508,11 @@ class Bot:
     """大版本字串"""
     version: str
     """伺服器協議對應的 Minecraft 版本字串"""
-    entity: Entity
+    entity: Entity | None
     """機器人自身的 `Entity` 物件
     常用欄位：`position` / `velocity` / `yaw` / `pitch` / `onGround` / `height` 等
     """
-    entities: dict[str, Entity]
+    entities: Mapping[str, Entity]
     """所有機器人可見實體的對應表，key 是實體數字 ID、value 是 `Entity`
     含玩家、怪物、掉落物、箭、船等
     """
@@ -1523,7 +1523,7 @@ class Bot:
     game: GameState
     player: Player
     """機器人自己的 `Player` 物件（名單上的那一筆，含 `ping`、顯示名稱等），等同 `bot.players[bot.username]`"""
-    players: dict[str, Player]
+    players: Mapping[str, Player]
     """所有連線玩家的對應表，key 是玩家名稱、value 是 `Player`
     支援 `bot.players["alice"]` 查找，也支援 `for name in bot.players:` 迭代取得全部名稱
 
@@ -1574,7 +1574,7 @@ class Bot:
     """機器人的物品欄 `Window` 物件
     用 `bot.inventory.items()` 取所有物品、`bot.inventory.findInventoryItem(...)` 搜尋特定物品
     """
-    targetDigBlock: Block
+    targetDigBlock: Block | None
     """目前正在挖的方塊 `Block`，沒有在挖時為 `None`"""
     isSleeping: bool
     """機器人目前是否躺在床上"""

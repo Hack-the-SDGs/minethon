@@ -1431,9 +1431,41 @@ class PathfinderModule:
 # --------------------------------------------------------------------------- #
 
 
-def render_property(member: Member) -> str:
+# Source-verified overrides for fields whose runtime value can be `None`
+# before login/spawn or after the entity disappears. JSPyBridge returns
+# missing/null JS properties as Python `None`, so the stub must reflect that
+# even when upstream `.d.ts` types them as non-null.
+# Ref:
+#   mineflayer/lib/plugins/entities.js — `bot.entity` / `player.entity` assign
+#   mineflayer/lib/plugins/digging.js  — `bot.targetDigBlock` reset to null
+NULLABLE_FIELD_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "Bot.username",
+        "Bot.entity",
+        "Bot.targetDigBlock",
+        "Player.entity",
+    }
+)
+
+# Source-verified overrides for fields whose runtime value is a raw JSPyBridge
+# proxy, not a real Python dict. The proxy supports `__getitem__`, `__iter__`,
+# and `__contains__` but NOT `.keys()` / `.items()` / `len(...)`; typing it as
+# `dict[...]` mis-teaches the IDE. Expose as `Mapping` until a real wrapper
+# ships (see AGENTS.md "當前狀態" — collection wrapper TODO).
+MAPPING_FIELD_OVERRIDES: dict[str, str] = {
+    "Bot.players": "Mapping[str, Player]",
+    "Bot.entities": "Mapping[str, Entity]",
+}
+
+
+def render_property(member: Member, *, class_name: str | None = None) -> str:
+    qualified = f"{class_name}.{member.name}" if class_name else ""
+    if qualified in MAPPING_FIELD_OVERRIDES:
+        return f"    {member.name}: {MAPPING_FIELD_OVERRIDES[qualified]}"
     py_type = ts_to_py(member.ts_type)
     if member.optional and "None" not in py_type:
+        py_type = f"{py_type} | None"
+    if qualified in NULLABLE_FIELD_OVERRIDES and "None" not in py_type:
         py_type = f"{py_type} | None"
     return f"    {member.name}: {py_type}"
 
@@ -1472,7 +1504,7 @@ def render_interface(
             lines.append("")  # blank line before each method for E301
             lines.append(render_method(m))
         else:
-            lines.append(render_property(m))
+            lines.append(render_property(m, class_name=name))
     return lines
 
 
@@ -1619,7 +1651,7 @@ def render_bot(
         if m.is_method:
             lines.append(render_method(m))
         else:
-            lines.append(render_property(m))
+            lines.append(render_property(m, class_name="Bot"))
 
     # Event overloads
     lines.append("")
@@ -1730,7 +1762,7 @@ HEADER = """\
 # Ref: {pathfinder_index}
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Literal, Self, TypedDict, overload
 
 from minethon._events import BotEvent
