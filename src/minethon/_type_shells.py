@@ -136,6 +136,10 @@ class Player(_Shell):
     pass
 
 
+class SkinData(_Shell):
+    pass
+
+
 class ChatPattern(_Shell):
     pass
 
@@ -232,6 +236,26 @@ class Villager(_Shell):
     pass
 
 
+class ScoreBoard(_Shell):
+    pass
+
+
+class ScoreBoardItem(_Shell):
+    pass
+
+
+class Team(_Shell):
+    pass
+
+
+class BossBar(_Shell):
+    pass
+
+
+class Particle(_Shell):
+    pass
+
+
 TYPE_SHELL_NAMES = (
     "Vec3",
     "ChatMessageScore",
@@ -264,6 +288,7 @@ TYPE_SHELL_NAMES = (
     "PartiallyComputedPath",
     "PathfinderModule",
     "Player",
+    "SkinData",
     "ChatPattern",
     "SkinParts",
     "GameSettings",
@@ -288,6 +313,11 @@ TYPE_SHELL_NAMES = (
     "EnchantmentTable",
     "Anvil",
     "Villager",
+    "ScoreBoard",
+    "ScoreBoardItem",
+    "Team",
+    "BossBar",
+    "Particle",
 )
 
 

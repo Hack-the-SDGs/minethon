@@ -16,16 +16,42 @@ from typing import TYPE_CHECKING, Literal
 
 MessagePosition = Literal["chat", "system", "game_info"]
 
+DisplaySlot = Literal[
+    "list",
+    "sidebar",
+    "belowName",
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+]
+
 if TYPE_CHECKING:
     from minethon._type_shells import (
         Block,
+        BossBar,
         ChatMessage,
         Effect,
         Entity,
         Goal,
         Instrument,
         PartiallyComputedPath,
+        Particle,
         Player,
+        ScoreBoard,
+        Team,
         Vec3,
         Window,
     )
@@ -55,13 +81,13 @@ class BotHandlers:
     ) -> None:
         pass
 
-    def on_boss_bar_created(self, boss_bar: object) -> None:
+    def on_boss_bar_created(self, boss_bar: BossBar) -> None:
         pass
 
-    def on_boss_bar_deleted(self, boss_bar: object) -> None:
+    def on_boss_bar_deleted(self, boss_bar: BossBar) -> None:
         pass
 
-    def on_boss_bar_updated(self, boss_bar: object) -> None:
+    def on_boss_bar_updated(self, boss_bar: BossBar) -> None:
         pass
 
     def on_breath(self) -> None:
@@ -241,7 +267,7 @@ class BotHandlers:
     def on_note_heard(self, block: Block, instrument: Instrument, pitch: float) -> None:
         pass
 
-    def on_particle(self, particle: object) -> None:
+    def on_particle(self, particle: Particle) -> None:
         pass
 
     def on_path_reset(
@@ -296,22 +322,24 @@ class BotHandlers:
     def on_respawn(self) -> None:
         pass
 
-    def on_score_removed(self, scoreboard: object, item: float) -> None:
+    def on_score_removed(self, scoreboard: ScoreBoard, item: float) -> None:
         pass
 
-    def on_score_updated(self, scoreboard: object, item: float) -> None:
+    def on_score_updated(self, scoreboard: ScoreBoard, item: float) -> None:
         pass
 
-    def on_scoreboard_created(self, scoreboard: object) -> None:
+    def on_scoreboard_created(self, scoreboard: ScoreBoard) -> None:
         pass
 
-    def on_scoreboard_deleted(self, scoreboard: object) -> None:
+    def on_scoreboard_deleted(self, scoreboard: ScoreBoard) -> None:
         pass
 
-    def on_scoreboard_position(self, position: str, scoreboard: object) -> None:
+    def on_scoreboard_position(
+        self, position: DisplaySlot, scoreboard: ScoreBoard
+    ) -> None:
         pass
 
-    def on_scoreboard_title_changed(self, scoreboard: object) -> None:
+    def on_scoreboard_title_changed(self, scoreboard: ScoreBoard) -> None:
         pass
 
     def on_sleep(self) -> None:
@@ -328,19 +356,19 @@ class BotHandlers:
     def on_spawn_reset(self) -> None:
         pass
 
-    def on_team_created(self, team: object) -> None:
+    def on_team_created(self, team: Team) -> None:
         pass
 
-    def on_team_member_added(self, team: object) -> None:
+    def on_team_member_added(self, team: Team) -> None:
         pass
 
-    def on_team_member_removed(self, team: object) -> None:
+    def on_team_member_removed(self, team: Team) -> None:
         pass
 
-    def on_team_removed(self, team: object) -> None:
+    def on_team_removed(self, team: Team) -> None:
         pass
 
-    def on_team_updated(self, team: object) -> None:
+    def on_team_updated(self, team: Team) -> None:
         pass
 
     def on_time(self) -> None:

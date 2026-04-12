@@ -1034,6 +1034,27 @@ Dimension = Literal["the_nether", "overworld", "the_end"]
 Difficulty = Literal["peaceful", "easy", "normal", "hard"]
 ControlState = Literal["forward", "back", "left", "right", "jump", "sprint", "sneak"]
 EquipmentDestination = Literal["hand", "head", "torso", "legs", "feet", "off-hand"]
+DisplaySlot = Literal[
+    "list",
+    "sidebar",
+    "belowName",
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+]
 MessagePosition = Literal["chat", "system", "game_info"]
 
 # --- Mineflayer aux interfaces ---
@@ -1053,9 +1074,15 @@ class Player:
     """玩家延遲毫秒"""
     entity: Entity | None
     """玩家的 `Entity` 物件（若該玩家目前在視野內）；否則為 `None`"""
-    skinData: object | None
+    skinData: SkinData | None
     """玩家膚色貼圖資料 dict（含 `url` 和 `model`），可能為 `None`"""
     profileKeys: object | None
+
+class SkinData:
+    """Ref: mineflayer/index.d.ts — SkinData"""
+
+    url: str
+    model: str | None
 
 class ChatPattern:
     """Ref: mineflayer/index.d.ts — ChatPattern"""
@@ -1229,6 +1256,13 @@ class Enchantment:
     level: float
     expected: object
 
+class ScoreBoardItem:
+    """Ref: mineflayer/index.d.ts — ScoreBoardItem"""
+
+    name: str
+    displayName: ChatMessage
+    value: float
+
 # --- Mineflayer container classes ---
 
 class Chest:
@@ -1342,6 +1376,87 @@ class Villager:
     def close(self) -> None:
         pass
 
+class ScoreBoard:
+    """Ref: mineflayer/index.d.ts — ScoreBoard"""
+
+    name: str
+    title: str
+    itemsMap: dict[str, ScoreBoardItem]
+    items: list[ScoreBoardItem]
+
+    def setTitle(self, title: str) -> None:
+        pass
+
+    def add(self, name: str, value: float) -> ScoreBoardItem:
+        pass
+
+    def remove(self, name: str) -> ScoreBoardItem:
+        pass
+
+class Team:
+    """Ref: mineflayer/index.d.ts — Team"""
+
+    team: str
+    name: ChatMessage
+    friendlyFire: float
+    nameTagVisibility: str
+    collisionRule: str
+    color: str
+    prefix: ChatMessage
+    suffix: ChatMessage
+    memberMap: dict[str, Literal[""]]
+    members: list[str]
+
+    def parseMessage(self, value: str) -> ChatMessage:
+        pass
+
+    def add(self, name: str, value: float) -> None:
+        pass
+
+    def remove(self, name: str) -> None:
+        pass
+
+    def update(
+        self,
+        name: str,
+        friendly_fire: bool,
+        name_tag_visibility: str,
+        collision_rule: str,
+        formatting: float,
+        prefix: str,
+        suffix: str,
+    ) -> None:
+        pass
+
+    def displayName(self, member: str) -> ChatMessage:
+        pass
+
+class BossBar:
+    """Ref: mineflayer/index.d.ts — BossBar"""
+
+    entityUUID: str
+    title: ChatMessage
+    health: float
+    dividers: float
+    color: Literal["pink", "blue", "red", "green", "yellow", "purple", "white"]
+    shouldDarkenSky: bool
+    isDragonBar: bool
+    createFog: bool
+    shouldCreateFog: bool
+
+class Particle:
+    """Ref: mineflayer/index.d.ts — Particle"""
+
+    id: float
+    position: Vec3
+    offset: Vec3
+    count: float
+    movementSpeed: float
+    longDistanceRender: bool
+
+    def fromNetwork(self, packet: object) -> Particle:
+        pass
+
 # --- Event callback type aliases ---
 _OnEvent_chat = Callable[[str, str, str | None, ChatMessage, list[str] | None], None]
 _OnEvent_whisper = Callable[[str, str, str | None, ChatMessage, list[str] | None], None]
@@ -1420,22 +1535,22 @@ _OnEvent_wake = Callable[[], None]
 _OnEvent_experience = Callable[[], None]
 _OnEvent_physicsTick = Callable[[], None]
 _OnEvent_physicTick = Callable[[], None]
-_OnEvent_scoreboardCreated = Callable[[object], None]
-_OnEvent_scoreboardDeleted = Callable[[object], None]
-_OnEvent_scoreboardTitleChanged = Callable[[object], None]
-_OnEvent_scoreUpdated = Callable[[object, float], None]
-_OnEvent_scoreRemoved = Callable[[object, float], None]
-_OnEvent_scoreboardPosition = Callable[[str, object], None]
-_OnEvent_teamCreated = Callable[[object], None]
-_OnEvent_teamRemoved = Callable[[object], None]
-_OnEvent_teamUpdated = Callable[[object], None]
-_OnEvent_teamMemberAdded = Callable[[object], None]
-_OnEvent_teamMemberRemoved = Callable[[object], None]
-_OnEvent_bossBarCreated = Callable[[object], None]
-_OnEvent_bossBarDeleted = Callable[[object], None]
-_OnEvent_bossBarUpdated = Callable[[object], None]
+_OnEvent_scoreboardCreated = Callable[[ScoreBoard], None]
+_OnEvent_scoreboardDeleted = Callable[[ScoreBoard], None]
+_OnEvent_scoreboardTitleChanged = Callable[[ScoreBoard], None]
+_OnEvent_scoreUpdated = Callable[[ScoreBoard, float], None]
+_OnEvent_scoreRemoved = Callable[[ScoreBoard, float], None]
+_OnEvent_scoreboardPosition = Callable[[DisplaySlot, ScoreBoard], None]
+_OnEvent_teamCreated = Callable[[Team], None]
+_OnEvent_teamRemoved = Callable[[Team], None]
+_OnEvent_teamUpdated = Callable[[Team], None]
+_OnEvent_teamMemberAdded = Callable[[Team], None]
+_OnEvent_teamMemberRemoved = Callable[[Team], None]
+_OnEvent_bossBarCreated = Callable[[BossBar], None]
+_OnEvent_bossBarDeleted = Callable[[BossBar], None]
+_OnEvent_bossBarUpdated = Callable[[BossBar], None]
 _OnEvent_resourcePack = Callable[[str, str | None, str | None], None]
-_OnEvent_particle = Callable[[object], None]
+_OnEvent_particle = Callable[[Particle], None]
 _OnEvent_goal_reached = Callable[[Goal], None]
 _OnEvent_path_update = Callable[[PartiallyComputedPath], None]
 _OnEvent_goal_updated = Callable[[Goal, bool], None]
@@ -1538,11 +1653,11 @@ class Bot:
     """目前雷雨強度（`0` ~ `1` 浮點）
     搭配 `bot.isRaining` 判斷天氣
     """
-    chatPatterns: list[object]
+    chatPatterns: list[ChatPattern]
     """目前註冊的 chat pattern 列表（含 regex、類型、描述）
     偵錯用
     """
-    settings: object
+    settings: GameSettings
     """遊戲設定物件
     含 `chat`（`"enabled"` / `"commandsOnly"` / `"disabled"`）、`colorsEnabled`、`viewDistance`、`difficulty`、`mainHand`、`skinParts` 等欄位
     """
@@ -1578,13 +1693,13 @@ class Bot:
     """目前正在挖的方塊 `Block`，沒有在挖時為 `None`"""
     isSleeping: bool
     """機器人目前是否躺在床上"""
-    scoreboards: dict[str, object]
+    scoreboards: dict[str, ScoreBoard]
     """所有記分板 `{name: ScoreBoard}` 對應表"""
-    scoreboard: dict[str, object]
+    scoreboard: dict[str, ScoreBoard]
     """按顯示槽位取得當前顯示的記分板 `{slot: ScoreBoard}`"""
-    teams: dict[str, object]
+    teams: dict[str, Team]
     """所有隊伍 `{name: Team}` 對應表"""
-    teamMap: dict[str, object]
+    teamMap: dict[str, Team]
     """以玩家名稱或實體名稱對應到所屬 `Team` 的快速查表"""
     controlState: ControlStateStatus
     creative: creativeMethods
@@ -1769,7 +1884,7 @@ class Bot:
     """新增一個 chat pattern，符合 pattern 的聊天訊息會以 `chatType` 指定的事件名觸
     **已停用**，請改用 `addChatPattern(name, pattern, options)`
     """
-    setSettings: Callable[[object], None]
+    setSettings: Callable[[GameSettings], None]
     """更新 `bot.settings`
 
     Args:
@@ -5901,13 +6016,13 @@ class BotHandlers:
     ) -> None:
         pass
 
-    def on_boss_bar_created(self, boss_bar: object) -> None:
+    def on_boss_bar_created(self, boss_bar: BossBar) -> None:
         pass
 
-    def on_boss_bar_deleted(self, boss_bar: object) -> None:
+    def on_boss_bar_deleted(self, boss_bar: BossBar) -> None:
         pass
 
-    def on_boss_bar_updated(self, boss_bar: object) -> None:
+    def on_boss_bar_updated(self, boss_bar: BossBar) -> None:
         pass
 
     def on_breath(self) -> None:
@@ -6087,7 +6202,7 @@ class BotHandlers:
     def on_note_heard(self, block: Block, instrument: Instrument, pitch: float) -> None:
         pass
 
-    def on_particle(self, particle: object) -> None:
+    def on_particle(self, particle: Particle) -> None:
         pass
 
     def on_path_reset(
@@ -6142,22 +6257,24 @@ class BotHandlers:
     def on_respawn(self) -> None:
         pass
 
-    def on_score_removed(self, scoreboard: object, item: float) -> None:
+    def on_score_removed(self, scoreboard: ScoreBoard, item: float) -> None:
         pass
 
-    def on_score_updated(self, scoreboard: object, item: float) -> None:
+    def on_score_updated(self, scoreboard: ScoreBoard, item: float) -> None:
         pass
 
-    def on_scoreboard_created(self, scoreboard: object) -> None:
+    def on_scoreboard_created(self, scoreboard: ScoreBoard) -> None:
         pass
 
-    def on_scoreboard_deleted(self, scoreboard: object) -> None:
+    def on_scoreboard_deleted(self, scoreboard: ScoreBoard) -> None:
         pass
 
-    def on_scoreboard_position(self, position: str, scoreboard: object) -> None:
+    def on_scoreboard_position(
+        self, position: DisplaySlot, scoreboard: ScoreBoard
+    ) -> None:
         pass
 
-    def on_scoreboard_title_changed(self, scoreboard: object) -> None:
+    def on_scoreboard_title_changed(self, scoreboard: ScoreBoard) -> None:
         pass
 
     def on_sleep(self) -> None:
@@ -6174,19 +6291,19 @@ class BotHandlers:
     def on_spawn_reset(self) -> None:
         pass
 
-    def on_team_created(self, team: object) -> None:
+    def on_team_created(self, team: Team) -> None:
         pass
 
-    def on_team_member_added(self, team: object) -> None:
+    def on_team_member_added(self, team: Team) -> None:
         pass
 
-    def on_team_member_removed(self, team: object) -> None:
+    def on_team_member_removed(self, team: Team) -> None:
         pass
 
-    def on_team_removed(self, team: object) -> None:
+    def on_team_removed(self, team: Team) -> None:
         pass
 
-    def on_team_updated(self, team: object) -> None:
+    def on_team_updated(self, team: Team) -> None:
         pass
 
     def on_time(self) -> None:

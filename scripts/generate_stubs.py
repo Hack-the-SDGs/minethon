@@ -345,22 +345,17 @@ TS_PRIMITIVES = {
     "Error": "Exception",
     "RegExp": "object",
     "Date": "object",
-    # TS types we don't fully model — treat as opaque
+    # Cross-package TS types with no locally-parsed d.ts — keep opaque.
+    # (Registry / IndexedData live in prismarine-registry / minecraft-data;
+    # Client / ClientOptions in minecraft-protocol; NBT, World, AStar are
+    # internal helpers the student-facing API does not surface directly.)
     "NBT": "object",
     "ClientOptions": "object",
     "Client": "object",
     "Registry": "object",
     "IndexedData": "object",
-    "ScoreBoard": "object",
-    "Team": "object",
-    "BossBar": "object",
-    "Particle": "object",
     "World": "object",
     "AStar": "object",
-    "DisplaySlot": "str",
-    "SkinData": "object",
-    "ChatPattern": "object",
-    "GameSettings": "object",
     "PluginOptions": "dict[str, object]",
     "Plugin": "Callable[..., object]",
     "Callback": "Callable[..., None]",
@@ -1780,10 +1775,12 @@ MINEFLAYER_TYPE_ALIASES = [
     "Difficulty",
     "ControlState",
     "EquipmentDestination",
+    "DisplaySlot",
 ]
 
 MINEFLAYER_INTERFACES = [
     "Player",
+    "SkinData",
     "ChatPattern",
     "SkinParts",
     "GameSettings",
@@ -1802,9 +1799,11 @@ MINEFLAYER_INTERFACES = [
     "CommandBlockOptions",
     "VillagerTrade",
     "Enchantment",
+    "ScoreBoardItem",
 ]
 
-# Classes from mineflayer/index.d.ts we need to expose (Window subclasses)
+# Classes from mineflayer/index.d.ts we need to expose (Window subclasses +
+# mineflayer-owned classes that the Bot interface references by name).
 MINEFLAYER_CLASSES = [
     "Chest",
     "Dispenser",
@@ -1812,6 +1811,10 @@ MINEFLAYER_CLASSES = [
     "EnchantmentTable",
     "Anvil",
     "Villager",
+    "ScoreBoard",
+    "Team",
+    "BossBar",
+    "Particle",
 ]
 
 
@@ -1894,6 +1897,8 @@ def render_events_module(
 
 def render_handlers_runtime(
     event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
+    *,
+    inline_aliases: dict[str, str] | None = None,
 ) -> str:
     """Emit the runtime ``BotHandlers`` class for `src/minethon/_handlers.py`.
 
@@ -1917,9 +1922,13 @@ def render_handlers_runtime(
                 }:
                     referenced.add(ident)
 
-    shell_imports = sorted(referenced & set(_type_shell_names()))
+    alias_map = dict(inline_aliases or {})
+    shell_imports = sorted(
+        referenced & set(_type_shell_names()) - set(alias_map),
+    )
     # MessagePosition is defined at module scope (Literal alias), not a shell.
     uses_message_position = "MessagePosition" in referenced
+    inlined = [name for name in sorted(alias_map) if name in referenced]
 
     lines = [
         "# GENERATED FROM mineflayer/index.d.ts — DO NOT EDIT MANUALLY.",
@@ -1938,12 +1947,15 @@ def render_handlers_runtime(
     ]
     # Combine `typing` imports; order matches ruff I001 (ALL_CAPS first).
     typing_imports = ["TYPE_CHECKING"]
-    if uses_message_position:
+    if uses_message_position or inlined:
         typing_imports.append("Literal")
     lines.append(f"from typing import {', '.join(typing_imports)}")
     lines.append("")
     if uses_message_position:
         lines.append('MessagePosition = Literal["chat", "system", "game_info"]')
+        lines.append("")
+    for name in inlined:
+        lines.append(f"{name} = {alias_map[name]}")
         lines.append("")
     if shell_imports:
         lines.append("if TYPE_CHECKING:")
@@ -2011,6 +2023,7 @@ def _type_shell_names() -> tuple[str, ...]:
         "PartiallyComputedPath",
         "PathfinderModule",
         "Player",
+        "SkinData",
         "ChatPattern",
         "SkinParts",
         "GameSettings",
@@ -2035,6 +2048,11 @@ def _type_shell_names() -> tuple[str, ...]:
         "EnchantmentTable",
         "Anvil",
         "Villager",
+        "ScoreBoard",
+        "ScoreBoardItem",
+        "Team",
+        "BossBar",
+        "Particle",
     )
 
 
@@ -2168,11 +2186,13 @@ def main() -> None:
     ]
 
     # Type aliases
+    type_alias_expressions: dict[str, str] = {}
     for alias in MINEFLAYER_TYPE_ALIASES:
         expr = extract_type_alias(mf_text, alias)
         if expr is None:
             print(f"warn: type alias {alias} not found", file=sys.stderr)
             continue
+        type_alias_expressions[alias] = ts_to_py(expr)
         out.append(render_type_alias(alias, expr))
     out.append('MessagePosition = Literal["chat", "system", "game_info"]')
     out.append("")
@@ -2250,7 +2270,14 @@ def main() -> None:
     OUT_PATH.write_text(final_text)
     events_text = render_events_module(event_callbacks)
     OUT_EVENTS_PATH.write_text(events_text)
-    handlers_text = render_handlers_runtime(event_callbacks)
+    runtime_inline_aliases = {
+        name: type_alias_expressions[name]
+        for name in ("DisplaySlot",)
+        if name in type_alias_expressions
+    }
+    handlers_text = render_handlers_runtime(
+        event_callbacks, inline_aliases=runtime_inline_aliases
+    )
     OUT_HANDLERS_PATH.write_text(handlers_text)
     format_generated_files(OUT_PATH, OUT_EVENTS_PATH, OUT_HANDLERS_PATH)
     final_text = OUT_PATH.read_text(encoding="utf-8")
