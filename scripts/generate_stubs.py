@@ -65,6 +65,23 @@ MF_INDEX = MF_DIR / "index.d.ts"
 PATHFINDER_INDEX = PATHFINDER_DIR / "index.d.ts"
 
 
+def _portable_ref(path: Path) -> str:
+    """Machine-independent path string for committed stub headers.
+
+    Absolute venv paths differ per developer and would dirty git diffs on
+    every regen. Prefer paths relative to the repo; fall back to the
+    ``node_modules/...`` suffix when the source lives in the venv.
+    """
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        parts = path.parts
+        if "node_modules" in parts:
+            idx = parts.index("node_modules")
+            return str(Path(*parts[idx:]))
+        return path.name
+
+
 # --------------------------------------------------------------------------- #
 #  Stubs doc parsing & docstring injection
 # --------------------------------------------------------------------------- #
@@ -2295,15 +2312,27 @@ def main() -> None:
 
     out: list[str] = [
         HEADER.format(
-            mf_index=MF_INDEX,
-            vec3_index=_resolve_package_dir("vec3") / "index.d.ts",
-            entity_index=_resolve_package_dir("prismarine-entity") / "index.d.ts",
-            block_index=_resolve_package_dir("prismarine-block") / "index.d.ts",
-            item_index=_resolve_package_dir("prismarine-item") / "index.d.ts",
-            chat_index=_resolve_package_dir("prismarine-chat") / "index.d.ts",
-            windows_index=_resolve_package_dir("prismarine-windows") / "index.d.ts",
-            recipe_index=_resolve_package_dir("prismarine-recipe") / "index.d.ts",
-            pathfinder_index=PATHFINDER_INDEX,
+            mf_index=_portable_ref(MF_INDEX),
+            vec3_index=_portable_ref(_resolve_package_dir("vec3") / "index.d.ts"),
+            entity_index=_portable_ref(
+                _resolve_package_dir("prismarine-entity") / "index.d.ts"
+            ),
+            block_index=_portable_ref(
+                _resolve_package_dir("prismarine-block") / "index.d.ts"
+            ),
+            item_index=_portable_ref(
+                _resolve_package_dir("prismarine-item") / "index.d.ts"
+            ),
+            chat_index=_portable_ref(
+                _resolve_package_dir("prismarine-chat") / "index.d.ts"
+            ),
+            windows_index=_portable_ref(
+                _resolve_package_dir("prismarine-windows") / "index.d.ts"
+            ),
+            recipe_index=_portable_ref(
+                _resolve_package_dir("prismarine-recipe") / "index.d.ts"
+            ),
+            pathfinder_index=_portable_ref(PATHFINDER_INDEX),
         ),
         EXTERNAL_STUBS,
         "",

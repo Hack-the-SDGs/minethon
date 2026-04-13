@@ -4,15 +4,15 @@
 # This file is the IDE completion overlay for src/minethon/bot.py.
 # Runtime behavior lives in bot.py; types live here.
 #
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer--342e33372e30/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/vec3--302e312e3130/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-entity/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-block/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-item/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
-# Ref: /Users/xinshou/IdeaProjects/minethon/.venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer--342e33372e30/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/vec3--302e312e3130/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-entity/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-block/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-item/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
+# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping

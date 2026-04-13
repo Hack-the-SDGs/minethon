@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import warnings
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar
@@ -58,7 +59,11 @@ def _normalize_handler(
 
     This wrapper:
 
-    * drops the leading emitter arg when JSPyBridge injects it
+    * drops the leading emitter arg when JSPyBridge injects it — detected
+      either by proxy-identity (``args[0] is emitter``) or by arity excess
+      (``len(args) > slots``), so a proxy-cache change in JSPyBridge that
+      breaks identity still strips the injected emitter when JS emits the
+      arity the handler declares
     * pads missing trailing positional args with ``None``
     * truncates any excess positional args JS emits
 
@@ -76,8 +81,11 @@ def _normalize_handler(
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        if emitter is not None and args and args[0] is emitter:
-            args = args[1:]
+        if emitter is not None and args:
+            identity_match = args[0] is emitter
+            arity_excess = not accepts_varargs and len(args) > slots
+            if identity_match or arity_excess:
+                args = args[1:]
         if accepts_varargs:
             return func(*args, **kwargs)
         if len(args) < slots:
@@ -307,8 +315,18 @@ class Bot:
         # Once(...) above, no listener was installed and done.wait() would
         # block forever. Seed `done` from the protocol client's `ended` flag
         # (minecraft-protocol sets it synchronously in end()/disconnect()).
+        # `_client` is an internal minecraft-protocol attribute; warn loudly
+        # if it ever disappears so a silent indefinite hang is noticed.
         client = getattr(self._js, "_client", None)
-        if client is not None and bool(getattr(client, "ended", False)):
+        if client is None:
+            warnings.warn(
+                "bot._client 不存在，run_forever() 無法防止提早 disconnect"
+                "造成的卡死。若在 create_bot() 與 run_forever() 之間斷線，"
+                "需要手動 Ctrl-C。",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        elif bool(getattr(client, "ended", False)):
             done.set()
         try:
             done.wait()
