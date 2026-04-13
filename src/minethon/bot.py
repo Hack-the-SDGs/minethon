@@ -285,6 +285,13 @@ class Bot:
         Once(self._js, BotEvent.END.value)(
             _normalize_handler(_on_end, emitter=self._js)
         )
+        # Race guard: if `end` fired between create_bot() returning and the
+        # Once(...) above, no listener was installed and done.wait() would
+        # block forever. Seed `done` from the protocol client's `ended` flag
+        # (minecraft-protocol sets it synchronously in end()/disconnect()).
+        client = getattr(self._js, "_client", None)
+        if client is not None and bool(getattr(client, "ended", False)):
+            done.set()
         try:
             done.wait()
         except KeyboardInterrupt:
