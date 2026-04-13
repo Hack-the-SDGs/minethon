@@ -1,6 +1,6 @@
 [project]
 name = "minethon"
-version = "0.2.0a1"
+version = "0.3.0a1"
 description = "A Python-first Mineflayer SDK with a synchronous, IDE-friendly callback API."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -54,9 +54,9 @@ ignore = [
 ]
 allowed-confusables = ["（", "）", "，", "！"]
 pylint.max-args = 6
-mccabe.max-complexity = 20
 pylint.max-branches = 15
 pylint.max-statements = 65
+mccabe.max-complexity = 20
 
 [tool.ruff.lint.per-file-ignores]
 # bridge / public entry — interops with untyped JSPyBridge proxies
