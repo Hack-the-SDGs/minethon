@@ -39,7 +39,7 @@ DisplaySlot = Literal[
 ]
 
 if TYPE_CHECKING:
-    from minethon._type_shells import (
+    from minethon.models import (
         Block,
         BossBar,
         ChatMessage,

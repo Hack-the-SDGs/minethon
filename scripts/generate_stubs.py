@@ -2151,7 +2151,7 @@ def render_handlers_runtime(
         lines.append("")
     if shell_imports:
         lines.append("if TYPE_CHECKING:")
-        lines.append("    from minethon._type_shells import (")
+        lines.append("    from minethon.models import (")
         for name in shell_imports:
             lines.append(f"        {name},")
         lines.append("    )")
@@ -2182,7 +2182,7 @@ def render_handlers_runtime(
 
 
 def _type_shell_names() -> tuple[str, ...]:
-    """Source-of-truth shell names — kept in sync with `_type_shells.py`."""
+    """Source-of-truth shell names — kept in sync with `models/__init__.py`."""
     return (
         "Vec3",
         "ChatMessageScore",

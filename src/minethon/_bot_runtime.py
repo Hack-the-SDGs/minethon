@@ -21,17 +21,12 @@ from typing import Any, TypeVar
 
 from javascript import On, Once, require
 
-from minethon import _type_shells
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
 from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
 from minethon._handlers import BotHandlers
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
 F = TypeVar("F", bound=Callable[..., Any])
-
-globals().update(
-    {name: getattr(_type_shells, name) for name in _type_shells.TYPE_SHELL_NAMES}
-)
 
 
 def _require_event(method: str, event: object) -> BotEvent:

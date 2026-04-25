@@ -1,5 +1,5 @@
 from minethon._events import BotEvent as BotEvent
-from minethon._type_shells import (
+from minethon.bot import (
     Anvil as Anvil,
     Block as Block,
     BossBar as BossBar,
