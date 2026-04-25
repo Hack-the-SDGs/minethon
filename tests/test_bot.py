@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-import minethon.bot as bot_module
+import minethon._bot_runtime as bot_module
 from minethon import BotEvent
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 

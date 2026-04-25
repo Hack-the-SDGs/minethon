@@ -52,14 +52,19 @@ def on_chat(...): ...
    - 使用者入口
    - re-export `create_bot`、`Bot`、`BotEvent`、公開錯誤類
 2. `src/minethon/bot.py`
-   - runtime façade
-   - event decorator、plugin loading、version pin guard
-3. `src/minethon/bot.pyi`
-   - 生成的型別面
-4. `src/minethon/models/`
+   - 公開 module 名 — 純 re-export 自 `_bot_runtime`
+   - 維持薄殼，`from minethon.bot import Bot` 不會把 runtime 細節帶進 IDE 視野
+3. `src/minethon/_bot_runtime.py`
+   - 真正的 runtime façade — `class Bot` 實作、`__getattr__` JS proxy 委託、event decorator、plugin loading、version pin guard
+   - 從 `bot.py` 拆出，避免 `.py` + `.pyi` 雙重 `class Bot` 在 IDE 解析時產生衝突源
+4. `src/minethon/bot.pyi`
+   - 生成的型別面 — `minethon.bot` 模組的 sole `class Bot` declaration
+5. `src/minethon/models/`
    - 可 import 的型別 shell
-5. `src/minethon/errors.py`
+6. `src/minethon/errors.py`
    - 使用者可見的錯誤類
+
+> 補充：PyCharm 的 completion popup 對 Python class member 預設右側顯示 owner class，不顯示型別 annotation — 這是 PyCharm 對 Python 的 UI 設計（純 `class Foo: a = 10` 也是這樣），跟 stub / .pyi 結構無關。要看完整型別請按 `Ctrl+J` (Quick Documentation) 或 hover；assign 後變數型別會正確顯示。
 
 ## Source-Verified 原則
 
@@ -146,7 +151,7 @@ uv run pytest -m "not integration" --tb=short -q
 - `[tool.ruff.lint]` 全域 `select = ["ALL"]`，只對「全案都不適用」的規則做全域忽略。
 - 針對情境的豁免一律走 `[tool.ruff.lint.per-file-ignores]`，不要擴張全域 `ignore`。
 - 已有的 per-file 區塊：
-  - `src/minethon/_bridge.py` / `src/minethon/bot.py` — JSPyBridge proxy 必然是 `Any`，豁免 `ANN401`
+  - `src/minethon/_bridge.py` / `src/minethon/bot.py` / `src/minethon/_bot_runtime.py` — JSPyBridge proxy 必然是 `Any`，豁免 `ANN401`
   - `src/minethon/**/*.pyi` — 型別覆蓋層；豁免 `N`（命名）、`A`（遮 builtin）、`ANN`、`ARG`、`PLR`、`PYI`、`UP`、`TRY`、`SIM`、`TC`、`RUF001`-`003`（zh-TW 全形符號）、`ERA001`、`PIE790`、`I001`；rationale 留在 `pyproject.toml` 註解
   - `scripts/*.py` — 產生器工具；豁免複雜度與風格類
   - `tests/*` — 允許 magic values、私有存取、硬編 fixtures
