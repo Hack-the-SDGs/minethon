@@ -33,7 +33,6 @@ VENDORED_DTS_ROOT = REPO_ROOT / "src/mineflayer/js/node_modules"
 OUT_PATH = REPO_ROOT / "src/minethon/bot.pyi"
 OUT_EVENTS_PATH = REPO_ROOT / "src/minethon/_events.py"
 OUT_HANDLERS_PATH = REPO_ROOT / "src/minethon/_handlers.py"
-STUBS_DOC = REPO_ROOT / "docs/stubs_zh_tw.md"
 
 
 def _find_runtime_node_modules() -> Path | None:
@@ -85,76 +84,18 @@ def _portable_ref(path: Path) -> str:
 
 
 # --------------------------------------------------------------------------- #
-#  Stubs doc parsing & docstring injection
+#  Existing-stub docstring extraction & injection
 # --------------------------------------------------------------------------- #
 
 
-def parse_stubs_doc() -> dict[str, str]:
-    """Parse docs/stubs_zh_tw.md into `{lookup_key: description_body}`.
-
-    Heading → key mapping:
-      - ``### bot.chat(message)``         → ``bot.chat``
-      - ``### bot.health``                → ``bot.health``
-      - ``### "chat"``                    → ``event:chat``
-      - ``### Vec3``                      → ``Vec3``
-      - ``### Vec3.offset(dx, dy, dz)``   → ``Vec3.offset``
-      - ``### Entity.position``           → ``Entity.position``
-
-    Sections whose body is empty return an empty string — callers should
-    treat empty body as "no docstring".
-    """
-    if not STUBS_DOC.exists():
-        return {}
-    text = STUBS_DOC.read_text()
-    sections: dict[str, str] = {}
-    current_key: str | None = None
-    current_body: list[str] = []
-
-    def _key_from_heading(heading: str) -> str:
-        t = heading.removeprefix("### ").strip()
-        m = re.match(r'^"([^"]+)"', t)
-        if m:
-            return f"event:{m.group(1)}"
-        # Strip trailing `(...)` argument list
-        m2 = re.match(r"^([^()\s]+)\s*\(", t)
-        if m2:
-            return m2.group(1)
-        return t
-
-    def _finalize(body: list[str]) -> str:
-        # Drop trailing "---" thematic breaks, empty lines, and `## `-level
-        # section separators that belong to file-level layout rather than the
-        # symbol's description.
-        while body:
-            t = body[-1].strip()
-            if not t or t == "---" or t.startswith("## "):
-                body.pop()
-                continue
-            break
-        return "\n".join(body).strip("\n")
-
-    for raw in text.split("\n"):
-        if raw.startswith("### "):
-            if current_key is not None:
-                sections[current_key] = _finalize(current_body)
-            current_key = _key_from_heading(raw)
-            current_body = []
-        elif current_key is not None:
-            current_body.append(raw)
-    if current_key is not None:
-        sections[current_key] = _finalize(current_body)
-    return sections
-
-
 def parse_existing_pyi_docstrings(path: Path) -> dict[str, str]:
-    """Extract docstrings from an existing `.pyi` using `parse_stubs_doc`'s key scheme.
+    """Extract docstrings from an existing `.pyi`, keyed for `inject_docstrings`.
 
-    After the one-shot migration from `docs/stubs_zh_tw.md` into `bot.pyi`,
-    the `.pyi` itself becomes the source of truth for hover descriptions.
-    Each regen reads docstrings back from the prior `.pyi` instead of the md
-    file, so human edits made in the `.pyi` survive `generate_stubs.py` runs.
+    The `.pyi` itself is the source of truth for hover descriptions: each
+    regen reads docstrings back from the prior `.pyi`, so human edits made
+    in the `.pyi` survive `generate_stubs.py` runs.
 
-    Key scheme (mirrors `parse_stubs_doc`):
+    Key scheme:
       - Class itself          → class name (e.g. ``"Bot"``, ``"Vec3"``)
       - Bot member            → ``"bot.<name>"``
       - Other class member    → ``"<ClassName>.<name>"``
@@ -2524,8 +2465,8 @@ def main() -> None:
     out.append("")
 
     raw_text = "\n".join(out)
-    # Source of truth for hover descriptions is now the existing .pyi itself.
-    # docs/stubs_zh_tw.md was a one-time seed and is no longer consulted.
+    # Source of truth for hover descriptions is the existing .pyi itself —
+    # human edits to docstrings survive regen.
     descriptions = parse_existing_pyi_docstrings(OUT_PATH)
     if descriptions:
         final_text = inject_docstrings(raw_text, descriptions)

@@ -42,7 +42,7 @@ def on_chat(...): ...
 
 - `src/minethon/bot.pyi` 是 IDE completion 的主要來源，必須由 `scripts/generate_stubs.py` 生成
 - generator 的 source of truth 優先讀 `.venv/.../javascript/js/node_modules/` 的實際安裝版本；缺少時才 fallback 到 repo vendored `src/mineflayer/js/node_modules/`
-- `docs/stubs_zh_tw.md` 是中文 hover 說明來源
+- 中文 hover docstring 直接住在 `bot.pyi` 內；regen 時從現有 `.pyi` 讀回 docstring 再注入，所以人工編輯不會被沖掉（過去的 `docs/stubs_zh_tw.md` 已停用並刪除）
 - `src/minethon/_events.py` 由 generator 生成，提供 `BotEvent`
 - `src/minethon/models/` 提供可 import 的公開型別 shell，方便使用者寫 annotation；實際成員面仍以 `bot.pyi` 為準
 

@@ -108,12 +108,12 @@ from minethon import BotHandlers, create_bot
 
 
 class My(BotHandlers):
-    def on_spawn(self) -> None:
-        print(f"Spawned as {bot.username}")
+   def on_spawn(self) -> None:
+      print(f"Spawned as {bot.username}")
 
-    def on_chat(self, username, message, *_):
-        if message == "quit":
-            bot.quit("bye")
+   def on_chat(self, username, message, *_):
+      if message == "quit":
+         bot.quit("bye")
 
 
 bot = create_bot(host="localhost", username="pybot")
@@ -170,10 +170,9 @@ src/minethon/
 scripts/
 ├── generate_stubs.py   # 從 mineflayer / pathfinder d.ts 生成 bot.pyi / _events.py / _handlers.py
 └── format.sh           # 一鍵 regen → ruff → pyright → pytest
-
-docs/
-└── stubs_zh_tw.md      # 中文 hover 說明來源（供 generator 注入 docstring）
 ```
+
+> hover 說明的中文 docstring 直接住在 `src/minethon/bot.pyi` 內；`generate_stubs.py` regen 時會從現有 `.pyi` 讀回 docstring 再注入新生成的 stub，所以人工編輯不會被沖掉。
 
 ## 開發
 

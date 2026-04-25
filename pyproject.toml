@@ -88,7 +88,7 @@ mccabe.max-complexity = 20
     "TC",       # `.pyi` IS the type-checking surface — TYPE_CHECKING is irrelevant
     "FIX002",   # TODO markers preserved from upstream docstrings
     "E741",     # short names (`l`, `i`) inherited from upstream signatures
-    "RUF001",   # ambiguous unicode in zh-TW docstrings (curated by docs/stubs_zh_tw.md)
+    "RUF001",   # ambiguous unicode in zh-TW docstrings (curated inline in bot.pyi)
     "RUF002",   # same as RUF001 but for docstrings
     "RUF003",   # same for comments
     "ERA001",   # generator header comments mention example code fragments
