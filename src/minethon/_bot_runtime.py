@@ -2,12 +2,13 @@
 
 Runtime behavior lives here. A sibling `bot.pyi` (generated from
 mineflayer's `index.d.ts`) supplies the typed overloads that IDEs
-use for completion of event names, callback signatures, and
-properties like `bot.health`, `bot.entity.position`, etc.
+use for completion of property and method signatures.
 
-Pure synchronous callback model — no asyncio. Long-running JS work
-(dig, goto, ...) reports completion via handlers registered with
-`@bot.on(BotEvent.X)` or `@bot.on_x`.
+Pure synchronous callback model — no asyncio. Event handlers are
+registered exclusively via subclassing :class:`EventAdaptor` and
+calling :meth:`Bot.bind`. The legacy decorator entries
+(`bot.on(...)`, `bot.once(...)`, `@bot.on_<event>`) have been
+removed in favor of the single class-based path.
 """
 
 from __future__ import annotations
@@ -15,29 +16,18 @@ from __future__ import annotations
 import inspect
 import threading
 import warnings
-from collections.abc import Callable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from javascript import On, Once, require
 
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
 from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
-from minethon._handlers import BotHandlers
+from minethon._handlers import EventAdaptor
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
-F = TypeVar("F", bound=Callable[..., Any])
-
-
-def _require_event(method: str, event: object) -> BotEvent:
-    if isinstance(event, BotEvent):
-        return event
-    msg = (
-        f"bot.{method}(...) 只接受 BotEvent。"
-        "請改用 @bot.on_<event> / @bot.once_<event>，"
-        "或傳入 BotEvent.CHAT 這種 enum 成員。"
-    )
-    raise TypeError(msg)
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _normalize_handler(
@@ -124,23 +114,6 @@ class Bot:
         """
         if name.startswith("_"):
             raise AttributeError(name)
-        for prefix, register in (("once_", self.once), ("on_", self.on)):
-            if not name.startswith(prefix):
-                continue
-            suffix = name[len(prefix) :]
-            event = EVENT_ATTRIBUTE_MAP.get(suffix)
-            if event is not None:
-                return register(event)
-            # Known-shape typo — surface a friendly hint instead of letting
-            # the lookup fall through to the JS proxy and produce a bare
-            # ``AttributeError`` with no guidance for students.
-            sample = ", ".join(f"{prefix}{k}" for k in list(EVENT_ATTRIBUTE_MAP)[:5])
-            msg = (
-                f"未知的事件 shortcut 'bot.{name}'。"
-                f"請確認事件名拼字，或改用 @bot.on(BotEvent.X)。"
-                f"常見例子 {sample} …"
-            )
-            raise AttributeError(msg)
         try:
             return getattr(self._js, name)
         except AttributeError as exc:
@@ -151,46 +124,6 @@ class Bot:
                 )
                 raise PluginNotInstalledError(msg) from exc
             raise
-
-    def on(self, event: BotEvent) -> Callable[[F], F]:
-        """Register a handler for a mineflayer event.
-
-        Per-event typed overloads live in `bot.pyi`; at runtime this is a generic
-        dispatcher. Handlers run on the JSPyBridge event thread — do not block
-        them with long Python work.
-
-        .. note::
-            Handler arity is auto-normalized: mineflayer occasionally types more
-            callback params than it emits (e.g., the ``chat`` event), so missing
-            trailing args are padded with ``None``.
-
-        .. seealso::
-            `mineflayer/index.d.ts` — Bot extends EventEmitter, see `on()`.
-        """
-        js_bot = self._js
-        event_name = _require_event("on", event).value
-
-        def decorator(func: F) -> F:
-            On(js_bot, event_name)(_normalize_handler(func, emitter=js_bot))
-            return func
-
-        return decorator
-
-    def once(self, event: BotEvent) -> Callable[[F], F]:
-        """Register a one-shot event handler.
-
-        Same arity-normalization rules apply as ``on()``.
-
-        Ref: mineflayer/index.d.ts — Bot.once (from EventEmitter)
-        """
-        js_bot = self._js
-        event_name = _require_event("once", event).value
-
-        def decorator(func: F) -> F:
-            Once(js_bot, event_name)(_normalize_handler(func, emitter=js_bot))
-            return func
-
-        return decorator
 
     def load_plugin(
         self,
@@ -261,31 +194,35 @@ class Bot:
         resolved_version = _resolve_package_version(name, version)
         return require(name, resolved_version)
 
-    def bind(self, handlers: BotHandlers) -> BotHandlers:
-        """Register every overridden ``on_<event>`` on a `BotHandlers` instance.
+    def bind(self, handlers: EventAdaptor) -> EventAdaptor:
+        """Register every overridden ``on_<event>`` on an `EventAdaptor` instance.
 
-        Walks :class:`BotHandlers`' generated method set, finds entries
-        overridden on the concrete subclass, and wires each one to the
-        matching :class:`BotEvent` via :meth:`on`. Handler arity is still
-        normalized by ``_normalize_handler``, so short signatures like
-        ``def on_chat(self, username, message)`` work.
+        This is the **only** public event-registration entry point. Walks the
+        generated :class:`EventAdaptor` method set, finds entries overridden on
+        the concrete subclass, and wires each one to the JS EventEmitter on
+        the matching mineflayer event. Handler arity is normalized by
+        ``_normalize_handler``, so short signatures like
+        ``def on_chat(self, username, message)`` work even though the typed
+        signature declares more parameters.
 
         Returns the handlers instance so calls can chain.
 
         Example::
 
-            class My(BotHandlers):
+            class My(EventAdaptor):
                 def on_chat(self, username, message, *_): ...
 
             bot.bind(My())
         """
+        js_bot = self._js
         for attr, event in EVENT_ATTRIBUTE_MAP.items():
             method_name = f"on_{attr}"
             impl = getattr(type(handlers), method_name, None)
-            base_impl = getattr(BotHandlers, method_name, None)
+            base_impl = getattr(EventAdaptor, method_name, None)
             if impl is None or impl is base_impl:
                 continue
-            self.on(event)(getattr(handlers, method_name))
+            handler = getattr(handlers, method_name)
+            On(js_bot, event.value)(_normalize_handler(handler, emitter=js_bot))
         return handlers
 
     def run_forever(self) -> None:

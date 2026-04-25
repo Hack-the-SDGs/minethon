@@ -466,7 +466,7 @@ EVENT_CALLBACK_OVERRIDES = {
 
 # Parameter names and types for events whose callback signature comes from
 # EVENT_CALLBACK_OVERRIDES (so there is no parsed arg list to reuse). Kept in
-# parallel with EVENT_CALLBACK_OVERRIDES; used by the BotHandlers stub render.
+# parallel with EVENT_CALLBACK_OVERRIDES; used by the EventAdaptor stub render.
 EVENT_HANDLER_SIGNATURES: dict[str, list[tuple[str, str]]] = {
     "message": [("msg", "ChatMessage"), ("position", "MessagePosition")],
     "messagestr": [
@@ -1659,7 +1659,7 @@ def render_bot_events(
 
     Returns the alias lines and a list of ``(event, alias, handler_args)``
     where ``handler_args`` is the ``[(name, py_type)]`` list used to render
-    ``BotHandlers.on_<event>`` signatures.
+    ``EventAdaptor.on_<event>`` signatures.
     """
     members = parse_members(events_body)
     lines: list[str] = ["# --- Event callback type aliases ---"]
@@ -1700,7 +1700,7 @@ def render_bot_events(
         else:
             cb_type = ts_to_py(m.ts_type)
             # Property-style event: `chat: (a: X, b: Y) => void`. Recover the
-            # named parameter list so BotHandlers.on_<event> can be fully typed.
+            # named parameter list so EventAdaptor.on_<event> can be fully typed.
             handler_args = _parse_arrow_fn_args(m.ts_type)
         alias = f"_OnEvent_{_sanitize_alias(m.name)}"
         lines.append(f"{alias} = {cb_type}")
@@ -1737,36 +1737,6 @@ def render_event_enum(
     return lines
 
 
-def render_event_decorator_aliases(
-    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
-    method: str,
-) -> list[str]:
-    lines: list[str] = []
-    for event, alias, _args in event_callbacks:
-        attr_name = _event_attr_name(event, prefix=method)
-        member = _event_member_name(event)
-        lines.append(f"    {attr_name}: Callable[[{alias}], {alias}]")
-        lines.append(f'    """Same as `bot.{method}(BotEvent.{member})`. """')
-    return lines
-
-
-def render_on_overloads(
-    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
-    method: str,
-) -> list[str]:
-    """Emit @overload defs for `on` or `once`."""
-    lines: list[str] = []
-    for event, alias, _args in event_callbacks:
-        member = _event_member_name(event)
-        lines.append("    @overload")
-        lines.append(
-            f"    def {method}(self, event: Literal[BotEvent.{member}]) -> "
-            f"Callable[[{alias}], {alias}]: ..."
-        )
-    # No string overload on purpose — public API only accepts BotEvent.
-    return lines
-
-
 # --------------------------------------------------------------------------- #
 #  Bot rendering
 # --------------------------------------------------------------------------- #
@@ -1776,6 +1746,10 @@ def render_bot(
     bot_body: str,
     event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
 ) -> list[str]:
+    # `event_callbacks` is retained on the signature for API stability with
+    # the rest of the generator pipeline; Bot itself no longer surfaces any
+    # event registration overloads — events go through EventAdaptor.bind().
+    del event_callbacks
     members = parse_members(bot_body)
     lines = [
         "class Bot:",
@@ -1794,19 +1768,6 @@ def render_bot(
         else:
             lines.append(render_property(m, class_name="Bot"))
 
-    # Event overloads
-    lines.append("")
-    lines.append("    # --- Typed event overloads (generated from BotEvents) ---")
-    lines.extend(render_on_overloads(event_callbacks, "on"))
-    lines.append("")
-    lines.append(
-        "    # Shortcut decorators for better IDE completion in JetBrains/Pylance"
-    )
-    lines.extend(render_event_decorator_aliases(event_callbacks, "on"))
-    lines.append("")
-    lines.extend(render_on_overloads(event_callbacks, "once"))
-    lines.append("")
-    lines.extend(render_event_decorator_aliases(event_callbacks, "once"))
     lines.append("")
     # Minethon-specific additions — defined in bot.py at runtime.
     lines.append("    # --- Minethon-specific methods (defined in bot.py) ---")
@@ -1835,7 +1796,7 @@ def render_bot(
         "    def require(self, name: str, version: str | None = ...) -> object: ..."
     )
     lines.append("    def run_forever(self) -> None: ...")
-    lines.append('    def bind(self, handlers: "BotHandlers") -> "BotHandlers": ...')
+    lines.append("    def bind(self, handlers: EventAdaptor) -> EventAdaptor: ...")
     return lines
 
 
@@ -1950,7 +1911,11 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 from typing import Literal, Self, TypedDict, Unpack, overload
 
-from minethon._events import BotEvent
+# Re-export EventAdaptor so `bot.pyi`'s `Bot.bind` annotation refers to the
+# **same** class users subclass at runtime — preventing PyCharm from treating
+# `minethon.bot.EventAdaptor` and `minethon._handlers.EventAdaptor` as two
+# different nominal types.
+from minethon._handlers import EventAdaptor as EventAdaptor
 
 """
 
@@ -2092,7 +2057,7 @@ def render_handlers_runtime(
     *,
     inline_aliases: dict[str, str] | None = None,
 ) -> str:
-    """Emit the runtime ``BotHandlers`` class for `src/minethon/_handlers.py`.
+    """Emit the runtime ``EventAdaptor`` class for `src/minethon/_handlers.py`.
 
     Every ``on_<event>`` method is a no-op with the same typed signature as
     the stub class in ``bot.pyi``. Subclasses override just the events they
@@ -2127,7 +2092,7 @@ def render_handlers_runtime(
         "# Regenerate via: uv run python scripts/generate_stubs.py",
         '"""Optional class-based event handler base.',
         "",
-        "Subclass :class:`BotHandlers`, override the ``on_<event>`` methods",
+        "Subclass :class:`EventAdaptor`, override the ``on_<event>`` methods",
         "you care about, then wire the instance via ``bot.bind(handlers)``.",
         "",
         "Method signatures here mirror ``bot.pyi`` so IDE hover, 'Override",
@@ -2158,10 +2123,10 @@ def render_handlers_runtime(
         lines.append("")
     lines.extend(
         [
-            '__all__ = ["BotHandlers"]',
+            '__all__ = ["EventAdaptor"]',
             "",
             "",
-            "class BotHandlers:",
+            "class EventAdaptor:",
             '    """Base class for class-based event handlers."""',
             "",
         ]
@@ -2253,25 +2218,22 @@ def _type_shell_names() -> tuple[str, ...]:
 def render_handlers_stub(
     event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
 ) -> list[str]:
-    """Emit the typed ``BotHandlers`` class for bot.pyi."""
-    lines = [
-        "",
-        "class BotHandlers:",
-        '    """Class-based handler base. Subclass, override `on_<event>`, '
-        "then call `bot.bind(handlers)`.",
-        "",
-        '    Typed signatures are provided here so IDE "Override methods" '
-        "auto-fill produces the correct parameter list.",
-        '    """',
-    ]
-    for event, _alias, args in event_callbacks:
-        attr = _event_attr_name(event, prefix="on")
-        if args:
-            sig = ", ".join(["self"] + [f"{name}: {py_type}" for name, py_type in args])
-        else:
-            sig = "self"
-        lines.append(f"    def {attr}({sig}) -> None: ...")
-    return lines
+    """Return the EventAdaptor surface for bot.pyi (now a no-op).
+
+    `EventAdaptor` is re-exported from the **header** of bot.pyi via
+    ``from minethon._handlers import EventAdaptor as EventAdaptor``
+    so that subclasses share the **same** nominal type as
+    ``Bot.bind``'s parameter. Re-declaring the class here would create
+    a second nominal ``EventAdaptor`` only visible inside
+    ``minethon.bot``, and PyCharm would flag
+    ``bot.bind(MySubclass())`` with "Expected EventAdaptor, got
+    MySubclass" because the two EventAdaptor classes would not be the
+    same type. The typed signatures users see at "Override methods"
+    auto-fill come from ``_handlers.py`` itself, which already carries
+    the full annotated method set.
+    """
+    del event_callbacks  # signatures live on the runtime class itself
+    return []
 
 
 def normalize_pyi_method_bodies(text: str) -> str:

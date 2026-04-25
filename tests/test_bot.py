@@ -6,7 +6,6 @@ from typing import Any, cast
 import pytest
 
 import minethon._bot_runtime as bot_module
-from minethon import BotEvent
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
 _normalize_handler: Any = cast("Any", bot_module)._normalize_handler
@@ -17,104 +16,15 @@ class _FakeJsBot:
         self.plugin = plugin
 
 
-def test_on_accepts_bot_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[tuple[object, str, object]] = []
-    calls: list[tuple[object | None, object | None, object | None]] = []
-
-    def fake_on(js_bot: object, event: str):
-        def decorator(func: object) -> object:
-            seen.append((js_bot, event, func))
-            return func
-
-        return decorator
-
-    monkeypatch.setattr(bot_module, "On", fake_on)
-    js_bot = _FakeJsBot()
-    bot = bot_module.Bot(js_bot)
-
-    @bot.on(BotEvent.CHAT)
-    def on_chat(
-        username: str,
-        message: str,
-        translate: str | None,
-        json_msg: object,
-        matches: list[str] | None,
-    ) -> None:
-        calls.append((username, message, translate))
-        assert json_msg is not None or matches is None
-
-    assert len(seen) == 1
-    assert seen[0][:2] == (js_bot, "chat")
-    assert seen[0][2] is not on_chat
-    registered = seen[0][2]
-    assert callable(registered)
-    registered(js_bot, "alice", "hello")
-    assert calls == [("alice", "hello", None)]
-
-
-def test_on_chat_shortcut_uses_same_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[str] = []
-
-    def fake_on(js_bot: object, event: str):
-        def decorator(func: object) -> object:
-            seen.append(event)
-            return func
-
-        return decorator
-
-    monkeypatch.setattr(bot_module, "On", fake_on)
+def test_decorator_event_api_removed() -> None:
     bot = bot_module.Bot(_FakeJsBot())
 
-    @bot.on_chat
-    def on_chat(
-        username: str,
-        message: str,
-        translate: str | None,
-        json_msg: object,
-        matches: list[str] | None,
-    ) -> None:
-        assert username or message
-        assert translate is None or isinstance(translate, str)
-        assert json_msg is not None or matches is None
-
-    assert seen == ["chat"]
-
-
-def test_on_rejects_string_event() -> None:
-    bot = bot_module.Bot(_FakeJsBot())
-
-    with pytest.raises(TypeError):
-        cast("Any", bot).on("chat")
-
-
-def test_unknown_event_shortcut_raises_informative_attribute_error() -> None:
-    bot = bot_module.Bot(_FakeJsBot())
-
-    with pytest.raises(AttributeError, match="未知的事件 shortcut"):
-        _ = bot.on_typo_event  # type: ignore[attr-defined]
-
-    with pytest.raises(AttributeError, match="未知的事件 shortcut"):
-        _ = bot.once_typo_event  # type: ignore[attr-defined]
-
-
-def test_once_chat_shortcut_registers_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[str] = []
-
-    def fake_once(js_bot: object, event: str):
-        def decorator(func: object) -> object:
-            seen.append(event)
-            return func
-
-        return decorator
-
-    monkeypatch.setattr(bot_module, "Once", fake_once)
-    bot = bot_module.Bot(_FakeJsBot())
-
-    @bot.once_chat
-    def _on_chat(*_args: object, **_kwargs: object) -> None:
-        pass
-
-    assert seen == ["chat"]
+    assert not hasattr(bot_module.Bot, "on")
+    assert not hasattr(bot_module.Bot, "once")
+    with pytest.raises(AttributeError):
+        _ = cast("Any", bot).on_chat
+    with pytest.raises(AttributeError):
+        _ = cast("Any", bot).once_chat
 
 
 def test_normalize_handler_drops_injected_emitter_and_pads_missing_args() -> None:
@@ -147,11 +57,13 @@ def test_require_without_version_rejects_unbundled_packages() -> None:
 def test_bind_wires_only_overridden_handlers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from minethon import BotHandlers
+    from minethon import EventAdaptor
 
     registered: list[str] = []
 
     def fake_on(js_bot: object, event: str):
+        del js_bot
+
         def decorator(func: object) -> object:
             registered.append(event)
             return func
@@ -161,7 +73,7 @@ def test_bind_wires_only_overridden_handlers(
     monkeypatch.setattr(bot_module, "On", fake_on)
     bot = bot_module.Bot(_FakeJsBot())
 
-    class MyHandlers(BotHandlers):
+    class MyHandlers(EventAdaptor):
         def on_chat(self, *_args: object, **_kwargs: object) -> None:
             pass
 
@@ -172,3 +84,25 @@ def test_bind_wires_only_overridden_handlers(
 
     assert isinstance(returned, MyHandlers)
     assert set(registered) == {"chat", "spawn"}
+
+
+def test_bind_skips_methods_not_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    from minethon import EventAdaptor
+
+    registered: list[str] = []
+
+    def fake_on(js_bot: object, event: str):
+        del js_bot
+
+        def decorator(func: object) -> object:
+            registered.append(event)
+            return func
+
+        return decorator
+
+    monkeypatch.setattr(bot_module, "On", fake_on)
+    bot = bot_module.Bot(_FakeJsBot())
+
+    bot.bind(EventAdaptor())
+
+    assert registered == []

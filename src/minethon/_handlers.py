@@ -2,7 +2,7 @@
 # Regenerate via: uv run python scripts/generate_stubs.py
 """Optional class-based event handler base.
 
-Subclass :class:`BotHandlers`, override the ``on_<event>`` methods
+Subclass :class:`EventAdaptor`, override the ``on_<event>`` methods
 you care about, then wire the instance via ``bot.bind(handlers)``.
 
 Method signatures here mirror ``bot.pyi`` so IDE hover, 'Override
@@ -56,10 +56,10 @@ if TYPE_CHECKING:
         Window,
     )
 
-__all__ = ["BotHandlers"]
+__all__ = ["EventAdaptor"]
 
 
-class BotHandlers:
+class EventAdaptor:
     """Base class for class-based event handlers."""
 
     def on_action_bar(self, json_msg: ChatMessage) -> None:
