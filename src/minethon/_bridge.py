@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from javascript import eval_js
 from javascript import require as _js_require
 
 # Pinned — bumped by humans, never `latest`.
@@ -24,6 +25,27 @@ BUNDLED_VERSIONS: dict[str, str] = {
 }
 MINEFLAYER_VERSION = BUNDLED_VERSIONS["mineflayer"]
 VEC3_VERSION = BUNDLED_VERSIONS["vec3"]
+
+
+def _suppress_mojang_auth_warning() -> None:
+    """Inject JS to intercept and drop specific auth deprecation stdout."""
+    eval_js("""
+        const original = console['warn'];
+        console['warn'] = function(...args) {
+            if (typeof args[0] === 'string') {
+                if (args[0].includes('mojang auth servers no longer')) {
+                    return;
+                }
+                if (args[0].includes('How-to-Migrate-Your-Mojang')) {
+                    return;
+                }
+            }
+            original.apply(console, args);
+        };
+    """)
+
+
+_suppress_mojang_auth_warning()
 
 
 def get_mineflayer() -> Any:
