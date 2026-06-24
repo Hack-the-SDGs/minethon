@@ -71,6 +71,7 @@ mccabe.max-complexity = 20
 ]
 "src/minethon/_commands.py" = [
     "ANN401",  # student command surface — mineflayer proxy values are Any
+    "FBT003",  # setControlState(control, True): JSPyBridge proxy calls reject kwargs
 ]
 
 # Generated type overlays — mirror upstream TypeScript surface verbatim.

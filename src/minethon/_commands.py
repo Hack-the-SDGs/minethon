@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from typing import Any
 
 from javascript import Once
@@ -35,6 +36,16 @@ _REACH_BLOCKS = 6.0
 # Ref: mineflayer/docs/api.md — bot.findBlocks(options.maxDistance) (default 16).
 _FIND_MAX_DISTANCE = 64
 
+# Movement: no "walk N blocks" primitive without pathfinder, so move_* presses a
+# control key and polls position until the horizontal distance travelled reaches
+# the target (or a safety timeout fires). 4.317 b/s is vanilla walking speed.
+# Ref: mineflayer/docs/api.md — bot.setControlState; Minecraft physics.
+_WALK_SPEED_BPS = 4.317
+_POLL_SECONDS = 0.05  # ~one physics tick
+_WALK_TIMEOUT_FACTOR = 3.0  # allow 3x the ideal travel time before giving up
+_WALK_TIMEOUT_FLOOR = 1.0  # always allow at least 1s (short hops)
+_JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
+
 
 def _norm_deg(deg: float) -> float:
     """Normalise an angle to the ``[0, 360)`` range."""
@@ -47,6 +58,13 @@ def _make_vec3(x: float, y: float, z: float) -> Any:
     Ref: vec3 module — the package export is callable as ``vec3(x, y, z)``.
     """
     return get_vec3()(x, y, z)
+
+
+def _walk_timeout(blocks: float) -> float:
+    """Safety deadline (seconds) for walking ``blocks`` so a stuck bot stops."""
+    return max(
+        _WALK_TIMEOUT_FLOOR, abs(blocks) / _WALK_SPEED_BPS * _WALK_TIMEOUT_FACTOR
+    )
 
 
 class Commands:
@@ -220,3 +238,53 @@ class Commands:
             {"matching": block_id, "maxDistance": _FIND_MAX_DISTANCE, "count": max}
         )
         return [(int(p.x), int(p.y), int(p.z)) for p in points]
+
+    # ── movement ──────────────────────────────────────────────────────
+    def _walk(self, control: str, blocks: float) -> tuple[float, float, float]:
+        """Hold ``control`` until the bot travels ``blocks`` horizontally.
+
+        Movement is relative to the bot's current facing. Stops early on a
+        safety timeout so walking into a wall can't hang the script.
+        Ref: mineflayer/docs/api.md — bot.setControlState(control, state).
+        """
+        if blocks <= 0:
+            return self.get_pos()
+        start = self._entity().position
+        sx, sz = float(start.x), float(start.z)
+        self._js.setControlState(control, True)
+        deadline = time.monotonic() + _walk_timeout(blocks)
+        try:
+            while time.monotonic() < deadline:
+                pos = self._entity().position
+                if math.hypot(float(pos.x) - sx, float(pos.z) - sz) >= blocks:
+                    break
+                time.sleep(_POLL_SECONDS)
+        finally:
+            self._js.setControlState(control, False)
+        return self.get_pos()
+
+    def move_forward(self, blocks: float = 1.0) -> tuple[float, float, float]:
+        """Walk forward ``blocks`` blocks; returns the new position."""
+        return self._walk("forward", blocks)
+
+    def move_backward(self, blocks: float = 1.0) -> tuple[float, float, float]:
+        """Walk backward ``blocks`` blocks; returns the new position."""
+        return self._walk("back", blocks)
+
+    def move_left(self, blocks: float = 1.0) -> tuple[float, float, float]:
+        """Strafe left ``blocks`` blocks; returns the new position."""
+        return self._walk("left", blocks)
+
+    def move_right(self, blocks: float = 1.0) -> tuple[float, float, float]:
+        """Strafe right ``blocks`` blocks; returns the new position."""
+        return self._walk("right", blocks)
+
+    def jump(self) -> tuple[float, float, float]:
+        """Jump once; returns the position right after the hop begins.
+
+        Ref: mineflayer/docs/api.md — bot.setControlState('jump', state).
+        """
+        self._js.setControlState("jump", True)
+        time.sleep(_JUMP_SECONDS)
+        self._js.setControlState("jump", False)
+        return self.get_pos()
