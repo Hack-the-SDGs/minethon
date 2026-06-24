@@ -47,6 +47,18 @@ _WALK_TIMEOUT_FLOOR = 1.0  # always allow at least 1s (short hops)
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
+# Size level <-> entity "scale" attribute. get_height reads the server-reported
+# scale; set_height writes it locally (best-effort) and validates the 1..5 range.
+# Ref: mineflayer lib/plugins/entities.js (entity.attributes[key] = {value,
+# modifiers}) + explosion.js getAttributeValue (base + operation 0/1/2 modifiers).
+_MIN_HEIGHT = 1
+_MAX_HEIGHT = 5
+_DEFAULT_SCALE_KEY = "minecraft:generic.scale"
+# Attribute modifier operations. Ref: mineflayer lib/plugins/explosion.js.
+_OP_ADD = 0  # add amount to the base value
+_OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
+_OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
+
 
 def _norm_deg(deg: float) -> float:
     """Normalise an angle to the ``[0, 360)`` range."""
@@ -66,6 +78,55 @@ def _walk_timeout(blocks: float) -> float:
     return max(
         _WALK_TIMEOUT_FLOOR, abs(blocks) / _WALK_SPEED_BPS * _WALK_TIMEOUT_FACTOR
     )
+
+
+def _attribute_value(prop: Any) -> float:
+    """Effective value of an entity attribute (base + modifiers).
+
+    Mirrors mineflayer's ``getAttributeValue`` (lib/plugins/explosion.js):
+    operation 0 adds to the base, 1 adds ``base*amount``, 2 multiplies the
+    running total. Uses subscript access so it works on both a JS object
+    proxy and a plain dict.
+    """
+    base = float(prop["value"])
+    raw = prop["modifiers"]
+    modifiers = list(raw) if raw is not None else []
+    base += sum(
+        float(m["amount"]) for m in modifiers if int(m["operation"]) == _OP_ADD
+    )
+    value = base + sum(
+        base * float(m["amount"])
+        for m in modifiers
+        if int(m["operation"]) == _OP_ADD_FRACTION_OF_BASE
+    )
+    for m in modifiers:
+        if int(m["operation"]) == _OP_MULTIPLY_TOTAL:
+            value += value * float(m["amount"])
+    return value
+
+
+def _scale_key(attributes: Any) -> str | None:
+    """First attribute key naming the entity scale, or ``None``."""
+    for key in attributes:
+        if "scale" in str(key):
+            return str(key)
+    return None
+
+
+def _read_scale(entity: Any) -> float:
+    """Server-reported scale of ``entity``; ``1.0`` when no scale attribute."""
+    attributes = getattr(entity, "attributes", None)
+    if attributes is None:
+        return 1.0
+    key = _scale_key(attributes)
+    if key is None:
+        return 1.0
+    return _attribute_value(attributes[key])
+
+
+def _scale_to_level(scale: float) -> int:
+    """Round + clamp a raw scale onto the ``1..5`` size-level range."""
+    return max(_MIN_HEIGHT, min(_MAX_HEIGHT, round(scale)))
 
 
 class Commands:
@@ -323,3 +384,32 @@ class Commands:
         """
         self._js.lookAt(_make_vec3(x, y, z), True)
         return (self.get_yaw(), self.get_pitch())
+
+    # ── size ──────────────────────────────────────────────────────────
+    def get_height(self) -> int:
+        """Current size level ``1..5`` from the server-reported scale attribute.
+
+        Returns ``1`` when the server has not sent a scale. Ref: mineflayer
+        lib/plugins/entities.js — entity.attributes.
+        """
+        return _scale_to_level(_read_scale(self._entity()))
+
+    def set_height(self, level: int) -> None:
+        """Request a size ``level`` in ``1..5``; raises ``ValueError`` otherwise.
+
+        Writes the scale attribute locally so :meth:`get_height` round-trips.
+        Note: an entity's scale is server-authoritative — the competition
+        server's plugin is what actually resizes the model in-world.
+        """
+        if not _MIN_HEIGHT <= level <= _MAX_HEIGHT:
+            msg = f"大小等級只能是 {_MIN_HEIGHT}~{_MAX_HEIGHT}，收到 {level}。"
+            raise ValueError(msg)
+        entity = self._entity()
+        prop = {"value": float(level), "modifiers": []}
+        attributes = getattr(entity, "attributes", None)
+        if attributes is None:
+            # ponytail: create the whole attributes object in one assignment so
+            # the bridge never has to mutate a nested proxy in place.
+            entity.attributes = {_DEFAULT_SCALE_KEY: prop}
+            return
+        attributes[_scale_key(attributes) or _DEFAULT_SCALE_KEY] = prop
