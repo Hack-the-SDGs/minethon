@@ -24,12 +24,29 @@ from typing import Any
 
 from javascript import Once
 
+from minethon._bridge import get_vec3
 from minethon.errors import NotSpawnedError
+
+# Cursor reach for "what am I aiming at" — covers look_block/dig/place. Slightly
+# beyond survival reach (~4.5 blocks) so creative interaction still resolves.
+# Ref: mineflayer/docs/api.md — bot.blockAtCursor(maxDistance).
+_REACH_BLOCKS = 6.0
+# Default search radius for find_block / find_blocks.
+# Ref: mineflayer/docs/api.md — bot.findBlocks(options.maxDistance) (default 16).
+_FIND_MAX_DISTANCE = 64
 
 
 def _norm_deg(deg: float) -> float:
     """Normalise an angle to the ``[0, 360)`` range."""
     return deg % 360.0
+
+
+def _make_vec3(x: float, y: float, z: float) -> Any:
+    """Construct a mineflayer ``Vec3`` proxy from coordinates.
+
+    Ref: vec3 module — the package export is callable as ``vec3(x, y, z)``.
+    """
+    return get_vec3()(x, y, z)
 
 
 class Commands:
@@ -137,3 +154,69 @@ class Commands:
         if item is None:
             return None
         return (str(item.name), int(item.count))
+
+    # ── world sensing (read) ──────────────────────────────────────────
+    def _block_id(self, name: str) -> int | None:
+        """Resolve a block name to its numeric id via the bot's registry.
+
+        Ref: mineflayer/docs/api.md — bot.registry (minecraft-data) blocksByName.
+        """
+        entry = self._js.registry.blocksByName[name]
+        if entry is None:
+            return None
+        return int(entry.id)
+
+    def get_block(self, x: int, y: int, z: int) -> str | None:
+        """Name of the block at ``(x, y, z)`` or ``None`` if that point is unloaded.
+
+        Ref: mineflayer/docs/api.md — bot.blockAt(point).
+        """
+        block = self._js.blockAt(_make_vec3(x, y, z))
+        if block is None:
+            return None
+        return str(block.name)
+
+    def look_block(self) -> tuple[tuple[int, int, int], str] | None:
+        """Block currently aimed at as ``((x, y, z), name)``, or ``None``.
+
+        Ref: mineflayer/docs/api.md — bot.blockAtCursor(maxDistance).
+        """
+        block = self._js.blockAtCursor(_REACH_BLOCKS)
+        if block is None:
+            return None
+        p = block.position
+        return ((int(p.x), int(p.y), int(p.z)), str(block.name))
+
+    def find_block(self, name: str) -> tuple[int, int, int] | None:
+        """Nearest block named ``name`` as ``(x, y, z)`` or ``None``.
+
+        Ref: mineflayer/docs/api.md — bot.findBlock(options) + bot.registry.
+        """
+        block_id = self._block_id(name)
+        if block_id is None:
+            return None
+        block = self._js.findBlock(
+            {"matching": block_id, "maxDistance": _FIND_MAX_DISTANCE}
+        )
+        if block is None:
+            return None
+        p = block.position
+        return (int(p.x), int(p.y), int(p.z))
+
+    def find_blocks(
+        self,
+        name: str,
+        max: int = 16,  # noqa: A002 — public student-facing name from IDEA.md spec
+    ) -> list[tuple[int, int, int]]:
+        """Up to ``max`` nearest blocks named ``name``, closest first.
+
+        Returns an empty list when the name is unknown or none are found.
+        Ref: mineflayer/docs/api.md — bot.findBlocks(options) (returns coords).
+        """
+        block_id = self._block_id(name)
+        if block_id is None:
+            return []
+        points = self._js.findBlocks(
+            {"matching": block_id, "maxDistance": _FIND_MAX_DISTANCE, "count": max}
+        )
+        return [(int(p.x), int(p.y), int(p.z)) for p in points]

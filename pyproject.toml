@@ -129,6 +129,7 @@ mccabe.max-complexity = 20
     "PLR2004",             # magic values in assertions
     "FBT003",              # boolean positional values in test calls
     "PLC0415",             # local imports inside test methods are fine
+    "TC002",               # pytest imported only for fixture annotations
 ]
 
 # examples — written by contributors, intentionally loose
