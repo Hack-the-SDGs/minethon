@@ -69,6 +69,9 @@ mccabe.max-complexity = 20
 "src/minethon/_bot_runtime.py" = [
     "ANN401",  # Bot runtime — JSPyBridge proxy interop is Any by necessity
 ]
+"src/minethon/_commands.py" = [
+    "ANN401",  # student command surface — mineflayer proxy values are Any
+]
 
 # Generated type overlays — mirror upstream TypeScript surface verbatim.
 # Stay specific per user-requested policy (AGENTS.md): disable only the
