@@ -59,6 +59,17 @@ _OP_ADD = 0  # add amount to the base value
 _OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
 _OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
 
+# Raycast face index (0..5) -> unit offset for placeBlock's faceVector.
+# Ref: mineflayer lib/plugins/digging.js (rayBlock.face) + Minecraft face order.
+_FACE_VECTORS = (
+    (0, -1, 0),  # 0: bottom (-Y)
+    (0, 1, 0),  # 1: top (+Y)
+    (0, 0, -1),  # 2: north (-Z)
+    (0, 0, 1),  # 3: south (+Z)
+    (-1, 0, 0),  # 4: west (-X)
+    (1, 0, 0),  # 5: east (+X)
+)
+
 
 def _norm_deg(deg: float) -> float:
     """Normalise an angle to the ``[0, 360)`` range."""
@@ -457,3 +468,55 @@ class Commands:
             return False
         self._js.tossStack(item)
         return True
+
+    # ── actions (on the block/face being aimed at) ────────────────────
+    def dig(self) -> tuple[tuple[int, int, int], str] | None:
+        """Break the block currently aimed at; returns its ``((x, y, z), name)``.
+
+        Returns ``None`` when nothing is in reach. (This renames mineflayer's
+        ``break`` action.) Ref: mineflayer/docs/api.md — bot.dig(block).
+        """
+        block = self._js.blockAtCursor(_REACH_BLOCKS)
+        if block is None:
+            return None
+        p = block.position
+        result = ((int(p.x), int(p.y), int(p.z)), str(block.name))
+        self._js.dig(block)
+        return result
+
+    def place(self) -> tuple[tuple[int, int, int], str] | None:
+        """Place the held block against the face being aimed at.
+
+        Returns the new block's ``((x, y, z), name)`` or ``None`` if nothing is
+        in reach. Ref: mineflayer/docs/api.md — bot.placeBlock(ref, faceVector).
+        """
+        ref = self._js.blockAtCursor(_REACH_BLOCKS)
+        if ref is None:
+            return None
+        offset = _FACE_VECTORS[int(ref.face)]
+        self._js.placeBlock(ref, _make_vec3(*offset))
+        rp = ref.position
+        pos = (int(rp.x) + offset[0], int(rp.y) + offset[1], int(rp.z) + offset[2])
+        placed = self._js.blockAt(_make_vec3(*pos))
+        name = str(placed.name) if placed is not None else ""
+        return (pos, name)
+
+    def use(self) -> bool:
+        """Right-click: interact with the aimed block, else use the held item.
+
+        Ref: mineflayer/docs/api.md — bot.activateBlock / bot.activateItem.
+        """
+        block = self._js.blockAtCursor(_REACH_BLOCKS)
+        if block is not None:
+            self._js.activateBlock(block)
+        else:
+            self._js.activateItem()
+        return True
+
+    def sneak(self, on: bool) -> bool:
+        """Hold or release sneak (a persistent state); returns ``on``.
+
+        Ref: mineflayer/docs/api.md — bot.setControlState('sneak', state).
+        """
+        self._js.setControlState("sneak", on)
+        return on
