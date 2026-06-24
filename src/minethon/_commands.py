@@ -45,6 +45,7 @@ _POLL_SECONDS = 0.05  # ~one physics tick
 _WALK_TIMEOUT_FACTOR = 3.0  # allow 3x the ideal travel time before giving up
 _WALK_TIMEOUT_FLOOR = 1.0  # always allow at least 1s (short hops)
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
+_DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
 
 def _norm_deg(deg: float) -> float:
@@ -288,3 +289,37 @@ class Commands:
         time.sleep(_JUMP_SECONDS)
         self._js.setControlState("jump", False)
         return self.get_pos()
+
+    # ── orientation (write) ───────────────────────────────────────────
+    def set_turn(self, yaw: float) -> tuple[float, float]:
+        """Face an absolute ``yaw`` (degrees); returns the new ``(yaw, pitch)``.
+
+        ``0`` faces -Z (north); larger yaw turns counter-clockwise. Pitch is
+        left unchanged. Ref: mineflayer/docs/api.md — bot.look(yaw, pitch, force).
+        """
+        entity = self._entity()
+        self._js.look(math.radians(yaw), float(entity.pitch), True)
+        return (self.get_yaw(), self.get_pitch())
+
+    def turn(self, degrees: float) -> tuple[float, float]:
+        """Turn ``degrees`` relative to the current facing (positive = left).
+
+        Returns the new ``(yaw, pitch)`` in degrees.
+        """
+        return self.set_turn(self.get_yaw() + degrees)
+
+    def turn_left(self) -> tuple[float, float]:
+        """Turn 90° to the left; returns the new ``(yaw, pitch)``."""
+        return self.turn(_DEGREES_PER_TURN)
+
+    def turn_right(self) -> tuple[float, float]:
+        """Turn 90° to the right; returns the new ``(yaw, pitch)``."""
+        return self.turn(-_DEGREES_PER_TURN)
+
+    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
+        """Face the exact point ``(x, y, z)``; returns the new ``(yaw, pitch)``.
+
+        Ref: mineflayer/docs/api.md — bot.lookAt(point, force).
+        """
+        self._js.lookAt(_make_vec3(x, y, z), True)
+        return (self.get_yaw(), self.get_pitch())
