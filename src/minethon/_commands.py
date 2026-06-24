@@ -91,9 +91,7 @@ def _attribute_value(prop: Any) -> float:
     base = float(prop["value"])
     raw = prop["modifiers"]
     modifiers = list(raw) if raw is not None else []
-    base += sum(
-        float(m["amount"]) for m in modifiers if int(m["operation"]) == _OP_ADD
-    )
+    base += sum(float(m["amount"]) for m in modifiers if int(m["operation"]) == _OP_ADD)
     value = base + sum(
         base * float(m["amount"])
         for m in modifiers
@@ -413,3 +411,49 @@ class Commands:
             entity.attributes = {_DEFAULT_SCALE_KEY: prop}
             return
         attributes[_scale_key(attributes) or _DEFAULT_SCALE_KEY] = prop
+
+    # ── items ─────────────────────────────────────────────────────────
+    def _find_inventory_item(self, name: str) -> Any:
+        """First inventory item named ``name`` or ``None``.
+
+        Ref: mineflayer/docs/api.md — bot.inventory.items() (prismarine-windows).
+        """
+        for item in self._js.inventory.items():
+            if str(item.name) == name:
+                return item
+        return None
+
+    def hold(self, name: str) -> bool:
+        """Equip the inventory item named ``name`` in the main hand.
+
+        Returns ``True`` on success, ``False`` if the item is not carried.
+        Ref: mineflayer/docs/api.md — bot.equip(item, 'hand').
+        """
+        item = self._find_inventory_item(name)
+        if item is None:
+            return False
+        self._js.equip(item, "hand")
+        return True
+
+    def unhold(self) -> bool:
+        """Move the held item back into the inventory.
+
+        Returns ``False`` if the hand was already empty.
+        Ref: mineflayer/docs/api.md — bot.unequip('hand').
+        """
+        if self._js.heldItem is None:
+            return False
+        self._js.unequip("hand")
+        return True
+
+    def drop(self) -> bool:
+        """Throw the entire held stack onto the ground.
+
+        Returns ``False`` if the hand was empty. Ref: mineflayer/docs/api.md —
+        bot.tossStack(item).
+        """
+        item = self._js.heldItem
+        if item is None:
+            return False
+        self._js.tossStack(item)
+        return True
