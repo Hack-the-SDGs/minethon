@@ -47,6 +47,21 @@ bot.bind(Greeter())
 - `BotEvent` 仍以 `StrEnum` 對外公開，作為事件名稱常數（例如 logging、檢查）使用，但**不再**作為註冊參數
 - event callback 參數以 upstream d.ts 為主；若 JS runtime 明確更嚴格或更少參數，由 `_normalize_handler` 自動補 `None` / 截斷
 
+## 同步命令式 API（學員主要入口）
+
+`IDEA.md` 描述的同步、阻塞、命令式 `Bot` 方法群，讓學員寫直線腳本（`bot.wait_spawn()` → `bot.move_forward(3)` → `bot.dig()`），不需要 callback / await。
+
+設計決策：
+
+- 實作在 `src/minethon/_commands.py` 的 `Commands` mixin；`Bot` 繼承它，所以方法直接掛在 `Bot` 上，未覆寫的名稱仍走 `__getattr__` 委託回 JS proxy
+- 全部回傳原生型別（`tuple` / `str` / `bool` / `int`），不對學員暴露 `Vec3` / `Block` / `Item` 物件
+- 不依賴 pathfinder：`move_*` 以 `setControlState` + 位置輪詢實作，含安全逾時避免撞牆卡死
+- 角度一律「度」；`get_height`/`set_height` 是大小等級 1~5，讀寫 entity `scale` 屬性（實際縮放仍需伺服器端配合）
+- `chat(obj)` 送一般公開聊天（`str(obj)`）；分組可見性由伺服器插件處理
+- 與事件 API 並存：直線動作跑主執行緒，`EventAdaptor` + `bind` 處理反應，最後 `run_forever` 保活
+- `dig` / `chat` 兩個名稱刻意覆寫 mineflayer 同名方法；generator 用 `_STUDENT_API_OVERRIDES` 在 `bot.pyi` 裡略過 upstream 版本，避免重複定義
+- 完整方法清單與中文 hover 見 `src/minethon/bot.pyi`；AI 替學員寫程式用的說明見 `skills/minethon/`
+
 ## IDE 與型別層
 
 - `src/minethon/bot.pyi` 是 IDE completion 的主要來源，必須由 `scripts/generate_stubs.py` 生成
@@ -64,13 +79,15 @@ bot.bind(Greeter())
    - 公開 module 名 — 純 re-export 自 `_bot_runtime`
    - 維持薄殼，`from minethon.bot import Bot` 不會把 runtime 細節帶進 IDE 視野
 3. `src/minethon/_bot_runtime.py`
-   - 真正的 runtime façade — `class Bot` 實作、`__getattr__` JS proxy 委託、`bind()` 事件分派、plugin loading、version pin guard
+   - 真正的 runtime façade — `class Bot(Commands)` 實作、`__getattr__` JS proxy 委託、`bind()` 事件分派、plugin loading、version pin guard
    - 從 `bot.py` 拆出，避免 `.py` + `.pyi` 雙重 `class Bot` 在 IDE 解析時產生衝突源
-4. `src/minethon/bot.pyi`
+4. `src/minethon/_commands.py`
+   - 同步命令式學員 API 的 `Commands` mixin（見上方「同步命令式 API」段）
+5. `src/minethon/bot.pyi`
    - 生成的型別面 — `minethon.bot` 模組的 sole `class Bot` declaration
-5. `src/minethon/models/`
+6. `src/minethon/models/`
    - 可 import 的型別 shell
-6. `src/minethon/errors.py`
+7. `src/minethon/errors.py`
    - 使用者可見的錯誤類
 
 > 補充：PyCharm 的 completion popup 對 Python class member 預設右側顯示 owner class，不顯示型別 annotation — 這是 PyCharm 對 Python 的 UI 設計（純 `class Foo: a = 10` 也是這樣），跟 stub / .pyi 結構無關。要看完整型別請按 `Ctrl+J` (Quick Documentation) 或 hover；assign 後變數型別會正確顯示。
@@ -182,6 +199,9 @@ mineflayer d.ts 跟現存 `bot.pyi` 的 class member 列表，缺項會 exit 1�
 - [x] `minethon.models` 可 import 型別 shell
 - [x] 顯式版本 guard
 - [x] 最小單元測試重建
+- [x] 同步命令式學員 API（`_commands.py`，IDEA.md 全數實作，含單元測試）
+- [x] 同步 API stub + 中文 hover 接進 `bot.pyi`（generator `_STUDENT_API_STUB`）
+- [x] AI agent skill（`skills/minethon/`）讓 AI 能替學員寫正確程式
 - [ ] 自家 collection wrapper（`bot.players` / `bot.entities` 目前仍是 bridge proxy）
 - [ ] 更完整的 user-facing error wrapping
 - [ ] 除 pathfinder 以外的 plugin typed 支援
