@@ -74,9 +74,7 @@ MF_INDEX = MF_DIR / "index.d.ts"
 # interface (parse_dts, check_stubs) keep working when it isn't installed. main()
 # (full regen) re-checks and fails with an actionable message.
 PATHFINDER_DIR = _resolve_package_dir_optional("mineflayer-pathfinder")
-PATHFINDER_INDEX = (
-    PATHFINDER_DIR / "index.d.ts" if PATHFINDER_DIR is not None else None
-)
+PATHFINDER_INDEX = PATHFINDER_DIR / "index.d.ts" if PATHFINDER_DIR is not None else None
 
 
 def _portable_ref(path: Path) -> str:
