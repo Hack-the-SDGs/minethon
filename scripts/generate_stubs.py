@@ -60,10 +60,23 @@ def _resolve_package_dir(package: str) -> Path:
     raise FileNotFoundError(f"Cannot resolve npm package directory for {package!r}")
 
 
+def _resolve_package_dir_optional(package: str) -> Path | None:
+    """Like ``_resolve_package_dir`` but returns ``None`` instead of raising."""
+    try:
+        return _resolve_package_dir(package)
+    except FileNotFoundError:
+        return None
+
+
 MF_DIR = _resolve_package_dir("mineflayer")
-PATHFINDER_DIR = _resolve_package_dir("mineflayer-pathfinder")
 MF_INDEX = MF_DIR / "index.d.ts"
-PATHFINDER_INDEX = PATHFINDER_DIR / "index.d.ts"
+# Pathfinder is optional at import time so tools that only need the mineflayer
+# interface (parse_dts, check_stubs) keep working when it isn't installed. main()
+# (full regen) re-checks and fails with an actionable message.
+PATHFINDER_DIR = _resolve_package_dir_optional("mineflayer-pathfinder")
+PATHFINDER_INDEX = (
+    PATHFINDER_DIR / "index.d.ts" if PATHFINDER_DIR is not None else None
+)
 
 
 def _portable_ref(path: Path) -> str:
@@ -2370,6 +2383,11 @@ def format_generated_files(*paths: Path) -> None:
 
 
 def main() -> None:
+    if PATHFINDER_INDEX is None:
+        raise SystemExit(
+            "mineflayer-pathfinder 尚未安裝，無法生成 pathfinder 型別。"
+            "請先執行 ./setup.sh 安裝 pinned 的 mineflayer / vec3 / pathfinder。"
+        )
     mf_text = MF_INDEX.read_text()
     mf_text = strip_ts_comments(mf_text)
     pathfinder_text = strip_ts_comments(PATHFINDER_INDEX.read_text())
