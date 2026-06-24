@@ -520,3 +520,13 @@ class Commands:
         """
         self._js.setControlState("sneak", on)
         return on
+
+    # ── chat ──────────────────────────────────────────────────────────
+    def chat(self, obj: object) -> None:
+        """Send ``obj`` (converted to text) as a normal public chat message.
+
+        Group-only visibility is handled server-side by the competition's
+        chat plugin — the bot just sends and receives normally.
+        Ref: mineflayer/docs/api.md — bot.chat(message).
+        """
+        self._js.chat(str(obj))
