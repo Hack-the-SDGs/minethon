@@ -15,10 +15,11 @@ minethon 是**教學導向**的 Python mineflayer SDK。
 
 ### 特色
 
-- **同步 callback API** — `@bot.on_chat` decorator 直接註冊處理函式，沒有 `await` 也沒有 event loop
+- **同步命令式 API** — `bot.wait_spawn()` → `bot.move_forward(3)` → `bot.dig()`，全部阻塞、回傳原生型別，學員寫一行看懂一行
+- **同步 callback API** — 繼承 `EventAdaptor`、覆寫 `on_<event>`、用 `bot.bind(...)` 一次綁完，沒有 `await` 也沒有 event loop
 - **完整型別層** — `bot.pyi` 由 mineflayer 官方 `index.d.ts` 自動生成，IDE hover 顯示中文說明
-- **兩種事件寫法** — `@bot.on_<event>` sugar、`@bot.on(BotEvent.CHAT)` enum，任選其一
-- **Class-based handler** — 繼承 `BotHandlers`、override 想要的 `on_<event>`、`bot.bind(instance)` 一次綁完
+- **單一事件入口** — 所有事件統一走 `EventAdaptor` 子類別 + `bot.bind(...)`，避免多套 API 並存造成學習負擔
+- **Class-based handler** — `EventAdaptor` 內附完整型別簽名，IDE 的「Override methods」可一鍵填入正確參數
 - **Pathfinding** — 內建 typed 支援的 `mineflayer-pathfinder`，`bot.pathfinder.goto(...)` 直接可用
 - **顯式版本釘選** — 非內建 plugin 必須傳版本字串，避免 JSPyBridge 在 runtime 偷裝 latest
 
@@ -46,68 +47,69 @@ minethon 是**教學導向**的 Python mineflayer SDK。
 
 ## 快速開始
 
+### 同步寫法（推薦初學者）
+
+直線腳本，一行做一件事，沒有 callback 也沒有 `await`：
+
 ```python
-from minethon import BotEvent, create_bot
+from minethon import create_bot
+
+bot = create_bot(host="localhost", username="pybot")
+
+bot.wait_spawn()                 # 卡住直到進入世界
+bot.move_forward(3)              # 往前走 3 格（不用 pathfinder）
+bot.dig()                        # 挖掉正在看的方塊
+x, y, z = bot.get_pos()
+bot.chat(f"我在 ({x:.0f}, {y:.0f}, {z:.0f})")
+```
+
+完整方法表見 [`skills/minethon/`](skills/minethon/)（也是給 AI 看的接口說明）。
+
+### 事件寫法
+
+要「反應」聊天、被打、玩家進出等事件時，繼承 `EventAdaptor`：
+
+```python
+from minethon import EventAdaptor, create_bot
 from minethon.models import ChatMessage
 
 bot = create_bot(host="localhost", username="pybot")
 
 
-@bot.on_spawn
-def on_spawn() -> None:
-    bot.chat("hello")
+class Greeter(EventAdaptor):
+    def on_spawn(self) -> None:
+        bot.chat("hello")
+
+    def on_chat(
+        self,
+        username: str,
+        message: str,
+        translate: str | None,
+        json_msg: ChatMessage,
+        matches: list[str] | None,
+    ) -> None:
+        if username == bot.username:
+            return
+        if message == "quit":
+            bot.quit("bye")
+
+    def on_end(self, reason: str) -> None:
+        print(f"Disconnected: {reason}")
 
 
-@bot.on_chat
-def on_chat(
-    username: str,
-    message: str,
-    translate: str | None,
-    json_msg: ChatMessage,
-    matches: list[str] | None,
-) -> None:
-    if username == bot.username:
-        return
-    if message == "quit":
-        bot.quit("bye")
-
-
-@bot.on(BotEvent.END)
-def on_end(reason: str) -> None:
-    print(f"Disconnected: {reason}")
-
-
+bot.bind(Greeter())
 bot.run_forever()
 ```
 
 ## 事件 API
 
-以下兩種寫法都支援：
+唯一公開寫法：繼承 `EventAdaptor`、覆寫想要的 `on_<event>` 方法、用 `bot.bind(instance)` 綁定。
 
 ```python
-@bot.on_chat
-def on_chat(...): ...
+from minethon import EventAdaptor, create_bot
 
 
-@bot.on(BotEvent.CHAT)
-def on_chat(...): ...
-```
-
-JetBrains / Pylance 的 completion 體驗：
-
-- `@bot.on_chat` 是最直接的 decorator，IDE 會跳出完整參數列
-- `@bot.on(BotEvent.CHAT)` 適合想保留顯式 event enum 的寫法
-- `@bot.on("chat")` 字串形式**已移除**，不再是公開 API
-
-### Class-based handler
-
-偏好 OOP 的學生可以繼承 `BotHandlers`、覆寫想關心的事件、一次 bind：
-
-```python
-from minethon import BotHandlers, create_bot
-
-
-class My(BotHandlers):
+class My(EventAdaptor):
     def on_spawn(self) -> None:
         print(f"Spawned as {bot.username}")
 
@@ -120,6 +122,14 @@ bot = create_bot(host="localhost", username="pybot")
 bot.bind(My())
 bot.run_forever()
 ```
+
+歷史寫法已**全部移除**，不再是公開 API：
+
+- `@bot.on("chat")`（字串）
+- `@bot.on(BotEvent.CHAT)` / `@bot.once(BotEvent.CHAT)`（enum decorator）
+- `@bot.on_<event>` / `@bot.once_<event>`（屬性 shortcut）
+
+統一只剩 `EventAdaptor` 一條路，避免初學者在多套 API 之間迷失方向。
 
 ## 型別與匯入
 
@@ -148,17 +158,18 @@ tool = bot.load_plugin("mineflayer-tool", "1.5.0", export_key="plugin")
 
 | 範例                                                                  | 說明                                  |
 | --------------------------------------------------------------------- | ------------------------------------- |
+| [linear_actions](examples/demos/linear_actions/main.py)               | 同步命令式 API：走路、轉向、挖方塊、回報座標 |
 | [drasl_auth](examples/demos/drasl_auth/main.py)                       | 透過自建 Drasl 驗證伺服器連線並回應聊天 |
 
 ## 專案結構
 
 ```
 src/minethon/
-├── __init__.py         # 使用者入口（re-export create_bot / Bot / BotEvent / BotHandlers / 錯誤類）
+├── __init__.py         # 使用者入口（re-export create_bot / Bot / BotEvent / EventAdaptor / 錯誤類）
 ├── bot.py              # runtime façade：event decorator、plugin loading、版本 guard
 ├── bot.pyi             # 生成的 IDE 型別層（由 scripts/generate_stubs.py 產出）
 ├── _events.py          # 生成的 BotEvent StrEnum
-├── _handlers.py        # 生成的 BotHandlers 基底類別
+├── _handlers.py        # 生成的 EventAdaptor 基底類別
 ├── _bridge.py          # JSPyBridge 封裝：callback thread、emitter 注入、handler 正規化
 ├── _type_shells.py     # 內部型別 shell 實作
 ├── errors.py           # 公開錯誤類（MinethonError、NotSpawnedError、VersionPinRequiredError 等）
@@ -170,10 +181,9 @@ src/minethon/
 scripts/
 ├── generate_stubs.py   # 從 mineflayer / pathfinder d.ts 生成 bot.pyi / _events.py / _handlers.py
 └── format.sh           # 一鍵 regen → ruff → pyright → pytest
-
-docs/
-└── stubs_zh_tw.md      # 中文 hover 說明來源（供 generator 注入 docstring）
 ```
+
+> hover 說明的中文 docstring 直接住在 `src/minethon/bot.pyi` 內；`generate_stubs.py` regen 時會從現有 `.pyi` 讀回 docstring 再注入新生成的 stub，所以人工編輯不會被沖掉。
 
 ## 開發
 

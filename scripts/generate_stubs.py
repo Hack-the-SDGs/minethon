@@ -20,6 +20,8 @@ Run: uv run python scripts/generate_stubs.py
 
 from __future__ import annotations
 
+import ast
+import inspect
 import re
 import subprocess
 import sys
@@ -31,7 +33,6 @@ VENDORED_DTS_ROOT = REPO_ROOT / "src/mineflayer/js/node_modules"
 OUT_PATH = REPO_ROOT / "src/minethon/bot.pyi"
 OUT_EVENTS_PATH = REPO_ROOT / "src/minethon/_events.py"
 OUT_HANDLERS_PATH = REPO_ROOT / "src/minethon/_handlers.py"
-STUBS_DOC = REPO_ROOT / "docs/stubs_zh_tw.md"
 
 
 def _find_runtime_node_modules() -> Path | None:
@@ -59,10 +60,21 @@ def _resolve_package_dir(package: str) -> Path:
     raise FileNotFoundError(f"Cannot resolve npm package directory for {package!r}")
 
 
+def _resolve_package_dir_optional(package: str) -> Path | None:
+    """Like ``_resolve_package_dir`` but returns ``None`` instead of raising."""
+    try:
+        return _resolve_package_dir(package)
+    except FileNotFoundError:
+        return None
+
+
 MF_DIR = _resolve_package_dir("mineflayer")
-PATHFINDER_DIR = _resolve_package_dir("mineflayer-pathfinder")
 MF_INDEX = MF_DIR / "index.d.ts"
-PATHFINDER_INDEX = PATHFINDER_DIR / "index.d.ts"
+# Pathfinder is optional at import time so tools that only need the mineflayer
+# interface (parse_dts, check_stubs) keep working when it isn't installed. main()
+# (full regen) re-checks and fails with an actionable message.
+PATHFINDER_DIR = _resolve_package_dir_optional("mineflayer-pathfinder")
+PATHFINDER_INDEX = PATHFINDER_DIR / "index.d.ts" if PATHFINDER_DIR is not None else None
 
 
 def _portable_ref(path: Path) -> str:
@@ -83,65 +95,116 @@ def _portable_ref(path: Path) -> str:
 
 
 # --------------------------------------------------------------------------- #
-#  Stubs doc parsing & docstring injection
+#  Existing-stub docstring extraction & injection
 # --------------------------------------------------------------------------- #
 
 
-def parse_stubs_doc() -> dict[str, str]:
-    """Parse docs/stubs_zh_tw.md into `{lookup_key: description_body}`.
+def parse_existing_pyi_docstrings(path: Path) -> dict[str, str]:
+    """Extract docstrings from an existing `.pyi`, keyed for `inject_docstrings`.
 
-    Heading → key mapping:
-      - ``### bot.chat(message)``         → ``bot.chat``
-      - ``### bot.health``                → ``bot.health``
-      - ``### "chat"``                    → ``event:chat``
-      - ``### Vec3``                      → ``Vec3``
-      - ``### Vec3.offset(dx, dy, dz)``   → ``Vec3.offset``
-      - ``### Entity.position``           → ``Entity.position``
+    The `.pyi` itself is the source of truth for hover descriptions: each
+    regen reads docstrings back from the prior `.pyi`, so human edits made
+    in the `.pyi` survive `generate_stubs.py` runs.
 
-    Sections whose body is empty return an empty string — callers should
-    treat empty body as "no docstring".
+    Key scheme:
+      - Class itself          → class name (e.g. ``"Bot"``, ``"Vec3"``)
+      - Bot member            → ``"bot.<name>"``
+      - Other class member    → ``"<ClassName>.<name>"``
+      - Event overload        → ``"event:<event_name>"``
+      - Module-level function → ``"<func_name>"``
+
+    AST-based so it tolerates ruff format reflows and any future formatter
+    changes without regex brittleness.
     """
-    if not STUBS_DOC.exists():
+    if not path.exists():
         return {}
-    text = STUBS_DOC.read_text()
-    sections: dict[str, str] = {}
-    current_key: str | None = None
-    current_body: list[str] = []
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return {}
 
-    def _key_from_heading(heading: str) -> str:
-        t = heading.removeprefix("### ").strip()
-        m = re.match(r'^"([^"]+)"', t)
-        if m:
-            return f"event:{m.group(1)}"
-        # Strip trailing `(...)` argument list
-        m2 = re.match(r"^([^()\s]+)\s*\(", t)
-        if m2:
-            return m2.group(1)
-        return t
+    out: dict[str, str] = {}
 
-    def _finalize(body: list[str]) -> str:
-        # Drop trailing "---" thematic breaks, empty lines, and `## `-level
-        # section separators that belong to file-level layout rather than the
-        # symbol's description.
-        while body:
-            t = body[-1].strip()
-            if not t or t == "---" or t.startswith("## "):
-                body.pop()
+    def _add(key: str, doc: str | None) -> None:
+        if doc:
+            out[key] = doc
+
+    def _member_key(class_name: str, member: str) -> str:
+        if class_name == "Bot":
+            return f"bot.{member}"
+        return f"{class_name}.{member}"
+
+    def _event_overload_name(func: ast.FunctionDef) -> str | None:
+        # Only consider @overload-decorated `on(self, event: Literal["X"])`
+        if not any(
+            isinstance(d, ast.Name) and d.id == "overload" for d in func.decorator_list
+        ):
+            return None
+        if len(func.args.args) < 2:
+            return None
+        ann = func.args.args[1].annotation
+        if not isinstance(ann, ast.Subscript):
+            return None
+        if not (isinstance(ann.value, ast.Name) and ann.value.id == "Literal"):
+            return None
+        sub = ann.slice
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            return sub.value
+        return None
+
+    def _is_str_expr(node: ast.stmt) -> bool:
+        return (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        )
+
+    def _walk_class(cls: ast.ClassDef) -> None:
+        class_name = cls.name
+        _add(class_name, ast.get_docstring(cls, clean=True))
+
+        body = list(cls.body)
+        # Skip the class-level docstring node so we don't pair it as an attr doc
+        idx = 0
+        if body and _is_str_expr(body[0]):
+            idx = 1
+        while idx < len(body):
+            item = body[idx]
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                name = item.target.id
+                # Attribute docstring lives in the *next* statement; raw value
+                # carries the source's continuation-line indent, so cleandoc()
+                # it the same way ast.get_docstring(clean=True) would for a
+                # method docstring — otherwise format_doc_block stacks indents
+                # on every regen.
+                if idx + 1 < len(body) and _is_str_expr(body[idx + 1]):
+                    raw = body[idx + 1].value.value  # type: ignore[attr-defined]
+                    _add(_member_key(class_name, name), inspect.cleandoc(raw))
+                    idx += 2
+                    continue
+                idx += 1
                 continue
-            break
-        return "\n".join(body).strip("\n")
+            if isinstance(item, ast.FunctionDef):
+                name = item.name
+                doc = ast.get_docstring(item, clean=True)
+                if class_name == "Bot" and name in {"on", "once"}:
+                    ev = _event_overload_name(item)
+                    if ev is not None:
+                        _add(f"event:{ev}", doc)
+                        idx += 1
+                        continue
+                _add(_member_key(class_name, name), doc)
+                idx += 1
+                continue
+            idx += 1
 
-    for raw in text.split("\n"):
-        if raw.startswith("### "):
-            if current_key is not None:
-                sections[current_key] = _finalize(current_body)
-            current_key = _key_from_heading(raw)
-            current_body = []
-        elif current_key is not None:
-            current_body.append(raw)
-    if current_key is not None:
-        sections[current_key] = _finalize(current_body)
-    return sections
+    for top in tree.body:
+        if isinstance(top, ast.ClassDef):
+            _walk_class(top)
+        elif isinstance(top, ast.FunctionDef):
+            _add(top.name, ast.get_docstring(top, clean=True))
+
+    return out
 
 
 def format_doc_block(body: str, indent: str) -> list[str]:
@@ -414,7 +477,7 @@ EVENT_CALLBACK_OVERRIDES = {
 
 # Parameter names and types for events whose callback signature comes from
 # EVENT_CALLBACK_OVERRIDES (so there is no parsed arg list to reuse). Kept in
-# parallel with EVENT_CALLBACK_OVERRIDES; used by the BotHandlers stub render.
+# parallel with EVENT_CALLBACK_OVERRIDES; used by the EventAdaptor stub render.
 EVENT_HANDLER_SIGNATURES: dict[str, list[tuple[str, str]]] = {
     "message": [("msg", "ChatMessage"), ("position", "MessagePosition")],
     "messagestr": [
@@ -1607,7 +1670,7 @@ def render_bot_events(
 
     Returns the alias lines and a list of ``(event, alias, handler_args)``
     where ``handler_args`` is the ``[(name, py_type)]`` list used to render
-    ``BotHandlers.on_<event>`` signatures.
+    ``EventAdaptor.on_<event>`` signatures.
     """
     members = parse_members(events_body)
     lines: list[str] = ["# --- Event callback type aliases ---"]
@@ -1648,7 +1711,7 @@ def render_bot_events(
         else:
             cb_type = ts_to_py(m.ts_type)
             # Property-style event: `chat: (a: X, b: Y) => void`. Recover the
-            # named parameter list so BotHandlers.on_<event> can be fully typed.
+            # named parameter list so EventAdaptor.on_<event> can be fully typed.
             handler_args = _parse_arrow_fn_args(m.ts_type)
         alias = f"_OnEvent_{_sanitize_alias(m.name)}"
         lines.append(f"{alias} = {cb_type}")
@@ -1685,45 +1748,66 @@ def render_event_enum(
     return lines
 
 
-def render_event_decorator_aliases(
-    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
-    method: str,
-) -> list[str]:
-    lines: list[str] = []
-    for event, alias, _args in event_callbacks:
-        attr_name = _event_attr_name(event, prefix=method)
-        member = _event_member_name(event)
-        lines.append(f"    {attr_name}: Callable[[{alias}], {alias}]")
-        lines.append(f'    """Same as `bot.{method}(BotEvent.{member})`. """')
-    return lines
-
-
-def render_on_overloads(
-    event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
-    method: str,
-) -> list[str]:
-    """Emit @overload defs for `on` or `once`."""
-    lines: list[str] = []
-    for event, alias, _args in event_callbacks:
-        member = _event_member_name(event)
-        lines.append("    @overload")
-        lines.append(
-            f"    def {method}(self, event: Literal[BotEvent.{member}]) -> "
-            f"Callable[[{alias}], {alias}]: ..."
-        )
-    # No string overload on purpose — public API only accepts BotEvent.
-    return lines
-
-
 # --------------------------------------------------------------------------- #
 #  Bot rendering
 # --------------------------------------------------------------------------- #
+
+
+# mineflayer Bot members the student API deliberately replaces with a simpler
+# synchronous version — skipped when rendering the upstream interface so the
+# student signature/docstring is the only one emitted.
+_STUDENT_API_OVERRIDES = frozenset({"chat", "dig"})
+
+# Minethon's synchronous student API — implemented in _commands.py (mixed into
+# Bot). Listed here so IDE completion surfaces them; the zh-TW hover docstrings
+# live in bot.pyi and survive regen via the docstring round-trip.
+_STUDENT_API_STUB = """\
+    # --- Synchronous student API (implemented in _commands.py) ---
+    def wait_spawn(self) -> None: ...
+    def wait(self, seconds: float) -> None: ...
+    def get_x(self) -> float: ...
+    def get_y(self) -> float: ...
+    def get_z(self) -> float: ...
+    def get_pos(self) -> tuple[float, float, float]: ...
+    def get_yaw(self) -> float: ...
+    def get_pitch(self) -> float: ...
+    def get_sneak(self) -> bool: ...
+    def get_hand(self) -> tuple[str, int] | None: ...
+    def get_block(self, x: int, y: int, z: int) -> str | None: ...
+    def look_block(self) -> tuple[tuple[int, int, int], str] | None: ...
+    def find_block(self, name: str) -> tuple[int, int, int] | None: ...
+    def find_blocks(self, name: str, max: int = ...) -> list[tuple[int, int, int]]: ...
+    def move_forward(self, blocks: float = ...) -> tuple[float, float, float]: ...
+    def move_backward(self, blocks: float = ...) -> tuple[float, float, float]: ...
+    def move_left(self, blocks: float = ...) -> tuple[float, float, float]: ...
+    def move_right(self, blocks: float = ...) -> tuple[float, float, float]: ...
+    def jump(self) -> tuple[float, float, float]: ...
+    def turn_left(self) -> tuple[float, float]: ...
+    def turn_right(self) -> tuple[float, float]: ...
+    def turn(self, degrees: float) -> tuple[float, float]: ...
+    def set_turn(self, yaw: float) -> tuple[float, float]: ...
+    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]: ...
+    def get_height(self) -> int: ...
+    def set_height(self, level: int) -> None: ...
+    def hold(self, name: str) -> bool: ...
+    def unhold(self) -> bool: ...
+    def drop(self) -> bool: ...
+    def dig(self) -> tuple[tuple[int, int, int], str] | None: ...
+    def place(self) -> tuple[tuple[int, int, int], str] | None: ...
+    def use(self) -> bool: ...
+    def sneak(self, on: bool) -> bool: ...
+    def chat(self, obj: object) -> None: ...
+"""
 
 
 def render_bot(
     bot_body: str,
     event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
 ) -> list[str]:
+    # `event_callbacks` is retained on the signature for API stability with
+    # the rest of the generator pipeline; Bot itself no longer surfaces any
+    # event registration overloads — events go through EventAdaptor.bind().
+    del event_callbacks
     members = parse_members(bot_body)
     lines = [
         "class Bot:",
@@ -1732,9 +1816,10 @@ def render_bot(
         '    Ref: mineflayer/index.d.ts — interface Bot\n    """',
         "    def __init__(self, js_bot: object) -> None: ...",
     ]
-    # Skip private `_client` field (exposed as raw JS only)
+    # Skip private `_client` field (exposed as raw JS only) and any member the
+    # synchronous student API replaces (rendered from _STUDENT_API_STUB instead).
     for raw in members:
-        if raw.name.startswith("_"):
+        if raw.name.startswith("_") or raw.name in _STUDENT_API_OVERRIDES:
             continue
         m = _as_method_if_arrow(raw)
         if m.is_method:
@@ -1742,19 +1827,6 @@ def render_bot(
         else:
             lines.append(render_property(m, class_name="Bot"))
 
-    # Event overloads
-    lines.append("")
-    lines.append("    # --- Typed event overloads (generated from BotEvents) ---")
-    lines.extend(render_on_overloads(event_callbacks, "on"))
-    lines.append("")
-    lines.append(
-        "    # Shortcut decorators for better IDE completion in JetBrains/Pylance"
-    )
-    lines.extend(render_event_decorator_aliases(event_callbacks, "on"))
-    lines.append("")
-    lines.extend(render_on_overloads(event_callbacks, "once"))
-    lines.append("")
-    lines.extend(render_event_decorator_aliases(event_callbacks, "once"))
     lines.append("")
     # Minethon-specific additions — defined in bot.py at runtime.
     lines.append("    # --- Minethon-specific methods (defined in bot.py) ---")
@@ -1783,7 +1855,9 @@ def render_bot(
         "    def require(self, name: str, version: str | None = ...) -> object: ..."
     )
     lines.append("    def run_forever(self) -> None: ...")
-    lines.append('    def bind(self, handlers: "BotHandlers") -> "BotHandlers": ...')
+    lines.append("    def bind(self, handlers: EventAdaptor) -> EventAdaptor: ...")
+    lines.append("")
+    lines.extend(_STUDENT_API_STUB.splitlines())
     return lines
 
 
@@ -1898,7 +1972,11 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 from typing import Literal, Self, TypedDict, Unpack, overload
 
-from minethon._events import BotEvent
+# Re-export EventAdaptor so `bot.pyi`'s `Bot.bind` annotation refers to the
+# **same** class users subclass at runtime — preventing PyCharm from treating
+# `minethon.bot.EventAdaptor` and `minethon._handlers.EventAdaptor` as two
+# different nominal types.
+from minethon._handlers import EventAdaptor as EventAdaptor
 
 """
 
@@ -2040,7 +2118,7 @@ def render_handlers_runtime(
     *,
     inline_aliases: dict[str, str] | None = None,
 ) -> str:
-    """Emit the runtime ``BotHandlers`` class for `src/minethon/_handlers.py`.
+    """Emit the runtime ``EventAdaptor`` class for `src/minethon/_handlers.py`.
 
     Every ``on_<event>`` method is a no-op with the same typed signature as
     the stub class in ``bot.pyi``. Subclasses override just the events they
@@ -2075,7 +2153,7 @@ def render_handlers_runtime(
         "# Regenerate via: uv run python scripts/generate_stubs.py",
         '"""Optional class-based event handler base.',
         "",
-        "Subclass :class:`BotHandlers`, override the ``on_<event>`` methods",
+        "Subclass :class:`EventAdaptor`, override the ``on_<event>`` methods",
         "you care about, then wire the instance via ``bot.bind(handlers)``.",
         "",
         "Method signatures here mirror ``bot.pyi`` so IDE hover, 'Override",
@@ -2099,17 +2177,17 @@ def render_handlers_runtime(
         lines.append("")
     if shell_imports:
         lines.append("if TYPE_CHECKING:")
-        lines.append("    from minethon._type_shells import (")
+        lines.append("    from minethon.models import (")
         for name in shell_imports:
             lines.append(f"        {name},")
         lines.append("    )")
         lines.append("")
     lines.extend(
         [
-            '__all__ = ["BotHandlers"]',
+            '__all__ = ["EventAdaptor"]',
             "",
             "",
-            "class BotHandlers:",
+            "class EventAdaptor:",
             '    """Base class for class-based event handlers."""',
             "",
         ]
@@ -2130,7 +2208,7 @@ def render_handlers_runtime(
 
 
 def _type_shell_names() -> tuple[str, ...]:
-    """Source-of-truth shell names — kept in sync with `_type_shells.py`."""
+    """Source-of-truth shell names — kept in sync with `models/__init__.py`."""
     return (
         "Vec3",
         "ChatMessageScore",
@@ -2201,25 +2279,22 @@ def _type_shell_names() -> tuple[str, ...]:
 def render_handlers_stub(
     event_callbacks: list[tuple[str, str, list[tuple[str, str]]]],
 ) -> list[str]:
-    """Emit the typed ``BotHandlers`` class for bot.pyi."""
-    lines = [
-        "",
-        "class BotHandlers:",
-        '    """Class-based handler base. Subclass, override `on_<event>`, '
-        "then call `bot.bind(handlers)`.",
-        "",
-        '    Typed signatures are provided here so IDE "Override methods" '
-        "auto-fill produces the correct parameter list.",
-        '    """',
-    ]
-    for event, _alias, args in event_callbacks:
-        attr = _event_attr_name(event, prefix="on")
-        if args:
-            sig = ", ".join(["self"] + [f"{name}: {py_type}" for name, py_type in args])
-        else:
-            sig = "self"
-        lines.append(f"    def {attr}({sig}) -> None: ...")
-    return lines
+    """Return the EventAdaptor surface for bot.pyi (now a no-op).
+
+    `EventAdaptor` is re-exported from the **header** of bot.pyi via
+    ``from minethon._handlers import EventAdaptor as EventAdaptor``
+    so that subclasses share the **same** nominal type as
+    ``Bot.bind``'s parameter. Re-declaring the class here would create
+    a second nominal ``EventAdaptor`` only visible inside
+    ``minethon.bot``, and PyCharm would flag
+    ``bot.bind(MySubclass())`` with "Expected EventAdaptor, got
+    MySubclass" because the two EventAdaptor classes would not be the
+    same type. The typed signatures users see at "Override methods"
+    auto-fill come from ``_handlers.py`` itself, which already carries
+    the full annotated method set.
+    """
+    del event_callbacks  # signatures live on the runtime class itself
+    return []
 
 
 def normalize_pyi_method_bodies(text: str) -> str:
@@ -2306,6 +2381,11 @@ def format_generated_files(*paths: Path) -> None:
 
 
 def main() -> None:
+    if PATHFINDER_INDEX is None:
+        raise SystemExit(
+            "mineflayer-pathfinder 尚未安裝，無法生成 pathfinder 型別。"
+            "請先執行 ./setup.sh 安裝 pinned 的 mineflayer / vec3 / pathfinder。"
+        )
     mf_text = MF_INDEX.read_text()
     mf_text = strip_ts_comments(mf_text)
     pathfinder_text = strip_ts_comments(PATHFINDER_INDEX.read_text())
@@ -2413,15 +2493,21 @@ def main() -> None:
     out.append("")
 
     raw_text = "\n".join(out)
-    descriptions = parse_stubs_doc()
+    # Source of truth for hover descriptions is the existing .pyi itself —
+    # human edits to docstrings survive regen.
+    descriptions = parse_existing_pyi_docstrings(OUT_PATH)
     if descriptions:
         final_text = inject_docstrings(raw_text, descriptions)
         print(
-            f"injected docstrings for {len(descriptions)} symbols from {STUBS_DOC.name}"
+            f"preserved docstrings for {len(descriptions)} symbols "
+            f"from existing {OUT_PATH.name}"
         )
     else:
         final_text = raw_text
-        print(f"no stubs doc at {STUBS_DOC}; skipping docstring injection")
+        print(
+            f"no existing docstrings in {OUT_PATH}; "
+            "first-run regen produces a stub without descriptions"
+        )
     final_text = normalize_pyi_method_bodies(final_text)
     OUT_PATH.write_text(final_text)
     events_text = render_events_module(event_callbacks)

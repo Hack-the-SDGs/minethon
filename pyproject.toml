@@ -66,6 +66,13 @@ mccabe.max-complexity = 20
 "src/minethon/bot.py" = [
     "ANN401",  # Bot.__init__ / __getattr__ / create_bot expose Any for JS proxy interop
 ]
+"src/minethon/_bot_runtime.py" = [
+    "ANN401",  # Bot runtime — JSPyBridge proxy interop is Any by necessity
+]
+"src/minethon/_commands.py" = [
+    "ANN401",  # student command surface — mineflayer proxy values are Any
+    "FBT003",  # setControlState(control, True): JSPyBridge proxy calls reject kwargs
+]
 
 # Generated type overlays — mirror upstream TypeScript surface verbatim.
 # Stay specific per user-requested policy (AGENTS.md): disable only the
@@ -85,7 +92,7 @@ mccabe.max-complexity = 20
     "TC",       # `.pyi` IS the type-checking surface — TYPE_CHECKING is irrelevant
     "FIX002",   # TODO markers preserved from upstream docstrings
     "E741",     # short names (`l`, `i`) inherited from upstream signatures
-    "RUF001",   # ambiguous unicode in zh-TW docstrings (curated by docs/stubs_zh_tw.md)
+    "RUF001",   # ambiguous unicode in zh-TW docstrings (curated inline in bot.pyi)
     "RUF002",   # same as RUF001 but for docstrings
     "RUF003",   # same for comments
     "ERA001",   # generator header comments mention example code fragments
@@ -123,6 +130,7 @@ mccabe.max-complexity = 20
     "PLR2004",             # magic values in assertions
     "FBT003",              # boolean positional values in test calls
     "PLC0415",             # local imports inside test methods are fine
+    "TC002",               # pytest imported only for fixture annotations
 ]
 
 # examples — written by contributors, intentionally loose
