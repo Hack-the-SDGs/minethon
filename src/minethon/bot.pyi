@@ -2130,18 +2130,6 @@ class Bot:
             timeout: 等待伺服器回覆的毫秒數
         """
 
-    def chat(self, message: str) -> None:
-        """在公開聊天中發送一則訊息
-
-        Args:
-            message: 要送出的內容字串；以 `/` 開頭會被當作指令送出。單則訊息超過伺服器長度限制時，會自動切成多則送出
-
-        ```python
-        bot.chat("大家好")
-        bot.chat("/time set day")  # 以斜線開頭會被當作指令
-        ```
-        """
-
     def whisper(self, username: str, message: str) -> None:
         """對指定玩家傳送私聊訊息
         （相當於 `/tell`、`/msg`）
@@ -2334,19 +2322,6 @@ class Bot:
             itemType: 物品 ID 整數
             metadata: 物品的 metadata 值，不關心就傳 `None`
             count: 要丟的數量
-        """
-
-    def dig(
-        self, block: Block, force_look: bool | Literal["ignore"] | None = ...
-    ) -> None:
-        """對指定方塊進行挖掘
-        完成或失敗會透過 `"diggingCompleted"` / `"diggingAborted"` 事件回報
-        **handler 內呼叫會阻塞**當下的 callback thread，建議在主執行流程呼叫
-
-        Args:
-            block: 目標 `Block` 物件（用 `bot.blockAt(pos)` 或 `bot.findBlock(...)` 取得）
-            forceLook: `True` / `False` / `"ignore"`；`"ignore"` 代表完全不轉頭，直接挖（通常是呼叫者已自己對準過）
-            digFace: `"auto"`（預設）、`"raycast"`，或傳一個 `Vec3` 指定從哪個方向打。多數情況留預設即可
         """
 
     def stopDigging(self) -> None:
@@ -2789,6 +2764,205 @@ class Bot:
 
         Returns:
             傳入的 `handlers` 實例，方便 fluent chain
+        """
+
+    # --- Synchronous student API (implemented in _commands.py) ---
+    def wait_spawn(self) -> None:
+        """卡住直到機器人進入世界（spawn）後才往下執行
+
+        放在腳本開頭，讓後面的動作都在「已經在世界裡」的狀態下進行。已經
+        spawn 過會立刻返回。
+        """
+
+    def wait(self, seconds: float) -> None:
+        """安全等待 `seconds` 秒，期間維持連線
+
+        Args:
+            seconds: 要等待的秒數
+        """
+
+    def get_x(self) -> float:
+        """目前所在的 X 座標"""
+
+    def get_y(self) -> float:
+        """目前所在的 Y 座標（高度）"""
+
+    def get_z(self) -> float:
+        """目前所在的 Z 座標"""
+
+    def get_pos(self) -> tuple[float, float, float]:
+        """目前位置，回傳 `(x, y, z)` 三元組"""
+
+    def get_yaw(self) -> float:
+        """目前水平朝向（度數，0~360）
+
+        `0` 朝向 -Z（北）；角度越大代表往左（逆時針）轉。
+        """
+
+    def get_pitch(self) -> float:
+        """目前俯仰角（度數，+90 看天、-90 看地）"""
+
+    def get_sneak(self) -> bool:
+        """目前是否正在潛行（蹲下）"""
+
+    def get_hand(self) -> tuple[str, int] | None:
+        """手上物品，回傳 `(名稱, 數量)`；空手回傳 `None`"""
+
+    def get_block(self, x: int, y: int, z: int) -> str | None:
+        """查詢座標 `(x, y, z)` 的方塊名稱；該區塊尚未載入回傳 `None`
+
+        Args:
+            x: 方塊 X 整數座標
+            y: 方塊 Y 整數座標
+            z: 方塊 Z 整數座標
+        """
+
+    def look_block(self) -> tuple[tuple[int, int, int], str] | None:
+        """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
+
+    def find_block(self, name: str) -> tuple[int, int, int] | None:
+        """找最近、名稱為 `name` 的方塊，回傳 `(x, y, z)`；找不到回傳 `None`
+
+        Args:
+            name: 方塊名稱，例如 `"diamond_ore"`
+        """
+
+    def find_blocks(self, name: str, max: int = ...) -> list[tuple[int, int, int]]:
+        """找最多 `max` 個名稱為 `name` 的方塊，由近到遠回傳座標清單
+
+        找不到時回傳空清單。
+
+        Args:
+            name: 方塊名稱
+            max: 最多回傳幾個（預設 16）
+        """
+
+    def move_forward(self, blocks: float = ...) -> tuple[float, float, float]:
+        """往面向的方向前進 `blocks` 格，回傳前進後的新位置
+
+        撞牆卡住時會在安全逾時後自動停下。
+
+        Args:
+            blocks: 要前進的格數（預設 1）
+        """
+
+    def move_backward(self, blocks: float = ...) -> tuple[float, float, float]:
+        """往後退 `blocks` 格，回傳後退後的新位置
+
+        Args:
+            blocks: 要後退的格數（預設 1）
+        """
+
+    def move_left(self, blocks: float = ...) -> tuple[float, float, float]:
+        """往左平移 `blocks` 格，回傳平移後的新位置
+
+        Args:
+            blocks: 要平移的格數（預設 1）
+        """
+
+    def move_right(self, blocks: float = ...) -> tuple[float, float, float]:
+        """往右平移 `blocks` 格，回傳平移後的新位置
+
+        Args:
+            blocks: 要平移的格數（預設 1）
+        """
+
+    def jump(self) -> tuple[float, float, float]:
+        """原地跳一下，回傳跳起瞬間的位置"""
+
+    def turn_left(self) -> tuple[float, float]:
+        """向左轉 90 度，回傳新的 `(yaw, pitch)`（度數）"""
+
+    def turn_right(self) -> tuple[float, float]:
+        """向右轉 90 度，回傳新的 `(yaw, pitch)`（度數）"""
+
+    def turn(self, degrees: float) -> tuple[float, float]:
+        """相對目前朝向轉 `degrees` 度（正數往左），回傳新的 `(yaw, pitch)`
+
+        Args:
+            degrees: 要轉的角度（度數）
+        """
+
+    def set_turn(self, yaw: float) -> tuple[float, float]:
+        """轉到絕對水平朝向 `yaw`（度數），回傳新的 `(yaw, pitch)`
+
+        `0` 朝向 -Z（北）；角度越大往左轉。俯仰角不變。
+
+        Args:
+            yaw: 目標水平朝向（度數）
+        """
+
+    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
+        """把視線對準座標 `(x, y, z)`，回傳新的 `(yaw, pitch)`
+
+        Args:
+            x: 目標 X 座標
+            y: 目標 Y 座標
+            z: 目標 Z 座標
+        """
+
+    def get_height(self) -> int:
+        """目前的大小等級 `1`~`5`（讀自伺服器回報的 scale 屬性）
+
+        伺服器尚未回報時回傳 `1`。
+        """
+
+    def set_height(self, level: int) -> None:
+        """設定大小等級，只接受 `1`~`5`，其餘丟出 `ValueError`
+
+        注意：實體大小由伺服器決定，實際縮放要靠競賽伺服器的插件配合。
+
+        Args:
+            level: 目標大小等級（1~5）
+        """
+
+    def hold(self, name: str) -> bool:
+        """把背包裡名為 `name` 的物品拿到手上
+
+        成功回傳 `True`，背包裡沒有該物品回傳 `False`。
+
+        Args:
+            name: 物品名稱，例如 `"diamond_sword"`
+        """
+
+    def unhold(self) -> bool:
+        """把手上的物品收回背包；本來就空手回傳 `False`"""
+
+    def drop(self) -> bool:
+        """把手上整疊物品丟到地上；空手回傳 `False`"""
+
+    def dig(self) -> tuple[tuple[int, int, int], str] | None:
+        """挖掉準心正對著的方塊，回傳被挖方塊的 `((x, y, z), 名稱)`
+
+        沒對到任何方塊時回傳 `None`。（這是把原本的 break 動作改名為 dig。）
+        """
+
+    def place(self) -> tuple[tuple[int, int, int], str] | None:
+        """在準心對著的面上放一個手上的方塊，回傳新方塊的 `((x, y, z), 名稱)`
+
+        沒對到任何方塊時回傳 `None`。
+        """
+
+    def use(self) -> bool:
+        """對準心對著的方塊互動（開門、按鈕…）；沒對到方塊則使用手上物品
+
+        永遠回傳 `True`。
+        """
+
+    def sneak(self, on: bool) -> bool:
+        """開或關潛行（持久狀態），回傳設定後的狀態
+
+        Args:
+            on: `True` 開始潛行，`False` 停止
+        """
+
+    def chat(self, obj: object) -> None:
+        """把 `obj` 轉成文字，當作一般公開聊天送出
+
+        分組可見性由競賽伺服器的聊天插件處理，機器人只要正常發送即可。
+
+        Args:
+            obj: 任意值，會用 `str(obj)` 轉成文字
         """
 
 def create_bot(**options: Unpack[CreateBotOptions]) -> Bot:

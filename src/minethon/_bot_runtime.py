@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from javascript import On, Once, require
 
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
+from minethon._commands import Commands
 from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
 from minethon._handlers import EventAdaptor
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
@@ -88,12 +89,14 @@ _PLUGIN_EXPORT_KEY: dict[str, str] = {
 }
 
 
-class Bot:
+class Bot(Commands):
     """Pythonic façade over a mineflayer Bot proxy.
 
-    Prefer `create_bot(...)` over direct construction. Unknown attribute
+    Prefer `create_bot(...)` over direct construction. The curated
+    synchronous student API (``move_forward``, ``dig``, ``get_pos`` …)
+    comes from :class:`minethon._commands.Commands`; unknown attribute
     reads fall through to the underlying JS proxy, so every documented
-    mineflayer property or method works transparently.
+    mineflayer property or method also works transparently.
 
     Ref: mineflayer/index.d.ts — Bot interface
     """

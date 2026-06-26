@@ -15,6 +15,7 @@ minethon 是**教學導向**的 Python mineflayer SDK。
 
 ### 特色
 
+- **同步命令式 API** — `bot.wait_spawn()` → `bot.move_forward(3)` → `bot.dig()`，全部阻塞、回傳原生型別，學員寫一行看懂一行
 - **同步 callback API** — 繼承 `EventAdaptor`、覆寫 `on_<event>`、用 `bot.bind(...)` 一次綁完，沒有 `await` 也沒有 event loop
 - **完整型別層** — `bot.pyi` 由 mineflayer 官方 `index.d.ts` 自動生成，IDE hover 顯示中文說明
 - **單一事件入口** — 所有事件統一走 `EventAdaptor` 子類別 + `bot.bind(...)`，避免多套 API 並存造成學習負擔
@@ -45,6 +46,28 @@ minethon 是**教學導向**的 Python mineflayer SDK。
 > Node.js 必須在 PATH 中可用。`setup.sh` 啟動時會自動檢查。
 
 ## 快速開始
+
+### 同步寫法（推薦初學者）
+
+直線腳本，一行做一件事，沒有 callback 也沒有 `await`：
+
+```python
+from minethon import create_bot
+
+bot = create_bot(host="localhost", username="pybot")
+
+bot.wait_spawn()                 # 卡住直到進入世界
+bot.move_forward(3)              # 往前走 3 格（不用 pathfinder）
+bot.dig()                        # 挖掉正在看的方塊
+x, y, z = bot.get_pos()
+bot.chat(f"我在 ({x:.0f}, {y:.0f}, {z:.0f})")
+```
+
+完整方法表見 [`skills/minethon/`](skills/minethon/)（也是給 AI 看的接口說明）。
+
+### 事件寫法
+
+要「反應」聊天、被打、玩家進出等事件時，繼承 `EventAdaptor`：
 
 ```python
 from minethon import EventAdaptor, create_bot
@@ -135,6 +158,7 @@ tool = bot.load_plugin("mineflayer-tool", "1.5.0", export_key="plugin")
 
 | 範例                                                                  | 說明                                  |
 | --------------------------------------------------------------------- | ------------------------------------- |
+| [linear_actions](examples/demos/linear_actions/main.py)               | 同步命令式 API：走路、轉向、挖方塊、回報座標 |
 | [drasl_auth](examples/demos/drasl_auth/main.py)                       | 透過自建 Drasl 驗證伺服器連線並回應聊天 |
 
 ## 專案結構
