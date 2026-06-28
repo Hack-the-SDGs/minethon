@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import time
 import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any
@@ -272,6 +273,11 @@ class Bot(Commands):
             pass
 
 
+# Seconds to wait after spawn (shorthand path) before acting — covers the
+# server's post-login invulnerability / settle window.
+_SPAWN_SETTLE_SECONDS = 3.5
+
+
 def create_bot(account: str | None = None, **options: Any) -> Bot:
     """Create and connect a mineflayer bot.
 
@@ -294,6 +300,10 @@ def create_bot(account: str | None = None, **options: Any) -> Bot:
     bot = Bot(js_bot)
     if account is not None:
         bot.wait_spawn()
+        # Post-spawn invulnerability window: the server may still teleport /
+        # settle the player for a moment. Wait it out before the student's
+        # straight-line script starts acting, to avoid unexpected behaviour.
+        time.sleep(_SPAWN_SETTLE_SECONDS)
     return bot
 
 
