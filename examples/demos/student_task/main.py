@@ -1,6 +1,6 @@
 from minethon import create_bot
 
-bot = create_bot("g-swim")
+bot = create_bot("g_swim")
 
 bot.move_forward()
 bot.turn_left()

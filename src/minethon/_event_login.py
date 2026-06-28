@@ -4,11 +4,11 @@ Lets students write ``create_bot("g-swim")`` or ``create_bot("swim")`` with no
 host/credentials. Each PC's group + computer number live in a hidden file that
 staff write once per machine via ``setup.sh`` / ``setup.ps1``.
 
-Shorthand → real account:
+Shorthand → real account (usernames use "_" — never "-"):
 
-    create_bot("g-swim")  → username "G<group>-swim"
+    create_bot("g_swim")  → username "G<group>_swim"
                             password sha256("Hack-The-SDGs-Python@<group>")
-    create_bot("swim")    → username "<computer>-swim"
+    create_bot("swim")    → username "<computer>_swim"
                             password sha256("Hack-The-SDGs-Python@<group>:<computer>")
 
 Security note: the salt below lives in importable code, so these passwords are
@@ -63,14 +63,15 @@ def _sha256(text: str) -> str:
 def resolve_account(shorthand: str) -> dict[str, Any]:
     """Map a task shorthand to full ``create_bot`` options.
 
-    ``g-<task>`` is a group account; anything else is the personal account.
+    A ``g-`` / ``g_`` prefix means a group account; anything else is the
+    personal account. Generated usernames join with "_" (server forbids "-").
     """
     group, computer = _read_identity()
-    if shorthand.startswith("g-"):
+    if shorthand[:2] in ("g-", "g_"):
         task = shorthand[2:]
-        username = f"G{group}-{task}"
+        username = f"G{group}_{task}"
         password = _sha256(f"{_SALT}{group}")
     else:
-        username = f"{computer}-{shorthand}"
+        username = f"{computer}_{shorthand}"
         password = _sha256(f"{_SALT}{group}:{computer}")
     return {**_DEFAULTS, "username": username, "password": password}
