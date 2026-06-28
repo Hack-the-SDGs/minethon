@@ -11,6 +11,7 @@ Version pinning policy (AGENTS.md):
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from javascript import eval_js
@@ -45,7 +46,41 @@ def _suppress_mojang_auth_warning() -> None:
     """)
 
 
+def _suppress_via_parse_noise() -> None:
+    """Drop console spam from packets ViaVersion/ViaBackwards mistranslates.
+
+    When the server runs a version newer than mineflayer can speak natively and
+    a Via proxy translates the stream, a few cosmetic packets still arrive with
+    a layout the bundled schema can't read. protodef then floods stdout via
+    `console.log(e.stack)` (protodef/src/serializer.js) even though the bot
+    works fine.
+
+    The logged arg is the stack STRING (not an Error). We swallow ONLY those
+    known-cosmetic parse errors (matched by the compiled `packet_<name>` frame);
+    every other log still prints. Add a name here if another packet leaks.
+    """
+    benign = ["world_particles"]
+    markers = json.dumps([f"packet_{name}" for name in benign])
+    # IIFE: eval_js shares one global scope, so keep locals from leaking.
+    eval_js(f"""
+        (function () {{
+            const markers = {markers};
+            const original = console['log'];
+            console['log'] = function(...args) {{
+                const s = args[0];
+                if (typeof s === 'string'
+                    && s.includes('PartialReadError')
+                    && markers.some(m => s.includes(m))) {{
+                    return;
+                }}
+                original.apply(console, args);
+            }};
+        }})();
+    """)
+
+
 _suppress_mojang_auth_warning()
+_suppress_via_parse_noise()
 
 
 def get_mineflayer() -> Any:
