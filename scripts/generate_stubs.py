@@ -2487,8 +2487,13 @@ def main() -> None:
     out.extend(render_handlers_stub(event_callbacks))
     out.append("")
 
-    # Module-level factory
+    # Module-level factory. Two call shapes: the Hack-The-SDGs shorthand
+    # `create_bot("g-swim")` (positional account, blocks until spawned) and the
+    # explicit `create_bot(host=..., username=...)` keyword form.
     out.append("")
+    out.append("@overload")
+    out.append("def create_bot(account: str, /) -> Bot: ...")
+    out.append("@overload")
     out.append("def create_bot(**options: Unpack[CreateBotOptions]) -> Bot: ...")
     out.append("")
 

@@ -2965,6 +2965,34 @@ class Bot:
             obj: 任意值，會用 `str(obj)` 轉成文字
         """
 
+@overload
+def create_bot(account: str, /) -> Bot:
+    """建立並啟動一個 mineflayer 機器人
+
+    回傳 `Bot`。連線是非同步進行的；請監聽 `"spawn"` 事件之後再動手操作世界::
+
+            bot = create_bot(
+                host="play.camp.tw",
+                username="alice",
+                auth="mojang",
+                auth_server="https://drasl.example.com/auth",
+                session_server="https://drasl.example.com/session",
+            )
+
+    Args:
+        host: Minecraft 伺服器網址或 IP
+        port: 連線 port（預設 `25565`）
+        username: 機器人的遊戲名稱
+        password: 正版帳號密碼（Mojang / Drasl 等自訂 auth 時用）
+        version: 強制協議版本字串，例如 `"1.20.4"`；省略會自動偵測
+        auth: 驗證方式：`"mojang"` / `"microsoft"` / `"offline"`
+        auth_server: 自訂 auth 伺服器網址（Drasl / Yggdrasil-compatible）
+        session_server: 自訂 session 伺服器網址
+            - 其他 `mineflayer.createBot()` 接受的選項都能直接傳
+    """
+    ...
+
+@overload
 def create_bot(**options: Unpack[CreateBotOptions]) -> Bot:
     """建立並啟動一個 mineflayer 機器人
 

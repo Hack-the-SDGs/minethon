@@ -23,6 +23,7 @@ from javascript import On, Once, require
 
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
 from minethon._commands import Commands
+from minethon._event_login import resolve_account
 from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
 from minethon._handlers import EventAdaptor
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
@@ -271,22 +272,29 @@ class Bot(Commands):
             pass
 
 
-def create_bot(**options: Any) -> Bot:
+def create_bot(account: str | None = None, **options: Any) -> Bot:
     """Create and connect a mineflayer bot.
 
-    Keyword options mirror `mineflayer.createBot()` with snake_case:
-    `auth_server` → `authServer`, `session_server` → `sessionServer`, etc.
-    Typed overloads live in `bot.pyi`.
+    Two ways to call it:
 
-    Returns immediately; the bot connects on the JS side. Register a
-    `spawn` handler to know when you can send chat, move, etc.
+    - `create_bot(host=..., username=...)` — explicit options mirroring
+      `mineflayer.createBot()` with snake_case (`auth_server` → `authServer`).
+    - `create_bot("g-swim")` / `create_bot("swim")` — Hack-The-SDGs shorthand:
+      host + credentials are resolved from this PC's identity file, and the call
+      blocks until the bot has spawned so a straight-line student script can act
+      immediately. Explicit keyword options still override resolved ones.
 
     Ref: mineflayer/lib/loader.js — `createBot(options)`
     """
+    if account is not None:
+        options = {**resolve_account(account), **options}
     js_options = {_to_camel(key): value for key, value in options.items()}
     mineflayer = get_mineflayer()
     js_bot = mineflayer.createBot(js_options)
-    return Bot(js_bot)
+    bot = Bot(js_bot)
+    if account is not None:
+        bot.wait_spawn()
+    return bot
 
 
 def _to_camel(snake: str) -> str:

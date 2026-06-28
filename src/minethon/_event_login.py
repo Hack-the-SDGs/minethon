@@ -1,0 +1,76 @@
+"""Hack-The-SDGs event login shorthand.
+
+Lets students write ``create_bot("g-swim")`` or ``create_bot("swim")`` with no
+host/credentials. Each PC's group + computer number live in a hidden file that
+staff write once per machine via ``setup.sh`` / ``setup.ps1``.
+
+Shorthand → real account:
+
+    create_bot("g-swim")  → username "G<group>-swim"
+                            password sha256("Hack-The-SDGs-Python@<group>")
+    create_bot("swim")    → username "<computer>-swim"
+                            password sha256("Hack-The-SDGs-Python@<group>:<computer>")
+
+Security note: the salt below lives in importable code, so these passwords are
+NOT secret from anyone who reads the SDK. This is casual deterrence only — real
+account protection is server-side (event-scoped accounts, rate limits, rotation).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from minethon.errors import MinethonError
+
+_SALT = "Hack-The-SDGs-Python@"
+
+# Hidden per-machine identity, written once by the staff setup script.
+IDENTITY_FILE = Path.home() / ".htsdg.json"
+
+# Baked event defaults — public infrastructure, safe to ship in the SDK.
+_DEFAULTS: dict[str, Any] = {
+    "host": "mc.ntust.camp",
+    "port": 25565,
+    "auth": "mojang",
+    "auth_server": "https://drasl.ntust.camp/auth",
+    "session_server": "https://drasl.ntust.camp/session",
+    "version": "1.21.11",
+}
+
+
+def _read_identity() -> tuple[int, int]:
+    if not IDENTITY_FILE.exists():
+        msg = (
+            f"找不到本機識別檔 {IDENTITY_FILE}。"
+            "請先請工作人員執行 setup.sh / setup.ps1 標記本機的組別與電腦編號。"
+        )
+        raise MinethonError(msg)
+    try:
+        data = json.loads(IDENTITY_FILE.read_text(encoding="utf-8"))
+        return int(data["group"]), int(data["computer"])
+    except (ValueError, KeyError, OSError) as exc:
+        msg = f"本機識別檔 {IDENTITY_FILE} 內容無效，請重跑 setup.sh / setup.ps1。"
+        raise MinethonError(msg) from exc
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def resolve_account(shorthand: str) -> dict[str, Any]:
+    """Map a task shorthand to full ``create_bot`` options.
+
+    ``g-<task>`` is a group account; anything else is the personal account.
+    """
+    group, computer = _read_identity()
+    if shorthand.startswith("g-"):
+        task = shorthand[2:]
+        username = f"G{group}-{task}"
+        password = _sha256(f"{_SALT}{group}")
+    else:
+        username = f"{computer}-{shorthand}"
+        password = _sha256(f"{_SALT}{group}:{computer}")
+    return {**_DEFAULTS, "username": username, "password": password}
