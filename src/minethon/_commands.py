@@ -32,6 +32,11 @@ from minethon.errors import NotSpawnedError
 # beyond survival reach (~4.5 blocks) so creative interaction still resolves.
 # Ref: mineflayer/docs/api.md — bot.blockAtCursor(maxDistance).
 _REACH_BLOCKS = 6.0
+# Names that aren't worth digging — dig() skips these when picking the block in
+# front so it never "breaks" empty space. Ref: minecraft-data block names.
+_NON_SOLID = frozenset(
+    {"air", "cave_air", "void_air", "water", "lava", "bubble_column"}
+)
 # Default search radius for find_block / find_blocks.
 # Ref: mineflayer/docs/api.md — bot.findBlocks(options.maxDistance) (default 16).
 _FIND_MAX_DISTANCE = 64
@@ -470,18 +475,47 @@ class Commands:
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────
-    def dig(self) -> tuple[tuple[int, int, int], str] | None:
-        """Break the block currently aimed at; returns its ``((x, y, z), name)``.
+    def _block_in_front(self) -> Any:
+        """Solid block one step ahead of the bot, or ``None`` if only air.
 
-        Returns ``None`` when nothing is in reach. (This renames mineflayer's
-        ``break`` action.) Ref: mineflayer/docs/api.md — bot.dig(block).
+        Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
+        looking level over flat ground, where blockAtCursor sees only air).
+        Steps along the dominant horizontal facing axis and checks the feet
+        block first, then head height. Ref: mineflayer lib/plugins/ray_trace.js
+        getViewDirection — forward = (-sin(yaw), 0, -cos(yaw)).
+        """
+        ent = self._entity()
+        yaw = float(ent.yaw)
+        dx, dz = -math.sin(yaw), -math.cos(yaw)
+        step = (
+            (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dz) else (0, 1 if dz > 0 else -1)
+        )
+        bx = math.floor(float(ent.position.x)) + step[0]
+        bz = math.floor(float(ent.position.z)) + step[1]
+        by = math.floor(float(ent.position.y))
+        for y in (by, by + 1):  # feet level, then head level
+            block = self._js.blockAt(_make_vec3(bx, y, bz))
+            if block is not None and str(block.name) not in _NON_SOLID:
+                return block
+        return None
+
+    def dig(self) -> tuple[tuple[int, int, int], str] | None:
+        """Break the block in front of the bot; returns its ``((x, y, z), name)``.
+
+        Uses whatever the bot is aiming at; if it isn't aiming at a block (e.g.
+        looking straight ahead over flat ground), falls back to the solid block
+        one step forward. Returns ``None`` when there's nothing solid to break.
+        (This renames mineflayer's ``break`` action.)
+        Ref: mineflayer/docs/api.md — bot.dig(block).
         """
         block = self._js.blockAtCursor(_REACH_BLOCKS)
+        if block is None:
+            block = self._block_in_front()
         if block is None:
             return None
         p = block.position
         result = ((int(p.x), int(p.y), int(p.z)), str(block.name))
-        self._js.dig(block)
+        self._js.dig(block)  # mineflayer looks at the block itself (forceLook)
         return result
 
     def place(self) -> tuple[tuple[int, int, int], str] | None:

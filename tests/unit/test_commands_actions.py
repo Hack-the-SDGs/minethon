@@ -26,6 +26,11 @@ class ActJs:
         self._block_at = block_at
         self.calls: list[tuple] = []
         self.controls: dict[str, bool] = {}
+        # Spawned at (0, 64, 0) facing yaw 0 (south, +z) — lets dig() fall back
+        # to _block_in_front when nothing is aimed at.
+        self.entity = SimpleNamespace(
+            position=SimpleNamespace(x=0.0, y=64.0, z=0.0), yaw=0.0
+        )
 
     def blockAtCursor(self, max_distance: float) -> object | None:  # noqa: N802
         self.calls.append(("blockAtCursor", max_distance))
@@ -60,8 +65,22 @@ def test_dig_breaks_block_at_cursor() -> None:
     assert ("dig", aimed) in fake.calls
 
 
-def test_dig_returns_none_when_nothing_aimed_at() -> None:
-    assert Bot(ActJs(cursor=None)).dig() is None
+def test_dig_returns_none_when_only_air_in_front() -> None:
+    # Nothing aimed at and only air one step ahead -> nothing to break.
+    assert Bot(ActJs(cursor=None, block_at=None)).dig() is None
+
+
+def test_dig_falls_back_to_block_in_front(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Not aiming at anything, but a solid block sits one step forward (yaw 0
+    # faces +z, so the block ahead is at (0, 64, 1)).
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    ahead = block("dirt", 0, 64, 1)
+    fake = ActJs(cursor=None, block_at=ahead)
+
+    assert Bot(fake).dig() == ((0, 64, 1), "dirt")
+    assert ("dig", ahead) in fake.calls
 
 
 def test_place_places_against_aimed_top_face(monkeypatch: pytest.MonkeyPatch) -> None:
