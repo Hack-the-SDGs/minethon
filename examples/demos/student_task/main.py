@@ -2,6 +2,8 @@ from minethon import create_bot
 
 bot = create_bot("g_swim")
 
+bot.turn_left()
+bot.turn_left()
 bot.move_forward()
 bot.turn_left()
 
