@@ -13,14 +13,18 @@ removed in favor of the single class-based path.
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import inspect
+import os
+import sys
 import threading
 import time
 import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
-from javascript import On, Once, require
+from javascript import On, Once, connection, require
 
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
 from minethon._commands import Commands
@@ -31,6 +35,52 @@ from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+# Shown instead of a traceback when a student stops the script with Ctrl-C.
+_GOODBYE = "\n程式已結束。"
+# Shown when the server drops the bot mid-run.
+_DISCONNECTED = "\n機器人已斷線，程式結束。"
+# `seen` makes the goodbye/disconnect line print once. A dict holder avoids a
+# `global` rebind.
+_INTERRUPT = {"seen": False}
+
+
+def _end_on_disconnect(message: str) -> None:
+    """Print ``message`` once and hard-stop the program when the bot drops.
+
+    Runs on the bridge's `end` callback thread. The student's main thread may
+    be parked in run_forever or blocked deep inside a bridge call on the now
+    dead connection — an async interrupt can't reliably break the latter, so we
+    terminate the node bridge and exit the process outright. Abrupt, but it
+    guarantees the script stops instead of grinding on a disconnected bot.
+    """
+    if _INTERRUPT["seen"]:
+        return
+    _INTERRUPT["seen"] = True
+    print(message, flush=True)  # noqa: T201 — student-facing, intentional
+    # Best-effort: terminate the node subprocess so it isn't orphaned.
+    with contextlib.suppress(Exception):
+        connection.stop()
+    os._exit(0)  # only reliable way out of a blocked bridge call
+
+
+def _install_quiet_interrupt() -> None:
+    """Replace the traceback for an uncaught Ctrl-C with a friendly line.
+
+    Students shouldn't see a KeyboardInterrupt stack trace — just that the
+    program ended. Non-interrupt exceptions still print normally.
+    """
+    previous = sys.excepthook
+
+    def _hook(exc_type: type[BaseException], exc: BaseException, tb: Any) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            if not _INTERRUPT["seen"]:  # real Ctrl-C; disconnect already printed
+                _INTERRUPT["seen"] = True
+                print(_GOODBYE)  # noqa: T201 — student-facing, intentional
+            return
+        previous(exc_type, exc, tb)
+
+    sys.excepthook = _hook
 
 
 def _normalize_handler(
@@ -242,6 +292,8 @@ class Bot(Commands):
 
         Ref: mineflayer/index.d.ts — Bot.on('end', reason)
         """
+        if _INTERRUPT["seen"]:  # already shutting down — don't re-block
+            return
         done = threading.Event()
 
         def _on_end(*_a: Any, **_kw: Any) -> None:
@@ -270,7 +322,9 @@ class Bot(Commands):
         try:
             done.wait()
         except KeyboardInterrupt:
-            pass
+            if not _INTERRUPT["seen"]:  # disconnect already printed its message
+                _INTERRUPT["seen"] = True
+                print(_GOODBYE)  # noqa: T201 — student-facing, intentional
 
 
 # Seconds to wait after spawn (shorthand path) before acting — covers the
@@ -296,8 +350,24 @@ def create_bot(account: str | None = None, **options: Any) -> Bot:
         options = {**resolve_account(account), **options}
     js_options = {_to_camel(key): value for key, value in options.items()}
     mineflayer = get_mineflayer()
+    _install_quiet_interrupt()
     js_bot = mineflayer.createBot(js_options)
     bot = Bot(js_bot)
+    # End the script automatically when the server drops the bot, wherever the
+    # main thread happens to be (mid-script or in the keep-alive below). `Once`
+    # (not `On`) so the callback removes itself after firing — a lingering
+    # callback would deadlock JSPyBridge's atexit on_exit (it waits while any
+    # callback is still registered and the node process is alive).
+    Once(js_bot, BotEvent.END.value)(
+        _normalize_handler(
+            lambda *_a, **_k: _end_on_disconnect(_DISCONNECTED), emitter=js_bot
+        )
+    )
+    # Keep the bot alive after the student's straight-line script ends, so they
+    # don't have to remember a trailing bot.run_forever(). Fires on normal exit;
+    # returns immediately if the bot already disconnected (e.g. bot.quit()) or
+    # the student pressed Ctrl-C.
+    atexit.register(bot.run_forever)
     if account is not None:
         bot.wait_spawn()
         # Post-spawn invulnerability window: the server may still teleport /
