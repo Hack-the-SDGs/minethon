@@ -22,8 +22,6 @@ def main() -> None:
         host=os.environ.get("MC_HOST", "localhost"),
         port=int(os.environ.get("MC_PORT", "25565")),
         username=os.environ.get("MC_USERNAME", "pybot"),
-        # 伺服器版本若 mineflayer 不能直接講（例如後面掛 ViaVersion/ViaBackwards），
-        # 設 MC_VERSION 把協定 pin 住；不設則自動偵測。
         version=os.environ.get("MC_VERSION") or None,
     )
 
