@@ -9,7 +9,7 @@ The plaintext "payload" (what actually runs) is encrypted with
 ``openssl enc -aes-256-cbc -pbkdf2`` so opening setup.sh / setup.ps1 shows only a
 Base64 blob. At runtime each script prompts for the password, decrypts, and runs.
 
-    python tools/build_setup.py --password 'YOUR_STAFF_PASSWORD'
+    python pc_setup/build_setup.py --password 'YOUR_STAFF_PASSWORD'
 
 Honest limit: this only stops people WITHOUT the password. Anyone who has it can
 dump the plaintext. And `create_bot`'s salt lives in the importable SDK, so the

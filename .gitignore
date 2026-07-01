@@ -979,6 +979,3 @@ FodyWeavers.xsd
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/python,node,intellij,macos,windows,linux,visualstudio,visualstudiocode,pycharm.claude/worktrees/
-
-# Generated per-event PC-marking scripts (built by tools/build_setup.py)
-pc_setup/
