@@ -2492,9 +2492,16 @@ def main() -> None:
     # explicit `create_bot(host=..., username=...)` keyword form.
     out.append("")
     out.append("@overload")
-    out.append("def create_bot(account: str, /) -> Bot: ...")
+    out.append(
+        "def create_bot(account: str, /, *, instruction_sleep: float = ..., "
+        "bypass_instruction_sleep: bool = ...) -> Bot: ..."
+    )
     out.append("@overload")
-    out.append("def create_bot(**options: Unpack[CreateBotOptions]) -> Bot: ...")
+    out.append(
+        "def create_bot(*, instruction_sleep: float = ..., "
+        "bypass_instruction_sleep: bool = ..., "
+        "**options: Unpack[CreateBotOptions]) -> Bot: ..."
+    )
     out.append("")
 
     raw_text = "\n".join(out)

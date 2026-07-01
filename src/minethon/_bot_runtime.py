@@ -40,19 +40,25 @@ if TYPE_CHECKING:
 _GOODBYE = "\n程式已結束。"
 # Shown when the server drops the bot mid-run.
 _DISCONNECTED = "\n機器人已斷線，程式結束。"
+# Shown when login fails (wrong task name / task closed), instead of leaking the
+# raw yggdrasil "Invalid credentials" stack trace.
+_QUEST_NOT_FOUND = "\n找不到此任務。請檢查任務名稱是否正確，或是任務是否開放。"
+# Default per-instruction pause (seconds) so a straight-line script's steps are
+# individually visible. Tunable via create_bot(instruction_sleep=...).
+_DEFAULT_INSTRUCTION_SLEEP = 0.2
 # `seen` makes the goodbye/disconnect line print once. A dict holder avoids a
 # `global` rebind.
 _INTERRUPT = {"seen": False}
 
 
-def _end_on_disconnect(message: str) -> None:
-    """Print ``message`` once and hard-stop the program when the bot drops.
+def _stop_with_message(message: str) -> None:
+    """Print ``message`` once and hard-stop the program.
 
-    Runs on the bridge's `end` callback thread. The student's main thread may
-    be parked in run_forever or blocked deep inside a bridge call on the now
-    dead connection — an async interrupt can't reliably break the latter, so we
-    terminate the node bridge and exit the process outright. Abrupt, but it
-    guarantees the script stops instead of grinding on a disconnected bot.
+    Runs on a bridge callback thread (a disconnect, or a login `error`). The
+    student's main thread may be parked in run_forever, blocked in wait_spawn
+    that will never fire, or deep inside a bridge call on a dead connection — an
+    async interrupt can't reliably break those, so we terminate the node bridge
+    and exit the process outright. Abrupt, but it guarantees the script stops.
     """
     if _INTERRUPT["seen"]:
         return
@@ -62,6 +68,28 @@ def _end_on_disconnect(message: str) -> None:
     with contextlib.suppress(Exception):
         connection.stop()
     os._exit(0)  # only reliable way out of a blocked bridge call
+
+
+def _looks_like_auth_error(text: str) -> bool:
+    """True when an `error` payload reads like a bad-credentials failure."""
+    low = text.lower()
+    return "invalid credentials" in low or "invalid username or password" in low
+
+
+def _on_login_error(err: Any) -> None:
+    """Turn a bot `error` (esp. auth failure) into a friendly line + clean exit.
+
+    Registering any `error` listener also stops mineflayer's EventEmitter from
+    throwing the raw yggdrasil stack. Ref: mineflayer lib/loader.js — bot._client
+    'error' is re-emitted as bot 'error'.
+    """
+    text = ""
+    with contextlib.suppress(Exception):
+        text = str(getattr(err, "message", None) or err)
+    message = (
+        _QUEST_NOT_FOUND if _looks_like_auth_error(text) else f"\n連線發生錯誤：{text}"  # noqa: RUF001 — zh-TW fullwidth colon
+    )
+    _stop_with_message(message)
 
 
 def _install_quiet_interrupt() -> None:
@@ -155,9 +183,15 @@ class Bot(Commands):
 
     _js: Any
 
-    def __init__(self, js_bot: Any) -> None:
-        """Wrap an existing mineflayer JS bot proxy."""
+    def __init__(self, js_bot: Any, instruction_sleep: float = 0.0) -> None:
+        """Wrap an existing mineflayer JS bot proxy.
+
+        ``instruction_sleep`` is the pause (seconds) added after each action so a
+        straight-line script's steps are visible; ``create_bot`` sets it, direct
+        construction defaults to no pause.
+        """
         object.__setattr__(self, "_js", js_bot)
+        object.__setattr__(self, "_instruction_sleep", float(instruction_sleep))
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute reads to the underlying JS bot.
@@ -332,7 +366,13 @@ class Bot(Commands):
 _SPAWN_SETTLE_SECONDS = 3.5
 
 
-def create_bot(account: str | None = None, **options: Any) -> Bot:
+def create_bot(
+    account: str | None = None,
+    *,
+    instruction_sleep: float = _DEFAULT_INSTRUCTION_SLEEP,
+    bypass_instruction_sleep: bool = False,
+    **options: Any,
+) -> Bot:
     """Create and connect a mineflayer bot.
 
     Two ways to call it:
@@ -344,15 +384,31 @@ def create_bot(account: str | None = None, **options: Any) -> Bot:
       blocks until the bot has spawned so a straight-line student script can act
       immediately. Explicit keyword options still override resolved ones.
 
+    Every action command pauses `instruction_sleep` seconds afterwards so each
+    step of a straight-line script is visible. Pass `bypass_instruction_sleep=True`
+    to turn that off, or `instruction_sleep=0.1` to shorten it.
+
     Ref: mineflayer/lib/loader.js — `createBot(options)`
     """
     if account is not None:
         options = {**resolve_account(account), **options}
     js_options = {_to_camel(key): value for key, value in options.items()}
+    # mineflayer defaults logErrors=true, registering its own bot.on('error',
+    # console.log) that dumps the raw stack (e.g. the yggdrasil auth trace) on
+    # top of our friendly message. Turn it off; _on_login_error handles errors.
+    # Ref: mineflayer lib/loader.js — options.logErrors ?? true.
+    js_options.setdefault("logErrors", False)
     mineflayer = get_mineflayer()
     _install_quiet_interrupt()
     js_bot = mineflayer.createBot(js_options)
-    bot = Bot(js_bot)
+    pace = 0.0 if bypass_instruction_sleep else instruction_sleep
+    bot = Bot(js_bot, instruction_sleep=pace)
+    # Turn a login failure (wrong task name, task closed) into a friendly line
+    # instead of the raw yggdrasil stack; also unblocks the wait_spawn below,
+    # which would otherwise hang forever since 'spawn' never fires.
+    Once(js_bot, BotEvent.ERROR.value)(
+        _normalize_handler(_on_login_error, emitter=js_bot)
+    )
     # End the script automatically when the server drops the bot, wherever the
     # main thread happens to be (mid-script or in the keep-alive below). `Once`
     # (not `On`) so the callback removes itself after firing — a lingering
@@ -360,7 +416,7 @@ def create_bot(account: str | None = None, **options: Any) -> Bot:
     # callback is still registered and the node process is alive).
     Once(js_bot, BotEvent.END.value)(
         _normalize_handler(
-            lambda *_a, **_k: _end_on_disconnect(_DISCONNECTED), emitter=js_bot
+            lambda *_a, **_k: _stop_with_message(_DISCONNECTED), emitter=js_bot
         )
     )
     # Keep the bot alive after the student's straight-line script ends, so they

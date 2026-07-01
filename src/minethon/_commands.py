@@ -21,12 +21,16 @@ from __future__ import annotations
 import math
 import threading
 import time
-from typing import Any
+from functools import wraps
+from typing import TYPE_CHECKING, Any
 
 from javascript import Once
 
 from minethon._bridge import get_vec3
 from minethon.errors import NotSpawnedError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Cursor reach for "what am I aiming at" — covers look_block/dig/place. Slightly
 # beyond survival reach (~4.5 blocks) so creative interaction still resolves.
@@ -143,6 +147,37 @@ def _scale_to_level(scale: float) -> int:
     return max(_MIN_HEIGHT, min(_MAX_HEIGHT, round(scale)))
 
 
+def _bridge_safe_sleep(seconds: float) -> None:
+    """Block for ``seconds`` without the bot going idle in-world.
+
+    mineflayer's physics loop is a Node-side ``setInterval`` (physics.js), so it
+    keeps ticking — position and control-state packets keep flowing — while the
+    Python thread parks here. That's why a held state (e.g. sneak) stays live
+    across a pause. Ref: mineflayer lib/plugins/physics.js setInterval(doPhysics).
+    """
+    if seconds > 0:
+        threading.Event().wait(seconds)
+
+
+def _paced(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Run an action, then pause ``self._instruction_sleep`` seconds.
+
+    Gives each student action a short trailing beat so a straight-line script's
+    steps are individually visible (turn, pause, turn, pause…). Only leaf actions
+    are wrapped, so ``turn_left`` (which delegates to ``set_turn``) still pauses
+    exactly once. The interval is set by ``create_bot(instruction_sleep=...)`` and
+    is ``0`` when ``bypass_instruction_sleep=True``.
+    """
+
+    @wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = method(self, *args, **kwargs)
+        _bridge_safe_sleep(getattr(self, "_instruction_sleep", 0.0))
+        return result
+
+    return wrapper
+
+
 class Commands:
     """Curated synchronous commands mixed into :class:`Bot`.
 
@@ -192,14 +227,21 @@ class Commands:
             pass
 
     def wait(self, seconds: float) -> None:
-        """Sleep for ``seconds`` while staying connected.
+        """Pause the script for ``seconds`` without the bot going idle.
 
-        The JSPyBridge Node thread keeps the bot's connection alive during
-        the sleep, so this is a safe pause between actions.
+        Use it to hold a state for a moment::
+
+            bot.sneak(True)
+            bot.wait(0.2)
+            bot.sneak(False)
+
+        Plain ``time.sleep`` works the same way — the bot keeps its place and its
+        held controls (sneak, etc.) in-world during the pause because mineflayer's
+        physics tick runs on the Node side, independent of this Python thread.
+        (``sleep`` is not added as a method name: mineflayer already uses
+        ``bot.sleep`` for sleeping in a bed.)
         """
-        # ponytail: plain sleep — the bridge's event thread drives the bot
-        # independently of the Python main thread, so the connection holds.
-        threading.Event().wait(seconds)
+        _bridge_safe_sleep(seconds)
 
     # ── position & orientation (read) ─────────────────────────────────
     def get_x(self) -> float:
@@ -339,22 +381,27 @@ class Commands:
             self._js.setControlState(control, False)
         return self.get_pos()
 
+    @_paced
     def move_forward(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Walk forward ``blocks`` blocks; returns the new position."""
         return self._walk("forward", blocks)
 
+    @_paced
     def move_backward(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Walk backward ``blocks`` blocks; returns the new position."""
         return self._walk("back", blocks)
 
+    @_paced
     def move_left(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Strafe left ``blocks`` blocks; returns the new position."""
         return self._walk("left", blocks)
 
+    @_paced
     def move_right(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Strafe right ``blocks`` blocks; returns the new position."""
         return self._walk("right", blocks)
 
+    @_paced
     def jump(self) -> tuple[float, float, float]:
         """Jump once; returns the position right after the hop begins.
 
@@ -366,6 +413,7 @@ class Commands:
         return self.get_pos()
 
     # ── orientation (write) ───────────────────────────────────────────
+    @_paced  # turn / turn_left / turn_right delegate here, so they pace once
     def set_turn(self, yaw: float) -> tuple[float, float]:
         """Face an absolute ``yaw`` (degrees); returns the new ``(yaw, pitch)``.
 
@@ -391,6 +439,7 @@ class Commands:
         """Turn 90° to the right; returns the new ``(yaw, pitch)``."""
         return self.turn(-_DEGREES_PER_TURN)
 
+    @_paced
     def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
         """Face the exact point ``(x, y, z)``; returns the new ``(yaw, pitch)``.
 
@@ -408,6 +457,7 @@ class Commands:
         """
         return _scale_to_level(_read_scale(self._entity()))
 
+    @_paced
     def set_height(self, level: int) -> None:
         """Request a size ``level`` in ``1..5``; raises ``ValueError`` otherwise.
 
@@ -439,6 +489,7 @@ class Commands:
                 return item
         return None
 
+    @_paced
     def hold(self, name: str) -> bool:
         """Equip the inventory item named ``name`` in the main hand.
 
@@ -451,6 +502,7 @@ class Commands:
         self._js.equip(item, "hand")
         return True
 
+    @_paced
     def unhold(self) -> bool:
         """Move the held item back into the inventory.
 
@@ -462,6 +514,7 @@ class Commands:
         self._js.unequip("hand")
         return True
 
+    @_paced
     def drop(self) -> bool:
         """Throw the entire held stack onto the ground.
 
@@ -499,6 +552,7 @@ class Commands:
                 return block
         return None
 
+    @_paced
     def dig(self) -> tuple[tuple[int, int, int], str] | None:
         """Break the block in front of the bot; returns its ``((x, y, z), name)``.
 
@@ -518,6 +572,7 @@ class Commands:
         self._js.dig(block)  # mineflayer looks at the block itself (forceLook)
         return result
 
+    @_paced
     def place(self) -> tuple[tuple[int, int, int], str] | None:
         """Place the held block against the face being aimed at.
 
@@ -535,6 +590,7 @@ class Commands:
         name = str(placed.name) if placed is not None else ""
         return (pos, name)
 
+    @_paced
     def use(self) -> bool:
         """Right-click: interact with the aimed block, else use the held item.
 
@@ -547,6 +603,7 @@ class Commands:
             self._js.activateItem()
         return True
 
+    @_paced
     def sneak(self, on: bool) -> bool:
         """Hold or release sneak (a persistent state); returns ``on``.
 
@@ -556,6 +613,7 @@ class Commands:
         return on
 
     # ── chat ──────────────────────────────────────────────────────────
+    @_paced
     def chat(self, obj: object) -> None:
         """Send ``obj`` (converted to text) as a normal public chat message.
 

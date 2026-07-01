@@ -2966,7 +2966,13 @@ class Bot:
         """
 
 @overload
-def create_bot(account: str, /) -> Bot:
+def create_bot(
+    account: str,
+    /,
+    *,
+    instruction_sleep: float = ...,
+    bypass_instruction_sleep: bool = ...,
+) -> Bot:
     """建立並啟動一個 mineflayer 機器人
 
     回傳 `Bot`。連線是非同步進行的；請監聽 `"spawn"` 事件之後再動手操作世界::
@@ -2993,7 +2999,12 @@ def create_bot(account: str, /) -> Bot:
     ...
 
 @overload
-def create_bot(**options: Unpack[CreateBotOptions]) -> Bot:
+def create_bot(
+    *,
+    instruction_sleep: float = ...,
+    bypass_instruction_sleep: bool = ...,
+    **options: Unpack[CreateBotOptions],
+) -> Bot:
     """建立並啟動一個 mineflayer 機器人
 
     回傳 `Bot`。連線是非同步進行的；請監聽 `"spawn"` 事件之後再動手操作世界::
