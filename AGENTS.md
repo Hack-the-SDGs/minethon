@@ -60,6 +60,8 @@ bot.bind(Greeter())
 - `chat(obj)` 送一般公開聊天（`str(obj)`）；分組可見性由伺服器插件處理
 - 與事件 API 並存：直線動作跑主執行緒，`EventAdaptor` + `bind` 處理反應，最後 `run_forever` 保活
 - `dig` / `chat` 兩個名稱刻意覆寫 mineflayer 同名方法；generator 用 `_STUDENT_API_OVERRIDES` 在 `bot.pyi` 裡略過 upstream 版本，避免重複定義
+- **不新增 `bot.sleep`**：mineflayer 已用 `bot.sleep(bedBlock)`（上床睡覺）。暫停用既有的 `bot.wait(seconds)` 或直接 `time.sleep`；因為 mineflayer 的 physics tick 跑在 Node 端（`physics.js` 的 `setInterval`），Python 主執行緒 block 不會凍結遊戲內角色，控制狀態（sneak 等）也會維持
+- **每個行為指令收尾有 `instruction_sleep` 停頓**（預設 0.2s），讓學員逐行看出動作。實作是 `_commands.py` 的 `_paced` decorator，只掛在「葉節點」動作上（`turn_left`→`turn`→`set_turn` 只有 `set_turn` 被 pace，避免重複停頓）；讀取類指令（`get_*`/`find_*`）不 pace。`create_bot(instruction_sleep=0.1)` 調整間隔、`bypass_instruction_sleep=True` 關閉（設成 0）；值存在 `Bot._instruction_sleep`
 - 完整方法清單與中文 hover 見 `src/minethon/bot.pyi`；AI 替學員寫程式用的說明見 `skills/minethon/`
 
 ## IDE 與型別層
@@ -150,6 +152,12 @@ bot.bind(Greeter())
 - `VersionPinRequiredError`
 
 使用者訊息優先告訴下一步該做什麼。
+
+登入失敗（帳密錯誤）不可外洩 yggdrasil 原始 stack。`create_bot` 註冊 `Once(bot, 'error')` →
+`_on_login_error`：偵測 `invalid credentials` / `invalid username or password` 時印
+「找不到此任務。請檢查任務名稱是否正確，或是任務是否開放」再 clean exit（`_stop_with_message`
+→ 關 node bridge + `os._exit`）；同時也解掉會永久卡住的 `wait_spawn`（登入失敗 `spawn`
+永不觸發）。註冊任一 `error` listener 也讓 mineflayer 的 EventEmitter 不再 throw 原始錯誤。
 
 ## 檢查指令
 
