@@ -8,7 +8,7 @@ Shorthand → real account (usernames use "_" — never "-"):
 
     create_bot("g_swim")  → username "G<group>_swim"
                             password sha256("Hack-The-SDGs-Python@<group>")
-    create_bot("swim")    → username "<computer>_swim"
+    create_bot("swim")    → username "U<computer>_swim"
                             password sha256("Hack-The-SDGs-Python@<group>:<computer>")
 
 Security note: the salt below lives in importable code, so these passwords are
@@ -72,6 +72,6 @@ def resolve_account(shorthand: str) -> dict[str, Any]:
         username = f"G{group}_{task}"
         password = _sha256(f"{_SALT}{group}")
     else:
-        username = f"{computer}_{shorthand}"
+        username = f"U{computer}_{shorthand}"
         password = _sha256(f"{_SALT}{group}:{computer}")
     return {**_DEFAULTS, "username": username, "password": password}
