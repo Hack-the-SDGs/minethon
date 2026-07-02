@@ -35,7 +35,7 @@ def paces(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 def test_action_paces_once(paces: list[float]) -> None:
-    Bot(TurnJs(), instruction_sleep=0.25).sneak(True)
+    Bot(TurnJs(), instruction_sleep=0.25).set_turn(90.0)
     assert paces == [0.25]
 
 
@@ -46,8 +46,14 @@ def test_turn_left_paces_exactly_once(paces: list[float]) -> None:
 
 
 def test_default_construction_does_not_pace(paces: list[float]) -> None:
-    Bot(TurnJs()).sneak(True)  # no instruction_sleep -> 0.0
+    Bot(TurnJs()).set_turn(90.0)  # no instruction_sleep -> 0.0
     assert paces == [0.0]
+
+
+def test_sneak_is_not_paced(paces: list[float]) -> None:
+    # sneak stays unpaced so a toggle loop isn't throttled by the delay.
+    Bot(TurnJs(), instruction_sleep=0.2).sneak(True)
+    assert paces == []
 
 
 def test_reads_are_not_paced(paces: list[float]) -> None:

@@ -603,7 +603,6 @@ class Commands:
             self._js.activateItem()
         return True
 
-    @_paced
     def sneak(self, on: bool) -> bool:
         """Hold or release sneak (a persistent state); returns ``on``.
 
