@@ -148,7 +148,11 @@ if ($group -gt 0) {{
 }}
 
 $path = Join-Path $HOME ".htsdg.json"
-"{{""group"": $group, ""computer"": $computer}}" | Set-Content -Path $path -Encoding UTF8
+$json = "{{""group"": $group, ""computer"": $computer}}"
+# Write UTF-8 WITHOUT a BOM. Set-Content -Encoding UTF8 adds a BOM on Windows
+# PowerShell 5.1, which then breaks json parsing on the Python side. WriteAllText
+# with an explicit no-BOM UTF8Encoding works on both PS 5.1 and 7.
+[System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "wrote $path (group=$group, computer=$computer)"
 """
 
