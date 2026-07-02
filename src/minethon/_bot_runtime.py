@@ -67,13 +67,16 @@ def _normalize_handler(
     This wrapper:
 
     * drops the leading emitter arg when JSPyBridge injects it. If
-      ``event_name`` is a known key in ``_REAL_ARGC``, the real arg count is
-      used directly (``len(args) == real_argc + 1``) — an exact fact checked
-      against mineflayer's source, not a guess. Otherwise falls back to
-      proxy-identity (``args[0] is emitter``) or arity excess
+      ``event_name`` is a known key in ``_REAL_ARGC`` and the observed arg
+      count matches it exactly (``len(args) == real_argc + 1``), that fact —
+      checked by hand against mineflayer's source, not a guess — decides it
+      outright. Otherwise (unknown event, or a stale/mismatched table entry)
+      falls back to proxy-identity (``args[0] is emitter``) or arity excess
       (``len(args) > slots``), either of which can coincidentally fail when
       the injected-emitter arg count happens to equal the handler's declared
-      slots (see ``chat``/``whisper``/``resourcePack``).
+      slots (see ``chat``/``whisper``/``resourcePack``) — the fallback keeps
+      today's behavior as a safety net rather than silently doing nothing if
+      ``_REAL_ARGC`` ever drifts from mineflayer's actual arity.
     * pads missing trailing positional args with ``None``
     * truncates any excess positional args JS emits
 
@@ -94,11 +97,11 @@ def _normalize_handler(
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if emitter is not None and args:
-            if real_argc is not None:
-                should_strip = len(args) == real_argc + 1
+            identity_match = args[0] is emitter
+            arity_excess = not accepts_varargs and len(args) > slots
+            if real_argc is not None and len(args) == real_argc + 1:
+                should_strip = True
             else:
-                identity_match = args[0] is emitter
-                arity_excess = not accepts_varargs and len(args) > slots
                 should_strip = identity_match or arity_excess
             if should_strip:
                 args = args[1:]
