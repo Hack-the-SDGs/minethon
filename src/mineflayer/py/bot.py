@@ -21,7 +21,7 @@ Vec3 = require("vec3").Vec3
 username = os.environ["MC_USERNAME"]
 bot = mineflayer.createBot({
     'host': os.environ["MC_HOST"],
-    'port': 25565,
+    'port': 50213,
     'username': os.environ["MC_USERNAME"],
     'password': os.environ["MC_PASSWORD"],
     'auth': "mojang",

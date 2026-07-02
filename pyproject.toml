@@ -1,6 +1,6 @@
 [project]
 name = "minethon"
-version = "0.3.8"
+version = "0.3.9"
 description = "A Python-first Mineflayer SDK with a synchronous, IDE-friendly callback API."
 readme = "README.md"
 requires-python = ">=3.14"

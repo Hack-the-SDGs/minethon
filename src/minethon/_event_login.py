@@ -33,7 +33,7 @@ IDENTITY_FILE = Path.home() / ".htsdg.json"
 # Baked event defaults — public infrastructure, safe to ship in the SDK.
 _DEFAULTS: dict[str, Any] = {
     "host": "mc.ntust.camp",
-    "port": 25565,
+    "port": 50213,
     "auth": "mojang",
     "auth_server": "https://drasl.ntust.camp/auth",
     "session_server": "https://drasl.ntust.camp/session",
