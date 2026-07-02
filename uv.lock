@@ -70,7 +70,7 @@ wheels = [
 
 [[package]]
 name = "minethon"
-version = "0.3.9"
+version = "0.3.10"
 source = { editable = "." }
 dependencies = [
     { name = "javascript" },
