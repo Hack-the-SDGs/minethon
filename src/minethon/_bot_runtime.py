@@ -43,6 +43,17 @@ _DISCONNECTED = "\n機器人已斷線，程式結束。"
 # Shown when login fails (wrong task name / task closed), instead of leaking the
 # raw yggdrasil "Invalid credentials" stack trace.
 _QUEST_NOT_FOUND = "\n找不到此任務。請檢查任務名稱是否正確，或是任務是否開放。"
+# Shown when a bridge call times out / the node process dies — usually the bot
+# was disconnected (e.g. killed and kicked) mid-command, leaving JSPyBridge
+# waiting on a dead connection. Rendered instead of the raw JSPyBridge stack.
+_CONNECTION_LOST = "\n與伺服器的連線中斷了，程式結束。"
+# Substrings JSPyBridge puts in the bare Exceptions it raises when the node
+# bridge stops responding. Ref: javascript/proxy.py + connection.py.
+_BRIDGE_FAILURE_MARKERS = (
+    "timed out accessing",
+    "execution timed out",
+    "process has crashed",
+)
 # Default per-instruction pause (seconds) so a straight-line script's steps are
 # individually visible. Tunable via create_bot(instruction_sleep=...).
 _DEFAULT_INSTRUCTION_SLEEP = 0.2
@@ -76,6 +87,16 @@ def _looks_like_auth_error(text: str) -> bool:
     return "invalid credentials" in low or "invalid username or password" in low
 
 
+def _is_bridge_failure(exc: BaseException) -> bool:
+    """True when ``exc`` is a JSPyBridge timeout / crashed-process error.
+
+    These surface as bare ``Exception`` (no dedicated class), so match by the
+    message the bridge writes. Ref: javascript/proxy.py, connection.py.
+    """
+    text = str(exc).lower()
+    return any(marker in text for marker in _BRIDGE_FAILURE_MARKERS)
+
+
 def _on_login_error(err: Any) -> None:
     """Turn a bot `error` (esp. auth failure) into a friendly line + clean exit.
 
@@ -105,6 +126,12 @@ def _install_quiet_interrupt() -> None:
             if not _INTERRUPT["seen"]:  # real Ctrl-C; disconnect already printed
                 _INTERRUPT["seen"] = True
                 print(_GOODBYE)  # noqa: T201 — student-facing, intentional
+            return
+        if _is_bridge_failure(exc):
+            # Bridge went silent mid-command (usually a disconnect). Show a clean
+            # line and hard-exit — os._exit also skips the atexit run_forever,
+            # which would otherwise time out again on the dead bridge.
+            _stop_with_message(_CONNECTION_LOST)
             return
         previous(exc_type, exc, tb)
 
@@ -333,32 +360,38 @@ class Bot(Commands):
         def _on_end(*_a: Any, **_kw: Any) -> None:
             done.set()
 
-        Once(self._js, BotEvent.END.value)(
-            _normalize_handler(_on_end, emitter=self._js)
-        )
-        # Race guard: if `end` fired between create_bot() returning and the
-        # Once(...) above, no listener was installed and done.wait() would
-        # block forever. Seed `done` from the protocol client's `ended` flag
-        # (minecraft-protocol sets it synchronously in end()/disconnect()).
-        # `_client` is an internal minecraft-protocol attribute; warn loudly
-        # if it ever disappears so a silent indefinite hang is noticed.
-        client = getattr(self._js, "_client", None)
-        if client is None:
-            warnings.warn(
-                "bot._client 不存在，run_forever() 無法防止提早 disconnect"
-                "造成的卡死。若在 create_bot() 與 run_forever() 之間斷線，"
-                "需要手動 Ctrl-C。",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        elif bool(getattr(client, "ended", False)):
-            done.set()
         try:
+            Once(self._js, BotEvent.END.value)(
+                _normalize_handler(_on_end, emitter=self._js)
+            )
+            # Race guard: if `end` fired between create_bot() returning and the
+            # Once(...) above, no listener was installed and done.wait() would
+            # block forever. Seed `done` from the protocol client's `ended` flag
+            # (minecraft-protocol sets it synchronously in end()/disconnect()).
+            # `_client` is an internal minecraft-protocol attribute; warn loudly
+            # if it ever disappears so a silent indefinite hang is noticed.
+            client = getattr(self._js, "_client", None)
+            if client is None:
+                warnings.warn(
+                    "bot._client 不存在，run_forever() 無法防止提早 disconnect"
+                    "造成的卡死。若在 create_bot() 與 run_forever() 之間斷線，"
+                    "需要手動 Ctrl-C。",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            elif bool(getattr(client, "ended", False)):
+                done.set()
             done.wait()
         except KeyboardInterrupt:
             if not _INTERRUPT["seen"]:  # disconnect already printed its message
                 _INTERRUPT["seen"] = True
                 print(_GOODBYE)  # noqa: T201 — student-facing, intentional
+        except Exception as exc:  # noqa: BLE001 — atexit must not raise
+            # Bridge already dead/unresponsive (e.g. disconnect mid-command).
+            # Nothing to keep alive; exit quietly instead of dumping a stack.
+            if _is_bridge_failure(exc) and not _INTERRUPT["seen"]:
+                _INTERRUPT["seen"] = True
+                print(_CONNECTION_LOST)  # noqa: T201 — student-facing
 
 
 # Seconds to wait after spawn (shorthand path) before acting — covers the

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import minethon._commands as cmd
-from minethon._bot_runtime import Bot, _looks_like_auth_error
+from minethon._bot_runtime import Bot, _is_bridge_failure, _looks_like_auth_error
 
 
 class TurnJs:
@@ -92,6 +92,20 @@ def test_sneak_state_uses_control(monkeypatch: pytest.MonkeyPatch) -> None:
 )
 def test_looks_like_auth_error(text: str, expected: bool) -> None:
     assert _looks_like_auth_error(text) is expected
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Timed out accessing 'setControlState'", True),
+        ("Execution timed out", True),
+        ("The JavaScript process has crashed. Please restart", True),
+        ("NameError: name 'foo' is not defined", False),
+        ("", False),
+    ],
+)
+def test_is_bridge_failure(message: str, expected: bool) -> None:
+    assert _is_bridge_failure(Exception(message)) is expected
 
 
 def test_set_turn_still_returns_angles(monkeypatch: pytest.MonkeyPatch) -> None:
