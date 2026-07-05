@@ -38,6 +38,10 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
   coords, or `None` if that chunk isn't loaded.
 - `look_block() -> tuple[tuple[int,int,int], str] | None` — the block the bot is
   aiming at as `((x, y, z), name)`, or `None` if nothing is within ~6 blocks.
+- `get_block_in_front() -> tuple[tuple[int,int,int], str] | None` — the solid
+  block one step ahead (feet level first, then head level) as
+  `((x, y, z), name)`, or `None` when only air/liquid is ahead. Fire **is**
+  reported, so a script can check `name == "fire"` before acting.
 - `find_block(name) -> tuple[int,int,int] | None` — nearest block matching the
   name, or `None`. Names are Minecraft ids like `"diamond_ore"`, `"oak_log"`.
 - `find_blocks(name, max=16) -> list[tuple[int,int,int]]` — up to `max` nearest
@@ -87,6 +91,11 @@ walking into a wall can't hang the script.
   face; returns the new block's position+name, or `None`.
 - `use() -> bool` — right-click: interact with the aimed block (door, button,
   lever…), or use the held item if not aiming at a block.
+- `action(name) -> bool` — run a named high-level action (equip + aim + use in
+  one verb); unknown names raise `ValueError`. Currently: `"put_water"` —
+  equip the carried water bucket, pour it one step ahead (dousing any fire the
+  water touches), then scoop the water back so the area isn't flooded. Returns
+  `False` when no water bucket is carried or the pour didn't land.
 - `sneak(on: bool) -> bool` — hold (`True`) or release (`False`) sneak; a
   persistent state. Returns the new state.
 

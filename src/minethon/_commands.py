@@ -22,7 +22,7 @@ import math
 import threading
 import time
 from functools import wraps
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from javascript import Once
 
@@ -67,6 +67,12 @@ _DEFAULT_SCALE_KEY = "minecraft:generic.scale"
 _OP_ADD = 0  # add amount to the base value
 _OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
 _OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
+
+# bot.action("put_water") item names + settle time between pour and scoop.
+# Ref: minecraft-data item names; vanilla bucket use is a server-side raytrace.
+_WATER_BUCKET = "water_bucket"
+_EMPTY_BUCKET = "bucket"
+_PUT_WATER_SETTLE_SECONDS = 0.3  # let the server register the poured source block
 
 # Raycast face index (0..5) -> unit offset for placeBlock's faceVector.
 # Ref: mineflayer lib/plugins/digging.js (rayBlock.face) + Minecraft face order.
@@ -323,6 +329,22 @@ class Commands:
         p = block.position
         return ((int(p.x), int(p.y), int(p.z)), str(block.name))
 
+    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
+        """Solid block one step ahead as ``((x, y, z), name)``, or ``None``.
+
+        Public face of the forward probe ``dig()`` falls back on: checks the
+        feet-level block one step along the dominant facing axis, then head
+        height. Non-solid names (air/water/lava…) read as "nothing in front";
+        anything else — including fire — is reported, so a script can inspect
+        what it is about to walk into.
+        Ref: mineflayer lib/plugins/ray_trace.js getViewDirection.
+        """
+        block = self._block_in_front()
+        if block is None:
+            return None
+        p = block.position
+        return ((int(p.x), int(p.y), int(p.z)), str(block.name))
+
     def find_block(self, name: str) -> tuple[int, int, int] | None:
         """Nearest block named ``name`` as ``(x, y, z)`` or ``None``.
 
@@ -528,14 +550,11 @@ class Commands:
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────
-    def _block_in_front(self) -> Any:
-        """Solid block one step ahead of the bot, or ``None`` if only air.
+    def _front_cell(self) -> tuple[int, int, int]:
+        """Feet-level grid cell one step ahead along the dominant facing axis.
 
-        Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
-        looking level over flat ground, where blockAtCursor sees only air).
-        Steps along the dominant horizontal facing axis and checks the feet
-        block first, then head height. Ref: mineflayer lib/plugins/ray_trace.js
-        getViewDirection — forward = (-sin(yaw), 0, -cos(yaw)).
+        Ref: mineflayer lib/plugins/ray_trace.js getViewDirection — forward =
+        (-sin(yaw), 0, -cos(yaw)).
         """
         ent = self._entity()
         yaw = float(ent.yaw)
@@ -543,9 +562,22 @@ class Commands:
         step = (
             (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dz) else (0, 1 if dz > 0 else -1)
         )
-        bx = math.floor(float(ent.position.x)) + step[0]
-        bz = math.floor(float(ent.position.z)) + step[1]
-        by = math.floor(float(ent.position.y))
+        return (
+            math.floor(float(ent.position.x)) + step[0],
+            math.floor(float(ent.position.y)),
+            math.floor(float(ent.position.z)) + step[1],
+        )
+
+    def _block_in_front(self) -> Any:
+        """Solid block one step ahead of the bot, or ``None`` if only air.
+
+        Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
+        looking level over flat ground, where blockAtCursor sees only air).
+        Steps along the dominant horizontal facing axis and checks the feet
+        block first, then head height. The public native-type view of the same
+        probe is :meth:`get_block_in_front`.
+        """
+        bx, by, bz = self._front_cell()
         for y in (by, by + 1):  # feet level, then head level
             block = self._js.blockAt(_make_vec3(bx, y, bz))
             if block is not None and str(block.name) not in _NON_SOLID:
@@ -610,6 +642,63 @@ class Commands:
         """
         self._js.setControlState("sneak", on)
         return on
+
+    # ── high-level named actions (bot.action) ─────────────────────────
+    def _action_put_water(self) -> bool:
+        """Pour the carried water bucket one step ahead, then scoop it back.
+
+        Bucket two-step: equip the water bucket if needed, aim at the block in
+        front (feet level first) or at the floor one step ahead, right-click
+        to pour (dousing any fire the water touches),
+        wait a beat for the server to register the source block, then
+        right-click again with the now-empty bucket to collect the water so
+        the area is not left flooded. Aiming goes through ``lookAt`` because
+        the pour position is a server-side raytrace from the look direction
+        (fire is not cursor-targetable, so ``blockAtCursor`` can't be used).
+        Ref: mineflayer/docs/api.md — bot.equip / bot.lookAt / bot.activateItem.
+        """
+        held = self._js.heldItem
+        if held is None or str(held.name) != _WATER_BUCKET:
+            item = self._find_inventory_item(_WATER_BUCKET)
+            if item is None:
+                return False
+            self._js.equip(item, "hand")
+        target = self._block_in_front()
+        if target is not None:
+            p = target.position
+            aim = (float(p.x) + 0.5, float(p.y) + 0.5, float(p.z) + 0.5)
+        else:
+            # Nothing solid ahead: aim at the top face of the floor block.
+            bx, by, bz = self._front_cell()
+            aim = (bx + 0.5, by - 0.5, bz + 0.5)
+        self._js.lookAt(_make_vec3(*aim), True)
+        self._js.activateItem()
+        _bridge_safe_sleep(_PUT_WATER_SETTLE_SECONDS)
+        held = self._js.heldItem
+        if held is None or str(held.name) != _EMPTY_BUCKET:
+            return False  # the pour didn't land (nothing in range / no swap yet)
+        self._js.activateItem()  # scoop the source back with the empty bucket
+        return True
+
+    _ACTION_HANDLERS: ClassVar[dict[str, Callable[[Commands], bool]]] = {
+        "put_water": _action_put_water,
+    }
+
+    @_paced
+    def action(self, name: str) -> bool:
+        """Run the named high-level action; ``True`` when it took effect.
+
+        Actions bundle a short equip/aim/use sequence behind one student-facing
+        verb; unknown names raise ``ValueError`` listing what is available.
+        Currently supported: ``"put_water"`` — pour the carried water bucket
+        one step ahead (dousing fire), then scoop the water back.
+        """
+        handler = self._ACTION_HANDLERS.get(name)
+        if handler is None:
+            supported = ", ".join(sorted(self._ACTION_HANDLERS))
+            msg = f"不認識的動作 {name!r}，可用的動作有 {supported}。"
+            raise ValueError(msg)
+        return handler(self)
 
     # ── chat ──────────────────────────────────────────────────────────
     @_paced

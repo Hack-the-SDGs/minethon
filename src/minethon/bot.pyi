@@ -2820,6 +2820,14 @@ class Bot:
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
 
+    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
+        """正前方一格的方塊，回傳 `((x, y, z), 名稱)`；前方沒東西回傳 `None`
+
+        沿目前朝向的主軸往前一格，先看腳的高度、再看頭的高度。
+        空氣、水、岩漿等非固體視為「前方沒東西」；火焰**會**被回報，
+        所以腳本可以偵測前方是否著火再決定動作。
+        """
+
     def find_block(self, name: str) -> tuple[int, int, int] | None:
         """找最近、名稱為 `name` 的方塊，回傳 `(x, y, z)`；找不到回傳 `None`
 
@@ -2947,6 +2955,19 @@ class Bot:
         """對準心對著的方塊互動（開門、按鈕…）；沒對到方塊則使用手上物品
 
         永遠回傳 `True`。
+        """
+
+    def action(self, name: str) -> bool:
+        """執行進階動作 `name`，動作有生效回傳 `True`
+
+        把「拿裝備 → 瞄準 → 使用」包成一個動詞；不認識的名稱丟出 `ValueError`。
+        目前支援：
+
+        - `"put_water"`：拿出水桶對正前方潑水（會撲滅碰到的火焰），
+          稍候再把水收回、不讓場地淹水。背包沒有水桶時回傳 `False`。
+
+        Args:
+            name: 動作名稱，例如 `"put_water"`
         """
 
     def sneak(self, on: bool) -> bool:

@@ -117,3 +117,95 @@ def test_sneak_toggles_control_and_returns_state() -> None:
     assert Bot(fake).sneak(True) is True
     assert fake.controls["sneak"] is True
     assert Bot(fake).sneak(False) is False
+
+
+def test_get_block_in_front_reports_fire(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fire is not in the non-solid skip list, so the forward probe reports it.
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    fake = ActJs(block_at=block("fire", 0, 64, -1))
+
+    assert Bot(fake).get_block_in_front() == ((0, 64, -1), "fire")
+
+
+def test_get_block_in_front_none_over_open_ground(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+
+    assert Bot(ActJs(block_at=None)).get_block_in_front() is None
+
+
+class BucketJs(ActJs):
+    """ActJs plus the inventory/equip/lookAt surface put_water relies on.
+
+    ``activateItem`` emulates the server swapping the held bucket: pour turns
+    ``water_bucket`` into ``bucket``, scoop turns it back.
+    """
+
+    def __init__(
+        self,
+        *,
+        block_at: object | None = None,
+        items: tuple = (),
+        held: SimpleNamespace | None = None,
+    ) -> None:
+        super().__init__(block_at=block_at)
+        self._items = list(items)
+        self.heldItem = held  # mirrors the mineflayer field name
+        self.inventory = SimpleNamespace(items=lambda: self._items)
+
+    def equip(self, item: object, destination: str) -> None:
+        self.calls.append(("equip", item, destination))
+        self.heldItem = item
+
+    def lookAt(self, point: object, force: bool) -> None:  # noqa: N802
+        self.calls.append(("lookAt", point, force))
+
+    def activateItem(self) -> None:  # noqa: N802
+        self.calls.append(("activateItem",))
+        if self.heldItem is not None and self.heldItem.name == "water_bucket":
+            self.heldItem = SimpleNamespace(name="bucket", count=1)
+        elif self.heldItem is not None and self.heldItem.name == "bucket":
+            self.heldItem = SimpleNamespace(name="water_bucket", count=1)
+
+
+def item(name: str) -> SimpleNamespace:
+    return SimpleNamespace(name=name, count=1)
+
+
+def test_put_water_pours_and_scoops_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    monkeypatch.setattr(cmd, "_PUT_WATER_SETTLE_SECONDS", 0.0)
+    fire = block("fire", 0, 64, 1)
+    fake = BucketJs(block_at=fire, items=(item("water_bucket"),))
+
+    assert Bot(fake).action("put_water") is True
+    # Equipped from the inventory, aimed at the fire's centre, poured + scooped.
+    assert ("equip", fake._items[0], "hand") in fake.calls
+    assert ("lookAt", (0.5, 64.5, 1.5), True) in fake.calls
+    assert fake.calls.count(("activateItem",)) == 2
+    assert fake.heldItem.name == "water_bucket"  # bucket refilled after scoop
+
+
+def test_put_water_aims_at_floor_when_nothing_ahead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    monkeypatch.setattr(cmd, "_PUT_WATER_SETTLE_SECONDS", 0.0)
+    fake = BucketJs(block_at=None, held=item("water_bucket"))
+
+    assert Bot(fake).action("put_water") is True
+    # Spawn is (0, 64, 0) yaw 0 -> front cell (0, 64, -1); aim its floor top.
+    assert ("lookAt", (0.5, 63.5, -0.5), True) in fake.calls
+
+
+def test_put_water_without_bucket_returns_false() -> None:
+    fake = BucketJs(block_at=None)
+
+    assert Bot(fake).action("put_water") is False
+    assert ("activateItem",) not in fake.calls
+
+
+def test_action_rejects_unknown_name() -> None:
+    with pytest.raises(ValueError, match="put_water"):
+        Bot(BucketJs()).action("make_coffee")
