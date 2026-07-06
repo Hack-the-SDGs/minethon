@@ -2820,6 +2820,14 @@ class Bot:
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
 
+    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
+        """正前方一格的方塊，回傳 `((x, y, z), 名稱)`；前方沒東西回傳 `None`
+
+        沿目前朝向的主軸往前一格，先看腳的高度、再看頭的高度。
+        空氣、水、岩漿等非固體視為「前方沒東西」；火焰**會**被回報，
+        所以腳本可以偵測前方是否著火再決定動作。
+        """
+
     def find_block(self, name: str) -> tuple[int, int, int] | None:
         """找最近、名稱為 `name` 的方塊，回傳 `(x, y, z)`；找不到回傳 `None`
 
@@ -2947,6 +2955,20 @@ class Bot:
         """對準心對著的方塊互動（開門、按鈕…）；沒對到方塊則使用手上物品
 
         永遠回傳 `True`。
+        """
+
+    def action(self, name: str, value: int | None = ...) -> None:
+        """請伺服器執行具名任務動作 `name`（例如 `"put out"` 滅火）
+
+        實際送出 vanilla `/trigger <帳號>_<動作>`（全部小寫、空格與連字號轉底線），
+        例如帳號 `G1_labfire` 呼叫 `action("put out")` 會送
+        `/trigger g1_labfire_put_out`。動作是否生效由伺服器判斷
+        （執行者身分、任務是否開始、前方是否有目標…），客戶端不做任何事、
+        也不會動到方塊；名稱含不合法字元丟出 `ValueError`。
+
+        Args:
+            name: 動作名稱，例如 `"put out"`
+            value: 可選的整數參數，會以 `set` 附加在 trigger 上
         """
 
     def sneak(self, on: bool) -> bool:

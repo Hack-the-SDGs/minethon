@@ -68,6 +68,13 @@ _OP_ADD = 0  # add amount to the base value
 _OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
 _OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
 
+# bot.action(name): the action key is normalised to this charset, then sent as
+# the vanilla trigger `/trigger <username>_<action>`. Server-authoritative — the
+# competition datapack validates and performs the action; the client does
+# nothing in-world. Ref: vanilla /trigger (players can only fire objectives the
+# server enabled for them, so stray calls are harmless).
+_ACTION_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+
 # Raycast face index (0..5) -> unit offset for placeBlock's faceVector.
 # Ref: mineflayer lib/plugins/digging.js (rayBlock.face) + Minecraft face order.
 _FACE_VECTORS = (
@@ -323,6 +330,22 @@ class Commands:
         p = block.position
         return ((int(p.x), int(p.y), int(p.z)), str(block.name))
 
+    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
+        """Solid block one step ahead as ``((x, y, z), name)``, or ``None``.
+
+        Public face of the forward probe ``dig()`` falls back on: checks the
+        feet-level block one step along the dominant facing axis, then head
+        height. Non-solid names (air/water/lava…) read as "nothing in front";
+        anything else — including fire — is reported, so a script can inspect
+        what it is about to walk into.
+        Ref: mineflayer lib/plugins/ray_trace.js getViewDirection.
+        """
+        block = self._block_in_front()
+        if block is None:
+            return None
+        p = block.position
+        return ((int(p.x), int(p.y), int(p.z)), str(block.name))
+
     def find_block(self, name: str) -> tuple[int, int, int] | None:
         """Nearest block named ``name`` as ``(x, y, z)`` or ``None``.
 
@@ -528,14 +551,11 @@ class Commands:
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────
-    def _block_in_front(self) -> Any:
-        """Solid block one step ahead of the bot, or ``None`` if only air.
+    def _front_cell(self) -> tuple[int, int, int]:
+        """Feet-level grid cell one step ahead along the dominant facing axis.
 
-        Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
-        looking level over flat ground, where blockAtCursor sees only air).
-        Steps along the dominant horizontal facing axis and checks the feet
-        block first, then head height. Ref: mineflayer lib/plugins/ray_trace.js
-        getViewDirection — forward = (-sin(yaw), 0, -cos(yaw)).
+        Ref: mineflayer lib/plugins/ray_trace.js getViewDirection — forward =
+        (-sin(yaw), 0, -cos(yaw)).
         """
         ent = self._entity()
         yaw = float(ent.yaw)
@@ -543,9 +563,22 @@ class Commands:
         step = (
             (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dz) else (0, 1 if dz > 0 else -1)
         )
-        bx = math.floor(float(ent.position.x)) + step[0]
-        bz = math.floor(float(ent.position.z)) + step[1]
-        by = math.floor(float(ent.position.y))
+        return (
+            math.floor(float(ent.position.x)) + step[0],
+            math.floor(float(ent.position.y)),
+            math.floor(float(ent.position.z)) + step[1],
+        )
+
+    def _block_in_front(self) -> Any:
+        """Solid block one step ahead of the bot, or ``None`` if only air.
+
+        Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
+        looking level over flat ground, where blockAtCursor sees only air).
+        Steps along the dominant horizontal facing axis and checks the feet
+        block first, then head height. The public native-type view of the same
+        probe is :meth:`get_block_in_front`.
+        """
+        bx, by, bz = self._front_cell()
         for y in (by, by + 1):  # feet level, then head level
             block = self._js.blockAt(_make_vec3(bx, y, bz))
             if block is not None and str(block.name) not in _NON_SOLID:
@@ -610,6 +643,38 @@ class Commands:
         """
         self._js.setControlState("sneak", on)
         return on
+
+    # ── high-level named actions (bot.action) ─────────────────────────
+    @_paced
+    def action(self, name: str, value: int | None = None) -> None:
+        """Ask the server to run the named quest action (e.g. ``"put out"``).
+
+        Server-authoritative by design: this only sends the vanilla trigger
+        ``/trigger <username>_<action>`` (username lowercased; action
+        lowercased with spaces/hyphens collapsed to underscores) and does
+        **nothing** client-side — no block edits, no item use, so a lost
+        connection mid-action can never damage the map. Bot ``G1_labfire``
+        calling ``action("put out")`` fires ``/trigger g1_labfire_put_out``.
+        ``value``, when given, is attached as the trigger's integer payload
+        (``set <value>``) for quests that want a parameter. The competition
+        datapack validates the request (right bot, quest active, target in
+        front…) and performs or silently ignores it; players can only fire
+        trigger objectives the server has enabled for them, so a stray call
+        is harmless. Ref: mineflayer/docs/api.md — bot.chat(message);
+        vanilla /trigger.
+        """
+        key = "_".join(str(name).strip().lower().replace("-", " ").split())
+        if not key or not all(c in _ACTION_NAME_CHARS for c in key):
+            msg = f"動作名稱只能包含英文字母、數字、空格、連字號或底線，收到 {name!r}。"
+            raise ValueError(msg)
+        username = getattr(self._js, "username", None)
+        if username is None:
+            msg = "機器人還沒登入伺服器。請先呼叫 bot.wait_spawn()。"
+            raise NotSpawnedError(msg)
+        command = f"/trigger {str(username).lower()}_{key}"
+        if value is not None:
+            command += f" set {int(value)}"
+        self._js.chat(command)
 
     # ── chat ──────────────────────────────────────────────────────────
     @_paced

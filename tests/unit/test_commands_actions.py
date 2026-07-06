@@ -117,3 +117,67 @@ def test_sneak_toggles_control_and_returns_state() -> None:
     assert Bot(fake).sneak(True) is True
     assert fake.controls["sneak"] is True
     assert Bot(fake).sneak(False) is False
+
+
+def test_get_block_in_front_reports_fire(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fire is not in the non-solid skip list, so the forward probe reports it.
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    fake = ActJs(block_at=block("fire", 0, 64, -1))
+
+    assert Bot(fake).get_block_in_front() == ((0, 64, -1), "fire")
+
+
+def test_get_block_in_front_none_over_open_ground(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+
+    assert Bot(ActJs(block_at=None)).get_block_in_front() is None
+
+
+class TriggerJs(ActJs):
+    """ActJs plus the username/chat surface bot.action() relies on."""
+
+    def __init__(self, *, username: str | None = None) -> None:
+        super().__init__()
+        self.username = username
+        self.messages: list[str] = []
+
+    def chat(self, message: str) -> None:
+        self.messages.append(message)
+
+
+def test_action_sends_username_prefixed_trigger() -> None:
+    fake = TriggerJs(username="G1_labfire")
+
+    assert Bot(fake).action("put out") is None
+    assert fake.messages == ["/trigger g1_labfire_put_out"]
+
+
+def test_action_normalises_case_hyphens_and_spacing() -> None:
+    fake = TriggerJs(username="G1_labfire")
+
+    Bot(fake).action("  Put-Out ")
+    assert fake.messages == ["/trigger g1_labfire_put_out"]
+
+
+def test_action_attaches_optional_value_payload() -> None:
+    fake = TriggerJs(username="G1_labfire")
+
+    Bot(fake).action("put out", 2)
+    assert fake.messages == ["/trigger g1_labfire_put_out set 2"]
+
+
+def test_action_rejects_bad_characters() -> None:
+    fake = TriggerJs(username="G1_labfire")
+
+    with pytest.raises(ValueError, match="動作名稱"):
+        Bot(fake).action("放水")
+    assert fake.messages == []
+
+
+def test_action_before_login_raises() -> None:
+    from minethon.errors import NotSpawnedError
+
+    with pytest.raises(NotSpawnedError):
+        Bot(TriggerJs(username=None)).action("put out")
