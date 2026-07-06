@@ -97,7 +97,7 @@ walking into a wall can't hang the script.
   integer payload (`set <value>`). The competition datapack validates the
   request (right bot, quest active, target in front…) and performs or silently
   ignores it — there is **no client-side effect**, so a dropped connection
-  mid-action can never damage the map. Example: bot `g1_labfire` calling
+  mid-action can never damage the map. Example: bot `G1_labfire` calling
   `action("put out")` fires `/trigger g1_labfire_put_out`. Bad characters in
   `name` raise `ValueError`.
 - `sneak(on: bool) -> bool` — hold (`True`) or release (`False`) sneak; a
