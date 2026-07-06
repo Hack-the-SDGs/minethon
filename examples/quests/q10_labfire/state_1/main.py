@@ -4,8 +4,8 @@
 每一步先看正前方一格是什麼：
 
 - 是火焰 → ``bot.action("put out")`` 送出滅火請求。實際只是送
-  ``/trigger <實際登入帳號小寫>_put_out`` 給伺服器（帳號 ``q_labfire_1``
-  → ``q_labfire_1_put_out``），由關卡 datapack 驗證「執行者是機器人、
+  ``/trigger <實際登入帳號小寫>_put_out`` 給伺服器（帳號 ``g_labfire_1``
+  → ``g1_labfire_1_put_out``），由關卡 datapack 驗證「執行者是機器人、
   任務進行中、前方真的有火」後代為滅火；客戶端不動任何方塊，
   斷線也不會損壞地圖。
 
@@ -20,7 +20,7 @@
 
 from minethon import create_bot
 
-bot = create_bot("q_labfire_1")
+bot = create_bot("g_labfire_1")
 bot.wait_spawn()
 
 doused = 0

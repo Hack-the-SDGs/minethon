@@ -17,8 +17,8 @@ WorldGuard 大量子區域授權、潑水瞬間斷線或掉包會來不及收水
 水流的微小推動會讓機器人瞄準偏移導致收不回。因此改為**伺服器權威**設計：
 
 1. 前端手打 `bot.action("put out")`
-2. minethon 依**實際登入帳號**加工成 `/trigger <帳號小寫>_put_out` 送出
-   （帳號 `q_labfire_1` → `q_labfire_1_put_out`）
+2. minethon 依 ** 實際登入帳號 ** 加工成 ` /trigger <帳號小寫>_put_out ` 送出
+  （帳號 ` g1_labfire_1 ` → ` g1_labfire_1_put_out `
 3. 關卡 datapack 驗證：執行者是不是機器人、任務是否開始、前方一格是否真的有火
 4. 驗證通過 → 伺服器直接熄掉該格火焰（不經 WG、無水流）；不通過 → 靜默忽略
 
@@ -34,7 +34,7 @@ WorldGuard 大量子區域授權、潑水瞬間斷線或掉包會來不及收水
 
 ## 前置
 
-- 機器人帳號：`q_labfire_1`（由關卡 datapack／Skript 控管：任務未啟動會被踢下線，
+- 機器人帳號：`g_labfire_1`（由關卡 datapack／Skript 控管：任務未啟動會被踢下線，
   登入後會自動傳送到該間實驗室的出生點）。
 - 執行前先啟動任務（管理員 `/function quests:q10_labfire/start`）。
 
