@@ -135,77 +135,49 @@ def test_get_block_in_front_none_over_open_ground(
     assert Bot(ActJs(block_at=None)).get_block_in_front() is None
 
 
-class BucketJs(ActJs):
-    """ActJs plus the inventory/equip/lookAt surface put_water relies on.
+class TriggerJs(ActJs):
+    """ActJs plus the username/chat surface bot.action() relies on."""
 
-    ``activateItem`` emulates the server swapping the held bucket: pour turns
-    ``water_bucket`` into ``bucket``, scoop turns it back.
-    """
+    def __init__(self, *, username: str | None = None) -> None:
+        super().__init__()
+        self.username = username
+        self.messages: list[str] = []
 
-    def __init__(
-        self,
-        *,
-        block_at: object | None = None,
-        items: tuple = (),
-        held: SimpleNamespace | None = None,
-    ) -> None:
-        super().__init__(block_at=block_at)
-        self._items = list(items)
-        self.heldItem = held  # mirrors the mineflayer field name
-        self.inventory = SimpleNamespace(items=lambda: self._items)
-
-    def equip(self, item: object, destination: str) -> None:
-        self.calls.append(("equip", item, destination))
-        self.heldItem = item
-
-    def lookAt(self, point: object, force: bool) -> None:  # noqa: N802
-        self.calls.append(("lookAt", point, force))
-
-    def activateItem(self) -> None:  # noqa: N802
-        self.calls.append(("activateItem",))
-        if self.heldItem is not None and self.heldItem.name == "water_bucket":
-            self.heldItem = SimpleNamespace(name="bucket", count=1)
-        elif self.heldItem is not None and self.heldItem.name == "bucket":
-            self.heldItem = SimpleNamespace(name="water_bucket", count=1)
+    def chat(self, message: str) -> None:
+        self.messages.append(message)
 
 
-def item(name: str) -> SimpleNamespace:
-    return SimpleNamespace(name=name, count=1)
+def test_action_sends_username_prefixed_trigger() -> None:
+    fake = TriggerJs(username="G1_labfire")
+
+    assert Bot(fake).action("put out") is None
+    assert fake.messages == ["/trigger g1_labfire_put_out"]
 
 
-def test_put_water_pours_and_scoops_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
-    monkeypatch.setattr(cmd, "_PUT_WATER_SETTLE_SECONDS", 0.0)
-    fire = block("fire", 0, 64, 1)
-    fake = BucketJs(block_at=fire, items=(item("water_bucket"),))
+def test_action_normalises_case_hyphens_and_spacing() -> None:
+    fake = TriggerJs(username="G1_labfire")
 
-    assert Bot(fake).action("put_water") is True
-    # Equipped from the inventory, aimed at the fire's centre, poured + scooped.
-    assert ("equip", fake._items[0], "hand") in fake.calls
-    assert ("lookAt", (0.5, 64.5, 1.5), True) in fake.calls
-    assert fake.calls.count(("activateItem",)) == 2
-    assert fake.heldItem.name == "water_bucket"  # bucket refilled after scoop
+    Bot(fake).action("  Put-Out ")
+    assert fake.messages == ["/trigger g1_labfire_put_out"]
 
 
-def test_put_water_aims_at_floor_when_nothing_ahead(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
-    monkeypatch.setattr(cmd, "_PUT_WATER_SETTLE_SECONDS", 0.0)
-    fake = BucketJs(block_at=None, held=item("water_bucket"))
+def test_action_attaches_optional_value_payload() -> None:
+    fake = TriggerJs(username="G1_labfire")
 
-    assert Bot(fake).action("put_water") is True
-    # Spawn is (0, 64, 0) yaw 0 -> front cell (0, 64, -1); aim its floor top.
-    assert ("lookAt", (0.5, 63.5, -0.5), True) in fake.calls
+    Bot(fake).action("put out", 2)
+    assert fake.messages == ["/trigger g1_labfire_put_out set 2"]
 
 
-def test_put_water_without_bucket_returns_false() -> None:
-    fake = BucketJs(block_at=None)
+def test_action_rejects_bad_characters() -> None:
+    fake = TriggerJs(username="G1_labfire")
 
-    assert Bot(fake).action("put_water") is False
-    assert ("activateItem",) not in fake.calls
+    with pytest.raises(ValueError, match="動作名稱"):
+        Bot(fake).action("放水")
+    assert fake.messages == []
 
 
-def test_action_rejects_unknown_name() -> None:
-    with pytest.raises(ValueError, match="put_water"):
-        Bot(BucketJs()).action("make_coffee")
+def test_action_before_login_raises() -> None:
+    from minethon.errors import NotSpawnedError
+
+    with pytest.raises(NotSpawnedError):
+        Bot(TriggerJs(username=None)).action("put out")

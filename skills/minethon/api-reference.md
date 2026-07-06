@@ -91,11 +91,15 @@ walking into a wall can't hang the script.
   face; returns the new block's position+name, or `None`.
 - `use() -> bool` — right-click: interact with the aimed block (door, button,
   lever…), or use the held item if not aiming at a block.
-- `action(name) -> bool` — run a named high-level action (equip + aim + use in
-  one verb); unknown names raise `ValueError`. Currently: `"put_water"` —
-  equip the carried water bucket, pour it one step ahead (dousing any fire the
-  water touches), then scoop the water back so the area isn't flooded. Returns
-  `False` when no water bucket is carried or the pour didn't land.
+- `action(name, value=None) -> None` — ask the **server** to perform a named
+  quest action. Sends the vanilla trigger `/trigger <username>_<action>`
+  (all lowercased; spaces/hyphens → underscores), with `value` as an optional
+  integer payload (`set <value>`). The competition datapack validates the
+  request (right bot, quest active, target in front…) and performs or silently
+  ignores it — there is **no client-side effect**, so a dropped connection
+  mid-action can never damage the map. Example: bot `G1_labfire` calling
+  `action("put out")` fires `/trigger g1_labfire_put_out`. Bad characters in
+  `name` raise `ValueError`.
 - `sneak(on: bool) -> bool` — hold (`True`) or release (`False`) sneak; a
   persistent state. Returns the new state.
 

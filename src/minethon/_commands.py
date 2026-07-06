@@ -22,7 +22,7 @@ import math
 import threading
 import time
 from functools import wraps
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from javascript import Once
 
@@ -68,11 +68,12 @@ _OP_ADD = 0  # add amount to the base value
 _OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
 _OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
 
-# bot.action("put_water") item names + settle time between pour and scoop.
-# Ref: minecraft-data item names; vanilla bucket use is a server-side raytrace.
-_WATER_BUCKET = "water_bucket"
-_EMPTY_BUCKET = "bucket"
-_PUT_WATER_SETTLE_SECONDS = 0.3  # let the server register the poured source block
+# bot.action(name): the action key is normalised to this charset, then sent as
+# the vanilla trigger `/trigger <username>_<action>`. Server-authoritative — the
+# competition datapack validates and performs the action; the client does
+# nothing in-world. Ref: vanilla /trigger (players can only fire objectives the
+# server enabled for them, so stray calls are harmless).
+_ACTION_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
 
 # Raycast face index (0..5) -> unit offset for placeBlock's faceVector.
 # Ref: mineflayer lib/plugins/digging.js (rayBlock.face) + Minecraft face order.
@@ -644,61 +645,36 @@ class Commands:
         return on
 
     # ── high-level named actions (bot.action) ─────────────────────────
-    def _action_put_water(self) -> bool:
-        """Pour the carried water bucket one step ahead, then scoop it back.
-
-        Bucket two-step: equip the water bucket if needed, aim at the block in
-        front (feet level first) or at the floor one step ahead, right-click
-        to pour (dousing any fire the water touches),
-        wait a beat for the server to register the source block, then
-        right-click again with the now-empty bucket to collect the water so
-        the area is not left flooded. Aiming goes through ``lookAt`` because
-        the pour position is a server-side raytrace from the look direction
-        (fire is not cursor-targetable, so ``blockAtCursor`` can't be used).
-        Ref: mineflayer/docs/api.md — bot.equip / bot.lookAt / bot.activateItem.
-        """
-        held = self._js.heldItem
-        if held is None or str(held.name) != _WATER_BUCKET:
-            item = self._find_inventory_item(_WATER_BUCKET)
-            if item is None:
-                return False
-            self._js.equip(item, "hand")
-        target = self._block_in_front()
-        if target is not None:
-            p = target.position
-            aim = (float(p.x) + 0.5, float(p.y) + 0.5, float(p.z) + 0.5)
-        else:
-            # Nothing solid ahead: aim at the top face of the floor block.
-            bx, by, bz = self._front_cell()
-            aim = (bx + 0.5, by - 0.5, bz + 0.5)
-        self._js.lookAt(_make_vec3(*aim), True)
-        self._js.activateItem()
-        _bridge_safe_sleep(_PUT_WATER_SETTLE_SECONDS)
-        held = self._js.heldItem
-        if held is None or str(held.name) != _EMPTY_BUCKET:
-            return False  # the pour didn't land (nothing in range / no swap yet)
-        self._js.activateItem()  # scoop the source back with the empty bucket
-        return True
-
-    _ACTION_HANDLERS: ClassVar[dict[str, Callable[[Commands], bool]]] = {
-        "put_water": _action_put_water,
-    }
-
     @_paced
-    def action(self, name: str) -> bool:
-        """Run the named high-level action; ``True`` when it took effect.
+    def action(self, name: str, value: int | None = None) -> None:
+        """Ask the server to run the named quest action (e.g. ``"put out"``).
 
-        Actions bundle a short equip/aim/use sequence behind one student-facing
-        verb; unknown names raise ``ValueError`` listing what is available.
-        Currently supported: ``"put_water"`` — pour the carried water bucket
-        one step ahead (dousing fire), then scoop the water back.
+        Server-authoritative by design: this only sends the vanilla trigger
+        ``/trigger <username>_<action>`` (username lowercased; action
+        lowercased with spaces/hyphens collapsed to underscores) and does
+        **nothing** client-side — no block edits, no item use, so a lost
+        connection mid-action can never damage the map. Bot ``G1_labfire``
+        calling ``action("put out")`` fires ``/trigger g1_labfire_put_out``.
+        ``value``, when given, is attached as the trigger's integer payload
+        (``set <value>``) for quests that want a parameter. The competition
+        datapack validates the request (right bot, quest active, target in
+        front…) and performs or silently ignores it; players can only fire
+        trigger objectives the server has enabled for them, so a stray call
+        is harmless. Ref: mineflayer/docs/api.md — bot.chat(message);
+        vanilla /trigger.
         """
-        handler = self._ACTION_HANDLERS.get(name)
-        if handler is None:
-            supported = ", ".join(sorted(self._ACTION_HANDLERS))
-            msg = f"不認識的動作 {name!r}，可用的動作有 {supported}。"
+        key = "_".join(str(name).strip().lower().replace("-", " ").split())
+        if not key or not all(c in _ACTION_NAME_CHARS for c in key):
+            msg = f"動作名稱只能包含英文字母、數字、空格、連字號或底線，收到 {name!r}。"
             raise ValueError(msg)
-        return handler(self)
+        username = getattr(self._js, "username", None)
+        if username is None:
+            msg = "機器人還沒登入伺服器。請先呼叫 bot.wait_spawn()。"
+            raise NotSpawnedError(msg)
+        command = f"/trigger {str(username).lower()}_{key}"
+        if value is not None:
+            command += f" set {int(value)}"
+        self._js.chat(command)
 
     # ── chat ──────────────────────────────────────────────────────────
     @_paced

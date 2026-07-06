@@ -2957,17 +2957,18 @@ class Bot:
         永遠回傳 `True`。
         """
 
-    def action(self, name: str) -> bool:
-        """執行進階動作 `name`，動作有生效回傳 `True`
+    def action(self, name: str, value: int | None = ...) -> None:
+        """請伺服器執行具名任務動作 `name`（例如 `"put out"` 滅火）
 
-        把「拿裝備 → 瞄準 → 使用」包成一個動詞；不認識的名稱丟出 `ValueError`。
-        目前支援：
-
-        - `"put_water"`：拿出水桶對正前方潑水（會撲滅碰到的火焰），
-          稍候再把水收回、不讓場地淹水。背包沒有水桶時回傳 `False`。
+        實際送出 vanilla `/trigger <帳號>_<動作>`（全部小寫、空格與連字號轉底線），
+        例如帳號 `G1_labfire` 呼叫 `action("put out")` 會送
+        `/trigger g1_labfire_put_out`。動作是否生效由伺服器判斷
+        （執行者身分、任務是否開始、前方是否有目標…），客戶端不做任何事、
+        也不會動到方塊；名稱含不合法字元丟出 `ValueError`。
 
         Args:
-            name: 動作名稱，例如 `"put_water"`
+            name: 動作名稱，例如 `"put out"`
+            value: 可選的整數參數，會以 `set` 附加在 trigger 上
         """
 
     def sneak(self, on: bool) -> bool:

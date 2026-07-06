@@ -74,7 +74,7 @@ bot = create_bot(
 | `dig()` | `((x,y,z), name)` or `None` | Break the block I'm aiming at |
 | `place()` | `((x,y,z), name)` or `None` | Place held block on the aimed face |
 | `use()` | `bool` | Right-click aimed block, else use item |
-| `action(name)` | `bool` | Named high-level action, e.g. `"put_water"` |
+| `action(name, value=None)` | `None` | Ask the server to run a quest action (vanilla `/trigger`) |
 | `sneak(on)` | `bool` | Hold/release sneak |
 | `chat(obj)` | `None` | Send `str(obj)` to public chat |
 
