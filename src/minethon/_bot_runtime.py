@@ -33,8 +33,27 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+# Events known to suffer the emitter-shift bug: how many real args each one
+# sends, counted by hand from mineflayer's source — a fact independent of
+# how the user's handler happens to declare its own parameters.
+# chat/whisper: lib/plugins/chat.js:85 (legacy addChatPattern deprecated path)
+# resourcePack: lib/plugins/resource_pack.js (all 3 call sites send exactly 2
+#   args, but the *order* isn't stable — the first positional value is
+#   sometimes `url`, sometimes `uuid`, depending on which branch fires. This
+#   is a separate mineflayer-level quirk; this table only guarantees "how
+#   many", not "which means what", so that part is out of scope here).
+_REAL_ARGC: dict[str, int] = {
+    "chat": 4,
+    "whisper": 4,
+    "resourcePack": 2,
+}
+
+
 def _normalize_handler(
-    func: Callable[..., Any], *, emitter: Any | None = None
+    func: Callable[..., Any],
+    *,
+    emitter: Any | None = None,
+    event_name: str | None = None,
 ) -> Callable[..., Any]:
     """Adapt a user handler to mineflayer's loose event-arity conventions.
 
@@ -47,15 +66,22 @@ def _normalize_handler(
 
     This wrapper:
 
-    * drops the leading emitter arg when JSPyBridge injects it — detected
-      either by proxy-identity (``args[0] is emitter``) or by arity excess
-      (``len(args) > slots``), so a proxy-cache change in JSPyBridge that
-      breaks identity still strips the injected emitter when JS emits the
-      arity the handler declares
+    * drops the leading emitter arg when JSPyBridge injects it. If
+      ``event_name`` is a known key in ``_REAL_ARGC`` and the observed arg
+      count matches it exactly (``len(args) == real_argc + 1``), that fact —
+      checked by hand against mineflayer's source, not a guess — decides it
+      outright. Otherwise (unknown event, or a stale/mismatched table entry)
+      falls back to proxy-identity (``args[0] is emitter``) or arity excess
+      (``len(args) > slots``), either of which can coincidentally fail when
+      the injected-emitter arg count happens to equal the handler's declared
+      slots (see ``chat``/``whisper``/``resourcePack``) — the fallback keeps
+      today's behavior as a safety net rather than silently doing nothing if
+      ``_REAL_ARGC`` ever drifts from mineflayer's actual arity.
     * pads missing trailing positional args with ``None``
     * truncates any excess positional args JS emits
 
     Ref: mineflayer/lib/plugins/chat.js:85 — chat event emit arity
+    Ref: mineflayer/lib/plugins/resource_pack.js — resourcePack emit arity
     Ref: javascript/__init__.py:78 — optional emitter injection in `On` / `Once`
     """
     params = list(inspect.signature(func).parameters.values())
@@ -66,13 +92,18 @@ def _normalize_handler(
         if p.kind
         in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     )
+    real_argc = _REAL_ARGC.get(event_name) if event_name is not None else None
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if emitter is not None and args:
             identity_match = args[0] is emitter
             arity_excess = not accepts_varargs and len(args) > slots
-            if identity_match or arity_excess:
+            if real_argc is not None and len(args) == real_argc + 1:
+                should_strip = True
+            else:
+                should_strip = identity_match or arity_excess
+            if should_strip:
                 args = args[1:]
         if accepts_varargs:
             return func(*args, **kwargs)
@@ -227,7 +258,9 @@ class Bot(Commands):
             if impl is None or impl is base_impl:
                 continue
             handler = getattr(handlers, method_name)
-            On(js_bot, event.value)(_normalize_handler(handler, emitter=js_bot))
+            On(js_bot, event.value)(
+                _normalize_handler(handler, emitter=js_bot, event_name=event.value)
+            )
         return handlers
 
     def run_forever(self) -> None:
