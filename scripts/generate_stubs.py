@@ -90,12 +90,16 @@ def _portable_ref(path: Path) -> str:
     ``node_modules/...`` suffix when the source lives in the venv.
     """
     try:
-        return str(path.relative_to(REPO_ROOT))
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if "site-packages/javascript/js/node_modules" in rel:
+            idx = rel.find("site-packages/javascript/js/node_modules")
+            rel = ".venv/lib/python3.14/" + rel[idx:]
+        return rel
     except ValueError:
         parts = path.parts
         if "node_modules" in parts:
             idx = parts.index("node_modules")
-            return str(Path(*parts[idx:]))
+            return Path(*parts[idx:]).as_posix()
         return path.name
 
 

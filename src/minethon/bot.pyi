@@ -2817,9 +2817,11 @@ class Bot:
             z: 方塊 Z 整數座標
         """
 
-    def get_block_property(self, x: int, y: int, z: int, property_name: str) -> str | int | bool | None:
+    def get_block_property(
+        self, x: int, y: int, z: int, property_name: str
+    ) -> str | int | bool | None:
         """取得指定座標塊的狀態屬性；塊未載入或沒有此屬性時回傳`None`
-        
+
         Args:
             x: 方塊 X 整數座標
             y: 方塊 Y 整數座標
