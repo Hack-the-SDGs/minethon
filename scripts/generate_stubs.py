@@ -88,12 +88,18 @@ def _portable_ref(path: Path) -> str:
     Absolute venv paths differ per developer and would dirty git diffs on
     every regen. Prefer paths relative to the repo; fall back to the
     ``node_modules/...`` suffix when the source lives in the venv.
+
+    The venv interpreter dir differs per platform and Python version
+    (``lib/python3.14`` on POSIX, ``Lib`` on Windows), so it is elided to
+    ``.venv/...`` rather than pinned to one concrete spelling: pinning kept
+    the committed stub stable but pointed the ref at a path that does not
+    exist in half the supported environments.
     """
+    marker = "site-packages/javascript/js/node_modules"
     try:
         rel = path.relative_to(REPO_ROOT).as_posix()
-        if "site-packages/javascript/js/node_modules" in rel:
-            idx = rel.find("site-packages/javascript/js/node_modules")
-            rel = ".venv/lib/python3.14/" + rel[idx:]
+        if marker in rel:
+            rel = ".venv/.../" + rel[rel.find(marker) :]
         return rel
     except ValueError:
         parts = path.parts
