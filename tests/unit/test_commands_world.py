@@ -111,3 +111,37 @@ def test_find_blocks_maps_each_coordinate() -> None:
 
 def test_find_blocks_unknown_name_returns_empty_list() -> None:
     assert Bot(FakeJs(names={})).find_blocks("nope") == []
+
+
+def test_get_block_property_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+
+    class FakeBlock:
+        def getProperties(self) -> dict:  # noqa: N802
+            return {"lit": True, "facing": "north"}
+
+    fake = FakeJs(block_at=FakeBlock())
+    bot = Bot(fake)
+    assert bot.get_block_property(1, 2, 3, "lit") is True
+    assert bot.get_block_property(1, 2, 3, "facing") == "north"
+    assert bot.get_block_property(1, 2, 3, "powered") is None
+
+
+def test_get_block_property_none_when_unloaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+
+    fake = FakeJs(block_at=None)
+    bot = Bot(fake)
+    assert bot.get_block_property(1, 2, 3, "lit") is None
+
+
+def test_get_block_property_exception_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+
+    class BrokenBlock:
+        def getProperties(self) -> dict:  # noqa: N802
+            raise RuntimeError("JS connection broken")
+
+    fake = FakeJs(block_at=BrokenBlock())
+    bot = Bot(fake)
+    assert bot.get_block_property(1, 2, 3, "lit") is None

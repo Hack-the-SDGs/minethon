@@ -2817,6 +2817,18 @@ class Bot:
             z: 方塊 Z 整數座標
         """
 
+    def get_block_property(
+        self, x: int, y: int, z: int, property_name: str
+    ) -> str | int | bool | None:
+        """取得指定座標塊的狀態屬性；塊未載入或沒有此屬性時回傳`None`
+
+        Args:
+            x: 方塊 X 整數座標
+            y: 方塊 Y 整數座標
+            z: 方塊 Z 整數座標
+            property_name: 屬性名稱，例如 `"lit"` 或 `"facing"`
+        """
+
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
 
