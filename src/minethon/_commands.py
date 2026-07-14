@@ -286,16 +286,15 @@ class Commands:
         if block is None:
             return None
 
-        # 呼叫 prismarine-block 的 getProperties() 獲取屬性字典
+        # 呼叫 prismarine-block 的 getProperties() 獲取屬性字典。
+        # JSPyBridge 的 JS 物件 Proxy 對不存在的 key 直接回傳 None（不丟例外），
+        # KeyError 只會在 props 是原生 dict 時出現。
+        # bridge / JS 端的錯誤刻意不攔，讓它往上拋，
+        # 避免「連線壞掉」跟「沒有這個屬性」對呼叫端長得一樣。
+        props = block.getProperties()
         try:
-            props = block.getProperties()
-            if props is None:
-                return None
-
-            # JSPyBridge 的 JS 物件 Proxy 支援 dict-like 鍵值存取
-            val = props[property_name]
-            return val if val is not None else None
-        except Exception:  # noqa: BLE001
+            return props[property_name]
+        except KeyError:
             return None
 
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:

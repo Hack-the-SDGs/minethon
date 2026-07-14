@@ -135,13 +135,35 @@ def test_get_block_property_none_when_unloaded(monkeypatch: pytest.MonkeyPatch) 
     assert bot.get_block_property(1, 2, 3, "lit") is None
 
 
-def test_get_block_property_exception_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_block_property_missing_key_on_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真實 JSPyBridge proxy 對不存在的 key 回傳 None，不丟 KeyError。"""
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+
+    class FakeProxyProps:
+        def __getitem__(self, key: str) -> object | None:
+            return {"lit": True}.get(key)
+
+    class FakeBlock:
+        def getProperties(self) -> FakeProxyProps:  # noqa: N802
+            return FakeProxyProps()
+
+    bot = Bot(FakeJs(block_at=FakeBlock()))
+    assert bot.get_block_property(1, 2, 3, "lit") is True
+    assert bot.get_block_property(1, 2, 3, "powered") is None
+
+
+def test_get_block_property_bridge_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bridge / JS 端錯誤要往上拋，不能被當成「沒有這個屬性」而回傳 None。"""
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
 
     class BrokenBlock:
         def getProperties(self) -> dict:  # noqa: N802
             raise RuntimeError("JS connection broken")
 
-    fake = FakeJs(block_at=BrokenBlock())
-    bot = Bot(fake)
-    assert bot.get_block_property(1, 2, 3, "lit") is None
+    bot = Bot(FakeJs(block_at=BrokenBlock()))
+    with pytest.raises(RuntimeError, match="JS connection broken"):
+        bot.get_block_property(1, 2, 3, "lit")
