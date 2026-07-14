@@ -4,15 +4,15 @@
 # This file is the IDE completion overlay for src/minethon/bot.py.
 # Runtime behavior lives in bot.py; types live here.
 #
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer--342e33372e30/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/vec3--302e312e3130/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-entity/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-block/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-item/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\mineflayer--342e33372e30\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\vec3--302e312e3130\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-entity\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-block\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-item\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-chat\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-windows\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-recipe\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\mineflayer-pathfinder--322e342e35\index.d.ts
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
@@ -2815,6 +2815,18 @@ class Bot:
             x: 方塊 X 整數座標
             y: 方塊 Y 整數座標
             z: 方塊 Z 整數座標
+        """
+
+    def get_block_property(
+        self, x: int, y: int, z: int, property_name: str
+    ) -> str | int | bool | None:
+        """獲取指定座標方塊的特定狀態屬性 True or False；若方塊未載入或無此屬性則回傳 None。
+
+        Args:
+            x: 方塊 X 整數座標
+            y: 方塊 Y 整數座標
+            z: 方塊 Z 整數座標
+            property_name: 屬性名稱（例如 "lit", "facing", "powered"）
         """
 
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
