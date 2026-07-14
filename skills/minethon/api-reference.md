@@ -36,6 +36,11 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
 
 - `get_block(x, y, z) -> str | None` — block name (e.g. `"stone"`) at integer
   coords, or `None` if that chunk isn't loaded.
+- `get_block_property(x, y, z, property_name) -> str | int | bool | None` — get
+  a specific block state property (e.g. `"lit"` for redstone lamps, `"facing"`
+  for furnaces, `"powered"` for levers) of the block at integer coordinates.
+  Returns the property value, or `None` if the chunk isn't loaded or the block
+  does not have this property.
 - `look_block() -> tuple[tuple[int,int,int], str] | None` — the block the bot is
   aiming at as `((x, y, z), name)`, or `None` if nothing is within ~6 blocks.
 - `get_block_in_front() -> tuple[tuple[int,int,int], str] | None` — the solid

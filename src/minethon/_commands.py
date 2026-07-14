@@ -319,6 +319,38 @@ class Commands:
             return None
         return str(block.name)
 
+    def get_block_property(
+        self, x: int, y: int, z: int, property_name: str
+    ) -> str | int | bool | None:
+        """獲取指定座標方塊的特定狀態屬性（Block State）。
+
+        例如紅石燈的 "lit" 狀態、熔爐的 "facing" 朝向等。
+
+        Args:
+            x: 方塊 X 整數座標
+            y: 方塊 Y 整數座標
+            z: 方塊 Z 整數座標
+            property_name: 屬性名稱（例如 "lit", "facing", "powered"）
+
+        Returns:
+            屬性的值（可能是 str, int, bool），若方塊未載入或無此屬性則回傳 None。
+        """
+        # 呼叫底層 mineflayer 的 blockAt 獲取方塊 Proxy 物件
+        block = self._js.blockAt(_make_vec3(x, y, z))
+        if block is None:
+            return None
+
+        # 呼叫 prismarine-block 的 getProperties() 獲取屬性字典。
+        # JSPyBridge 的 JS 物件 Proxy 對不存在的 key 直接回傳 None（不丟例外），
+        # KeyError 只會在 props 是原生 dict 時出現。
+        # bridge / JS 端的錯誤刻意不攔，讓它往上拋，
+        # 避免「連線壞掉」跟「沒有這個屬性」對呼叫端長得一樣。
+        props = block.getProperties()
+        try:
+            return props[property_name]
+        except KeyError:
+            return None
+
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """Block currently aimed at as ``((x, y, z), name)``, or ``None``.
 
