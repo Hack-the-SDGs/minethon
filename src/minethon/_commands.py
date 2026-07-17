@@ -231,7 +231,15 @@ class Commands:
         try:
             done.wait()
         except KeyboardInterrupt:
-            pass
+            # Ctrl-C while waiting on a login that never spawns: honor the
+            # project's Ctrl-C contract (goodbye line + clean stop) instead of
+            # swallowing the interrupt and letting the script run on with an
+            # un-spawned bot straight into a NotSpawnedError.
+            from minethon import _bot_runtime  # noqa: PLC0415 — avoids an import cycle
+
+            _bot_runtime._stop_with_message(  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+                _bot_runtime._GOODBYE  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+            )
 
     def wait(self, seconds: float) -> None:
         """Pause the script for ``seconds`` without the bot going idle.
