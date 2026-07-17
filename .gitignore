@@ -979,3 +979,6 @@ FodyWeavers.xsd
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/python,node,intellij,macos,windows,linux,visualstudio,visualstudiocode,pycharm.claude/worktrees/
+
+# Minecraft launcher credential file — must never be committed
+launcher_accounts.json
