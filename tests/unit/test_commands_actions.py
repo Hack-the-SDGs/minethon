@@ -24,10 +24,12 @@ class ActJs:
         *,
         cursor: object | None = None,
         block_at: object | None = None,
+        held: object | None = SimpleNamespace(name="stone", count=1),
         dig_ms: float | None = 1000.0,
     ) -> None:
         self._cursor = cursor
         self._block_at = block_at
+        self.heldItem = held
         self.dig_ms = dig_ms
         self.calls: list[tuple] = []
         self.dig_timeouts: list[float] = []
@@ -228,3 +230,10 @@ def test_dig_refuses_bedrock_infinity_as_none(capsys: pytest.CaptureFixture) -> 
     assert Bot(fake).dig() is None
     assert not fake.dig_timeouts
     assert "太硬" in capsys.readouterr().out
+
+
+def test_place_returns_none_when_hand_is_empty() -> None:
+    fake = ActJs(cursor=block("stone", 5, 64, 5), held=None)
+
+    assert Bot(fake).place() is None
+    assert not any(call[0] == "placeBlock" for call in fake.calls)

@@ -681,9 +681,13 @@ class Commands:
     def place(self) -> tuple[tuple[int, int, int], str] | None:
         """Place the held block against the face being aimed at.
 
-        Returns the new block's ``((x, y, z), name)`` or ``None`` if nothing is
-        in reach. Ref: mineflayer/docs/api.md — bot.placeBlock(ref, faceVector).
+        Returns the new block's ``((x, y, z), name)``, or ``None`` if nothing
+        is in reach or the hand is empty (hold something first — mineflayer
+        would otherwise throw a raw "must be holding an item" error).
+        Ref: mineflayer/docs/api.md — bot.placeBlock(ref, faceVector).
         """
+        if self._js.heldItem is None:
+            return None
         ref = self._js.blockAtCursor(_REACH_BLOCKS)
         if ref is None:
             return None
