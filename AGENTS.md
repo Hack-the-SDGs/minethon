@@ -180,6 +180,16 @@ uv run pytest -m "not integration" --tb=short -q
 uv run python scripts/check_stubs.py        # TS d.ts ↔ bot.pyi drift gate
 ```
 
+Integration smoke（bridge↔mineflayer 實連路徑，JSPyBridge / bundled npm 升版前必跑）：
+
+```bash
+uv run pytest -m integration   # 需要可連線的 Minecraft 伺服器
+```
+
+預設連 `localhost:25565`（offline mode），可用 `MINETHON_IT_HOST` /
+`MINETHON_IT_PORT` / `MINETHON_IT_USERNAME` 覆寫；伺服器連不上時測試會
+skip（不會卡死）。預設的 `pytest -m "not integration"` 與 CI 不會執行它。
+
 `scripts/parse_dts.py` 是 TS 解析器的 stable public surface（目前 façade
 re-export 自 `generate_stubs.py`）；`scripts/check_stubs.py` 用它比對
 mineflayer d.ts 跟現存 `bot.pyi` 的 class member 列表，缺項會 exit 1。
