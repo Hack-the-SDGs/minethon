@@ -20,11 +20,17 @@ def block(
 
 class ActJs:
     def __init__(
-        self, *, cursor: object | None = None, block_at: object | None = None
+        self,
+        *,
+        cursor: object | None = None,
+        block_at: object | None = None,
+        dig_ms: float | None = 1000.0,
     ) -> None:
         self._cursor = cursor
         self._block_at = block_at
+        self.dig_ms = dig_ms
         self.calls: list[tuple] = []
+        self.dig_timeouts: list[float] = []
         self.controls: dict[str, bool] = {}
         # Spawned at (0, 64, 0) facing yaw 0 (south, +z) — lets dig() fall back
         # to _block_in_front when nothing is aimed at.
@@ -36,8 +42,13 @@ class ActJs:
         self.calls.append(("blockAtCursor", max_distance))
         return self._cursor
 
-    def dig(self, the_block: object) -> None:
+    def digTime(self, the_block: object) -> float | None:  # noqa: N802
+        self.calls.append(("digTime", the_block))
+        return self.dig_ms
+
+    def dig(self, the_block: object, timeout: float = 10.0) -> None:
         self.calls.append(("dig", the_block))
+        self.dig_timeouts.append(timeout)
 
     def placeBlock(self, ref: object, face_vector: object) -> None:  # noqa: N802
         self.calls.append(("placeBlock", ref, face_vector))
@@ -181,3 +192,39 @@ def test_action_before_login_raises() -> None:
 
     with pytest.raises(NotSpawnedError):
         Bot(TriggerJs(username=None)).action("put out")
+
+
+def test_dig_scales_bridge_timeout_from_dig_time() -> None:
+    # 15s of digging (deepslate bare-handed) must outlive JSPyBridge's 10s
+    # default call budget: timeout = digTime + margin.
+    fake = ActJs(cursor=block("deepslate", 1, 64, 1), dig_ms=15_000.0)
+
+    assert Bot(fake).dig() == ((1, 64, 1), "deepslate")
+    assert fake.dig_timeouts == [20.0]
+
+
+def test_dig_keeps_default_timeout_floor_for_quick_digs() -> None:
+    fake = ActJs(cursor=block("dirt", 1, 64, 1), dig_ms=300.0)
+
+    Bot(fake).dig()
+    assert fake.dig_timeouts == [10.0]
+
+
+def test_dig_refuses_unbreakable_blocks(capsys: pytest.CaptureFixture) -> None:
+    # Bare-handed obsidian is 250s — refuse with a friendly line instead of
+    # blocking for minutes and then dumping a bridge-timeout stack.
+    fake = ActJs(cursor=block("obsidian", 1, 64, 1), dig_ms=250_000.0)
+
+    assert Bot(fake).dig() is None
+    assert not fake.dig_timeouts
+    assert "太硬" in capsys.readouterr().out
+
+
+def test_dig_refuses_bedrock_infinity_as_none(capsys: pytest.CaptureFixture) -> None:
+    # Bedrock's digTime is Infinity; the bridge's JSON serialization delivers
+    # it as None — that must route to the friendly "too hard" line too.
+    fake = ActJs(cursor=block("bedrock", 1, 64, 1), dig_ms=None)
+
+    assert Bot(fake).dig() is None
+    assert not fake.dig_timeouts
+    assert "太硬" in capsys.readouterr().out

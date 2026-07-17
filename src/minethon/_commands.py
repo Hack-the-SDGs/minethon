@@ -18,6 +18,7 @@ below cites the api.md / lib section it relies on.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import threading
 import time
@@ -44,6 +45,15 @@ _NON_SOLID = frozenset(
 # Default search radius for find_block / find_blocks.
 # Ref: mineflayer/docs/api.md — bot.findBlocks(options.maxDistance) (default 16).
 _FIND_MAX_DISTANCE = 64
+# dig(): longest break we'll wait for. Anything slower (obsidian bare-handed is
+# 250s; bedrock's Infinity arrives over the bridge as None) gets a friendly
+# "too hard" line instead of a JSPyBridge call timeout mid-dig. Deepslate
+# bare-handed (~15s) fits well under.
+_MAX_DIG_SECONDS = 60.0
+# dig(): margin added on top of mineflayer's digTime estimate, and the floor so
+# short digs keep JSPyBridge's default 10s budget.
+_DIG_TIMEOUT_MARGIN_SECONDS = 5.0
+_DIG_TIMEOUT_FLOOR_SECONDS = 10.0
 
 # Movement: no "walk N blocks" primitive without pathfinder, so move_* presses a
 # control key and polls position until the horizontal distance travelled reaches
@@ -631,9 +641,10 @@ class Commands:
 
         Uses whatever the bot is aiming at; if it isn't aiming at a block (e.g.
         looking straight ahead over flat ground), falls back to the solid block
-        one step forward. Returns ``None`` when there's nothing solid to break.
-        (This renames mineflayer's ``break`` action.)
-        Ref: mineflayer/docs/api.md — bot.dig(block).
+        one step forward. Returns ``None`` when there's nothing solid to break,
+        or when the block is too hard to break in a reasonable time (prints a
+        friendly line in that case). (This renames mineflayer's ``break``
+        action.) Ref: mineflayer/docs/api.md — bot.dig(block), bot.digTime.
         """
         block = self._js.blockAtCursor(_REACH_BLOCKS)
         if block is None:
@@ -642,7 +653,28 @@ class Commands:
             return None
         p = block.position
         result = ((int(p.x), int(p.y), int(p.z)), str(block.name))
-        self._js.dig(block)  # mineflayer looks at the block itself (forceLook)
+        # Long digs (deepslate bare-handed is ~15s) outlive JSPyBridge's 10s
+        # per-call budget: the student got a raw English timeout stack and the
+        # late JS reply then poisoned the bridge IO loop. Size the call timeout
+        # from mineflayer's own estimate; refuse effectively unbreakable blocks.
+        # Unbreakable (bedrock) digTime is Infinity, which the bridge's JSON
+        # serialization delivers as None — float(None) raises, leaving the
+        # sentinel in place, so None routes to the "too hard" line too.
+        dig_ms: float | None = None
+        with contextlib.suppress(Exception):
+            dig_ms = float(self._js.digTime(block))
+        if (
+            dig_ms is None
+            or not math.isfinite(dig_ms)
+            or dig_ms > _MAX_DIG_SECONDS * 1000
+        ):
+            print(f"「{result[1]}」太硬了，挖不動。", flush=True)  # noqa: T201 — student-facing
+            return None
+        timeout = max(
+            _DIG_TIMEOUT_FLOOR_SECONDS, dig_ms / 1000 + _DIG_TIMEOUT_MARGIN_SECONDS
+        )
+        # mineflayer looks at the block itself (forceLook)
+        self._js.dig(block, timeout=timeout)
         return result
 
     @_paced
