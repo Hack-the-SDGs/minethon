@@ -131,6 +131,18 @@ def _on_login_error(err: Any) -> None:
     _stop_with_message(message, code=1)
 
 
+def _on_kicked(reason: Any = None, *_a: Any) -> None:
+    """Print the server's kick reason so it isn't swallowed.
+
+    Runs before the `end` handler's disconnect line. Ref: mineflayer
+    index.d.ts — kicked: (reason: string, loggedIn: boolean).
+    """
+    text = ""
+    with contextlib.suppress(Exception):
+        text = str(reason)
+    print(f"\n機器人被伺服器踢出：{text}", flush=True)  # noqa: T201, RUF001 — student-facing; zh-TW colon
+
+
 def _install_quiet_interrupt() -> None:
     """Replace the traceback for an uncaught Ctrl-C with a friendly line.
 
@@ -541,6 +553,12 @@ def create_bot(
     # which would otherwise hang forever since 'spawn' never fires.
     Once(js_bot, BotEvent.ERROR.value)(
         _normalize_handler(_on_login_error, emitter=js_bot)
+    )
+    # Surface the kick reason. mineflayer's logErrors=false (above) plus our
+    # own listeners would otherwise swallow it entirely — a version mismatch
+    # or whitelist kick showed nothing but the generic disconnect line.
+    Once(js_bot, BotEvent.KICKED.value)(
+        _normalize_handler(_on_kicked, emitter=js_bot, event_name=BotEvent.KICKED.value)
     )
     # End the script automatically when the server drops the bot, wherever the
     # main thread happens to be (mid-script or in the keep-alive below). `Once`
