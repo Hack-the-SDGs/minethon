@@ -148,28 +148,28 @@ class TriggerJs(ActJs):
 
 
 def test_action_sends_username_prefixed_trigger() -> None:
-    fake = TriggerJs(username="G1_labfire")
+    fake = TriggerJs(username="G1_labfire_1")
 
     assert Bot(fake).action("put out") is None
-    assert fake.messages == ["/trigger g1_labfire_put_out"]
+    assert fake.messages == ["/trigger g1_labfire_1_put_out"]
 
 
 def test_action_normalises_case_hyphens_and_spacing() -> None:
-    fake = TriggerJs(username="G1_labfire")
+    fake = TriggerJs(username="G1_labfire_1")
 
     Bot(fake).action("  Put-Out ")
-    assert fake.messages == ["/trigger g1_labfire_put_out"]
+    assert fake.messages == ["/trigger g1_labfire_1_put_out"]
 
 
 def test_action_attaches_optional_value_payload() -> None:
-    fake = TriggerJs(username="G1_labfire")
+    fake = TriggerJs(username="G1_labfire_1")
 
     Bot(fake).action("put out", 2)
-    assert fake.messages == ["/trigger g1_labfire_put_out set 2"]
+    assert fake.messages == ["/trigger g1_labfire_1_put_out set 2"]
 
 
 def test_action_rejects_bad_characters() -> None:
-    fake = TriggerJs(username="G1_labfire")
+    fake = TriggerJs(username="G1_labfire_1")
 
     with pytest.raises(ValueError, match="動作名稱"):
         Bot(fake).action("放水")

@@ -2973,8 +2973,8 @@ class Bot:
         """請伺服器執行具名任務動作 `name`（例如 `"put out"` 滅火）
 
         實際送出 vanilla `/trigger <帳號>_<動作>`（全部小寫、空格與連字號轉底線），
-        例如帳號 `G1_labfire` 呼叫 `action("put out")` 會送
-        `/trigger g1_labfire_put_out`。動作是否生效由伺服器判斷
+        例如帳號 `G1_labfire_1` 呼叫 `action("put out")` 會送
+        `/trigger g1_labfire_1_put_out`。動作是否生效由伺服器判斷
         （執行者身分、任務是否開始、前方是否有目標…），客戶端不做任何事、
         也不會動到方塊；名稱含不合法字元丟出 `ValueError`。
 

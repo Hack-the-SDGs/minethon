@@ -685,8 +685,8 @@ class Commands:
         ``/trigger <username>_<action>`` (username lowercased; action
         lowercased with spaces/hyphens collapsed to underscores) and does
         **nothing** client-side — no block edits, no item use, so a lost
-        connection mid-action can never damage the map. Bot ``G1_labfire``
-        calling ``action("put out")`` fires ``/trigger g1_labfire_put_out``.
+        connection mid-action can never damage the map. Bot ``G1_labfire_1``
+        calling ``action("put out")`` fires ``/trigger g1_labfire_1_put_out``.
         ``value``, when given, is attached as the trigger's integer payload
         (``set <value>``) for quests that want a parameter. The competition
         datapack validates the request (right bot, quest active, target in
