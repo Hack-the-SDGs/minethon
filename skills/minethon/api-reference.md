@@ -89,11 +89,14 @@ walking into a wall can't hang the script.
 
 ## Actions (operate on the block/face you're aiming at)
 
-- `dig() -> ((x,y,z), name) | None` — break the aimed block; returns what was
-  broken, or `None` if nothing is in reach. (No argument — it's the renamed
-  "break" action.)
+- `dig() -> ((x,y,z), name) | None` — break the aimed block; if not aiming at
+  one, falls back to the solid block one step ahead. Returns what was broken,
+  `None` when there is nothing solid to break — or when the block is too hard
+  to break in reasonable time (prints a friendly line). (No argument — it's
+  the renamed "break" action.)
 - `place() -> ((x,y,z), name) | None` — place the held block against the aimed
-  face; returns the new block's position+name, or `None`.
+  face; returns the new block's position+name, or `None` when nothing is in
+  reach or the hand is empty (`hold(...)` something first).
 - `use() -> bool` — right-click: interact with the aimed block (door, button,
   lever…), or use the held item if not aiming at a block.
 - `action(name, value=None) -> None` — ask the **server** to perform a named

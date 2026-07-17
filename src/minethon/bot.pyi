@@ -2954,13 +2954,15 @@ class Bot:
     def dig(self) -> tuple[tuple[int, int, int], str] | None:
         """挖掉準心正對著的方塊，回傳被挖方塊的 `((x, y, z), 名稱)`
 
-        沒對到任何方塊時回傳 `None`。（這是把原本的 break 動作改名為 dig。）
+        沒瞄準任何方塊時，會改挖「正前方一格」的固體方塊；兩者都沒有才回傳
+        `None`。太硬挖不完的方塊（例如徒手挖黑曜石）不會挖，印一行提示後回傳
+        `None`。（這是把原本的 break 動作改名為 dig。）
         """
 
     def place(self) -> tuple[tuple[int, int, int], str] | None:
         """在準心對著的面上放一個手上的方塊，回傳新方塊的 `((x, y, z), 名稱)`
 
-        沒對到任何方塊時回傳 `None`。
+        沒對到任何方塊、或手上是空的（先用 `hold(...)` 拿東西）時回傳 `None`。
         """
 
     def use(self) -> bool:

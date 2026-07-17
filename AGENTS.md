@@ -121,7 +121,7 @@ bot.bind(Greeter())
   - `mineflayer-pathfinder`
 - 對 bundled package，可省略版本
 - 對其他 npm 套件，`bot.load_plugin(...)` / `bot.require(...)` 必須顯式版本
-- Python 端的 `javascript` (JSPyBridge) 套件在 `pyproject.toml` 用 minor 級 ceiling 鎖（目前 `>=1!1.2.6,<1!1.3`）。理由：minethon 依賴 `On`/`Once` 的 emitter 注入與 Promise `await`-before-return 行為，這兩件事是實作細節不是正式契約；升 minor 前要先跑 `./scripts/format.sh` 與 integration smoke。
+- Python 端的 `javascript` (JSPyBridge) 套件在 `pyproject.toml` 用 minor 級 ceiling 鎖（目前 `>=1!1.2.6,<1!1.3`）。理由：minethon 依賴 `On`/`Once` 在 pinned runtime **不注入 emitter**（`needsNodePatches` 只在 Node 14/15 成立）與 Promise `await`-before-return 行為，這兩件事是實作細節不是正式契約；升 minor 前要先跑 `./scripts/format.sh` 與 integration smoke。
 
 理由：
 
@@ -140,7 +140,8 @@ bot.bind(Greeter())
 
 - 所有 event handler 跑在 JSPyBridge callback thread
 - handler 內不要 blocking
-- bridge 層必須處理 JSPyBridge 可選的 emitter 注入，以及 runtime 少於 d.ts 宣告參數的情況
+- pinned runtime（Node 22+ / javascript 1.2.x）**不會**注入 emitter（`needsNodePatches` 只在 Node 14/15 成立）；`_normalize_handler` 的 emitter 偵測僅靠 `_REAL_ARGC` 已知表與 emitter identity，多餘參數一律**從尾端截斷**（短簽名 handler 拿到的是最前面的參數）
+- handler 內未捕捉的例外由 `_normalize_handler` 攔截：印友善訊息＋traceback 後略過該次事件，不回流 JS（避免 unhandled rejection 殺死 node 進程）
 
 ## 錯誤處理
 
@@ -159,6 +160,18 @@ bot.bind(Greeter())
 「找不到此任務。請檢查任務名稱是否正確，或是任務是否開放」再 clean exit（`_stop_with_message`
 → 關 node bridge + `os._exit`）；同時也解掉會永久卡住的 `wait_spawn`（登入失敗 `spawn`
 永不觸發）。註冊任一 `error` listener 也讓 mineflayer 的 EventEmitter 不再 throw 原始錯誤。
+
+其他失敗路徑的規則：
+
+- exit code：正常結束（quit / 伺服器關閉 session）為 0；失敗（登入錯誤、bridge 逾時/斷線）
+  為 1，讓 shell / CI 能分辨。`_stop_with_message(code=...)` 統一處理並先 flush 輸出。
+- `create_bot` 另註冊 `Once(bot, 'kicked')` 印出被踢原因（版本不合、白名單、任務踢線），
+  否則 `logErrors=False` 下原因會被整條吞掉。
+- JSPyBridge 的 per-call 逾時（`Call to 'X' timed out.`）由 excepthook 轉成友善訊息後
+  結束（逾時後的遲到回應會毒化 bridge IO loop，不硬撐）。
+- `bind()` 對「拼錯的 `on_xxx`（不對應任何事件）」印提醒，不再靜默忽略。
+- `bot.pathfinder` 未載入時（真實 bridge 回 `None`）拋 `PluginNotInstalledError`
+   並附下一步指引。
 
 ## 檢查指令
 
