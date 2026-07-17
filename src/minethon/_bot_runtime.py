@@ -238,6 +238,11 @@ _PLUGIN_EXPORT_KEY: dict[str, str] = {
     "mineflayer-pathfinder": "pathfinder",
 }
 
+# User-facing hint when bot.pathfinder is touched before the plugin loads.
+_PATHFINDER_MISSING = (
+    "pathfinder 尚未載入。先呼叫 bot.load_plugin('mineflayer-pathfinder')。"
+)
+
 
 class Bot(Commands):
     """Pythonic façade over a mineflayer Bot proxy.
@@ -274,15 +279,19 @@ class Bot(Commands):
         if name.startswith("_"):
             raise AttributeError(name)
         try:
-            return getattr(self._js, name)
+            value = getattr(self._js, name)
         except AttributeError as exc:
             if name == "pathfinder":
-                msg = (
-                    "pathfinder 尚未載入。先呼叫 "
-                    "bot.load_plugin('mineflayer-pathfinder')。"
-                )
-                raise PluginNotInstalledError(msg) from exc
+                raise PluginNotInstalledError(_PATHFINDER_MISSING) from exc
             raise
+        # The real JSPyBridge proxy returns None for missing JS attributes
+        # instead of raising AttributeError (bridge.js answers 'void' for
+        # undefined), so the except-branch above never fires against a live
+        # bridge — check the value too, or students get a bare
+        # "'NoneType' object has no attribute 'goto'" instead of this hint.
+        if value is None and name == "pathfinder":
+            raise PluginNotInstalledError(_PATHFINDER_MISSING)
+        return value
 
     def load_plugin(
         self,
