@@ -20,6 +20,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any
@@ -171,23 +172,27 @@ def _normalize_handler(
 
     This wrapper:
 
-    * drops the leading emitter arg when JSPyBridge injects it. If
-      ``event_name`` is a known key in ``_REAL_ARGC`` and the observed arg
-      count matches it exactly (``len(args) == real_argc + 1``), that fact —
-      checked by hand against mineflayer's source, not a guess — decides it
-      outright. Otherwise (unknown event, or a stale/mismatched table entry)
-      falls back to proxy-identity (``args[0] is emitter``) or arity excess
-      (``len(args) > slots``), either of which can coincidentally fail when
-      the injected-emitter arg count happens to equal the handler's declared
-      slots (see ``chat``/``whisper``/``resourcePack``) — the fallback keeps
-      today's behavior as a safety net rather than silently doing nothing if
-      ``_REAL_ARGC`` ever drifts from mineflayer's actual arity.
+    * drops the leading emitter arg when JSPyBridge injects it. The pinned
+      runtime (Node 22+, javascript 1.2.x) never injects — `needsNodePatches`
+      only returns true on Node 14/15 — so detection is deliberately narrow:
+      a known ``_REAL_ARGC`` entry whose observed count matches exactly
+      (``len(args) == real_argc + 1``), or proxy identity
+      (``args[0] is emitter``). Arity excess is **not** treated as injection:
+      a short handler (``def on_chat(self, username, message)``) legitimately
+      receives more real args than it declares, and stripping the first one
+      would hand it the wrong values — excess args are truncated from the
+      end instead.
     * pads missing trailing positional args with ``None``
-    * truncates any excess positional args JS emits
+    * truncates any excess positional args JS emits (from the end)
+    * isolates handler exceptions: a bug in a student handler prints a
+      friendly message plus the traceback and skips that one event, instead
+      of flowing back into JS as an unhandled rejection that kills the node
+      process (Node ≥15 terminates on unhandled rejections) and leaves the
+      script hanging forever.
 
     Ref: mineflayer/lib/plugins/chat.js:85 — chat event emit arity
     Ref: mineflayer/lib/plugins/resource_pack.js — resourcePack emit arity
-    Ref: javascript/__init__.py:78 — optional emitter injection in `On` / `Once`
+    Ref: javascript/js/bridge.js — needsNodePatches() (emitter injection gate)
     """
     params = list(inspect.signature(func).parameters.values())
     accepts_varargs = any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params)
@@ -202,19 +207,26 @@ def _normalize_handler(
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if emitter is not None and args:
-            identity_match = args[0] is emitter
-            arity_excess = not accepts_varargs and len(args) > slots
             if real_argc is not None and len(args) == real_argc + 1:
                 should_strip = True
             else:
-                should_strip = identity_match or arity_excess
+                should_strip = args[0] is emitter
             if should_strip:
                 args = args[1:]
-        if accepts_varargs:
-            return func(*args, **kwargs)
-        if len(args) < slots:
-            args = (*args, *([None] * (slots - len(args))))
-        return func(*args[:slots], **kwargs)
+        try:
+            if accepts_varargs:
+                return func(*args, **kwargs)
+            if len(args) < slots:
+                args = (*args, *([None] * (slots - len(args))))
+            return func(*args[:slots], **kwargs)
+        except Exception:  # noqa: BLE001 — must not reach JS as unhandled rejection
+            label = event_name or getattr(func, "__name__", "handler")
+            print(  # noqa: T201 — student-facing, intentional
+                f"\n事件處理發生錯誤（{label}），已略過這一次事件：\n"  # noqa: RUF001 — zh-TW fullwidth colon
+                f"{traceback.format_exc()}",
+                flush=True,
+            )
+            return None
 
     return wrapper
 

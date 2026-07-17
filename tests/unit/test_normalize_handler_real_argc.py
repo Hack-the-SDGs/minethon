@@ -105,13 +105,12 @@ def test_normalize_handler_falls_back_to_heuristic_for_unknown_events() -> None:
     assert calls == [("alice", None)]
 
 
-def test_normalize_handler_falls_back_to_heuristic_when_real_argc_table_is_stale() -> (
-    None
-):
-    """If `_REAL_ARGC["chat"]` ever drifts from mineflayer's actual arity so
-    the observed raw arg count no longer matches `real_argc + 1` exactly,
-    the table path must not just give up — it should fall back to the old
-    identity/arity heuristic instead of silently skipping the strip."""
+def test_normalize_handler_keeps_first_real_arg_for_short_handlers() -> None:
+    """The pinned runtime (Node 22+) never injects the emitter, so a short
+    handler receiving more real args than it declares must be truncated from
+    the END. The old arity-excess heuristic treated `4 args > 2 slots` as an
+    injected emitter and stripped `username`, handing the handler
+    `(message, translate)` — the C3-01 regression this test pins."""
     calls: list[tuple[object | None, object | None]] = []
     emitter = object()
 
@@ -119,10 +118,24 @@ def test_normalize_handler_falls_back_to_heuristic_when_real_argc_table_is_stale
         calls.append((username, message))
 
     wrapped = _normalize_handler(handler, emitter=emitter, event_name="chat")
-    # _REAL_ARGC["chat"] expects raw args == 4 + 1 == 5; send only 3 to
-    # simulate a drifted/incorrect table entry (e.g. a future mineflayer
-    # version changing chat's real arg count).
-    fresh_proxy = object()
-    wrapped(fresh_proxy, "alice", "hi")
+    # chat's real 4 args, no emitter injected — exactly what Node 22 sends.
+    wrapped("alice", "hi", None, None)
+
+    assert calls == [("alice", "hi")]
+
+
+def test_normalize_handler_identity_still_strips_when_table_is_stale() -> None:
+    """If `_REAL_ARGC["chat"]` ever drifts so the observed count no longer
+    matches `real_argc + 1`, proxy identity remains the only safe fallback —
+    it can never misfire on a real first argument."""
+    calls: list[tuple[object | None, object | None]] = []
+    emitter = object()
+
+    def handler(username, message):
+        calls.append((username, message))
+
+    wrapped = _normalize_handler(handler, emitter=emitter, event_name="chat")
+    # 3 raw args (≠ 4 + 1): the table path skips; args[0] IS the emitter.
+    wrapped(emitter, "alice", "hi")
 
     assert calls == [("alice", "hi")]
