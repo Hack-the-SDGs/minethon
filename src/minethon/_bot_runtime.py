@@ -63,23 +63,30 @@ _DEFAULT_INSTRUCTION_SLEEP = 0.2
 _INTERRUPT = {"seen": False}
 
 
-def _stop_with_message(message: str) -> None:
-    """Print ``message`` once and hard-stop the program.
+def _stop_with_message(message: str, *, code: int = 0) -> None:
+    """Print ``message`` once and hard-stop the program with exit ``code``.
 
     Runs on a bridge callback thread (a disconnect, or a login `error`). The
     student's main thread may be parked in run_forever, blocked in wait_spawn
     that will never fire, or deep inside a bridge call on a dead connection — an
     async interrupt can't reliably break those, so we terminate the node bridge
     and exit the process outright. Abrupt, but it guarantees the script stops.
+
+    ``code`` is 0 for a normal end (quit / server closed the session) and 1 for
+    failures (login error, lost bridge), so shells and CI can tell them apart.
+    os._exit skips atexit and buffered writers by design — flush both streams
+    first so the student's own prints aren't lost.
     """
     if _INTERRUPT["seen"]:
         return
     _INTERRUPT["seen"] = True
     print(message, flush=True)  # noqa: T201 — student-facing, intentional
+    with contextlib.suppress(Exception):
+        sys.stderr.flush()
     # Best-effort: terminate the node subprocess so it isn't orphaned.
     with contextlib.suppress(Exception):
         connection.stop()
-    os._exit(0)  # only reliable way out of a blocked bridge call
+    os._exit(code)  # only reliable way out of a blocked bridge call
 
 
 def _looks_like_auth_error(text: str) -> bool:
@@ -111,7 +118,7 @@ def _on_login_error(err: Any) -> None:
     message = (
         _QUEST_NOT_FOUND if _looks_like_auth_error(text) else f"\n連線發生錯誤：{text}"  # noqa: RUF001 — zh-TW fullwidth colon
     )
-    _stop_with_message(message)
+    _stop_with_message(message, code=1)
 
 
 def _install_quiet_interrupt() -> None:
@@ -132,7 +139,7 @@ def _install_quiet_interrupt() -> None:
             # Bridge went silent mid-command (usually a disconnect). Show a clean
             # line and hard-exit — os._exit also skips the atexit run_forever,
             # which would otherwise time out again on the dead bridge.
-            _stop_with_message(_CONNECTION_LOST)
+            _stop_with_message(_CONNECTION_LOST, code=1)
             return
         previous(exc_type, exc, tb)
 
