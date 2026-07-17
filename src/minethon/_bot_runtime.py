@@ -384,6 +384,28 @@ class Bot(Commands):
             On(js_bot, event.value)(
                 _normalize_handler(handler, emitter=js_bot, event_name=event.value)
             )
+        # A typo'd handler name (`on_chatt`, `on_Spawn`) silently never fires —
+        # the most common beginner mistake with class-based handlers. Walk the
+        # subclass's own on_* methods and call out any that match no event.
+        known = {f"on_{attr}" for attr in EVENT_ATTRIBUTE_MAP}
+        unknown: list[str] = []
+        for klass in type(handlers).__mro__:
+            if klass is EventAdaptor:
+                break
+            for name, member in vars(klass).items():
+                if (
+                    name.startswith("on_")
+                    and callable(member)
+                    and name not in known
+                    and name not in unknown
+                ):
+                    unknown.append(name)
+        for name in sorted(unknown):
+            print(  # noqa: T201 — student-facing, intentional
+                f"提醒：`{name}` 不是任何 mineflayer 事件，永遠不會被觸發。"  # noqa: RUF001 — zh-TW fullwidth colon
+                "請檢查拼字（例如 on_chat、on_spawn；完整清單見 EventAdaptor 的方法）。",  # noqa: RUF001 — zh-TW fullwidth semicolon
+                flush=True,
+            )
         return handlers
 
     def run_forever(self) -> None:
