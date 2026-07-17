@@ -48,12 +48,22 @@ _QUEST_NOT_FOUND = "\n找不到此任務。請檢查任務名稱是否正確，�
 # was disconnected (e.g. killed and kicked) mid-command, leaving JSPyBridge
 # waiting on a dead connection. Rendered instead of the raw JSPyBridge stack.
 _CONNECTION_LOST = "\n與伺服器的連線中斷了，程式結束。"
+# Shown when a single bridge method call hits JSPyBridge's per-call timeout
+# ("Call to 'X' timed out."). Distinct from _CONNECTION_LOST: the connection
+# may be fine and the action simply took too long, so say both possibilities.
+_CALL_TIMEOUT = (
+    "\n指令等不到伺服器回應（逾時）。可能是連線中斷，或這個動作耗時過長，程式結束。"
+)
+# Marker for JSPyBridge's per-method-call timeout. Ref: javascript/proxy.py —
+# "Call to '{attr}' timed out. Increase the timeout by setting ...".
+_CALL_TIMEOUT_MARKER = "timed out. increase the timeout"
 # Substrings JSPyBridge puts in the bare Exceptions it raises when the node
 # bridge stops responding. Ref: javascript/proxy.py + connection.py.
 _BRIDGE_FAILURE_MARKERS = (
     "timed out accessing",
     "execution timed out",
     "process has crashed",
+    _CALL_TIMEOUT_MARKER,
 )
 # Default per-instruction pause (seconds) so a straight-line script's steps are
 # individually visible. Tunable via create_bot(instruction_sleep=...).
@@ -134,6 +144,13 @@ def _install_quiet_interrupt() -> None:
             if not _INTERRUPT["seen"]:  # real Ctrl-C; disconnect already printed
                 _INTERRUPT["seen"] = True
                 print(_GOODBYE)  # noqa: T201 — student-facing, intentional
+            return
+        if _CALL_TIMEOUT_MARKER in str(exc).lower():
+            # A single method call timed out — connection may be fine, the
+            # action just outlived the bridge's per-call budget. The late JS
+            # reply can still poison JSPyBridge's IO loop, so exit cleanly
+            # rather than limp on toward a cryptic hang.
+            _stop_with_message(_CALL_TIMEOUT, code=1)
             return
         if _is_bridge_failure(exc):
             # Bridge went silent mid-command (usually a disconnect). Show a clean
