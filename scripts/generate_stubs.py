@@ -2512,7 +2512,8 @@ def main() -> None:
     out.append("@overload")
     out.append(
         "def create_bot(account: str, /, *, instruction_sleep: float = ..., "
-        "bypass_instruction_sleep: bool = ...) -> Bot: ..."
+        "bypass_instruction_sleep: bool = ..., "
+        "**options: Unpack[CreateBotOptions]) -> Bot: ..."
     )
     out.append("@overload")
     out.append(

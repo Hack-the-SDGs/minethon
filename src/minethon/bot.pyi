@@ -3006,6 +3006,7 @@ def create_bot(
     *,
     instruction_sleep: float = ...,
     bypass_instruction_sleep: bool = ...,
+    **options: Unpack[CreateBotOptions],
 ) -> Bot:
     """建立並啟動一個 mineflayer 機器人
 
