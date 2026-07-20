@@ -2971,17 +2971,6 @@ class Bot:
         永遠回傳 `True`。
         """
 
-    def use_player(self, username: str) -> bool:
-        """面向指定玩家實體的中心並互動
-
-        會使用玩家當下的位置與實體高度，所以不需要自行計算 yaw、pitch 或堆疊層高。
-        成功送出互動時回傳 `True`；若玩家不在線、不同世界，或不在機器人的已載入
-        實體範圍內，則丟出 `PlayerNotFoundError`。實際互動距離仍由伺服器判定。
-
-        Args:
-            username: 要互動的玩家名稱
-        """
-
     def action(self, name: str, value: int | None = ...) -> None:
         """請伺服器執行具名任務動作 `name`（例如 `"put out"` 滅火）
 

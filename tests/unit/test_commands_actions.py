@@ -124,62 +124,6 @@ def test_use_activates_held_item_without_target() -> None:
     assert ("activateItem",) in fake.calls
 
 
-class PlayerUseJs(ActJs):
-    def __init__(self, players: dict[str, object], *, spawned: bool = True) -> None:
-        super().__init__()
-        self.players = players
-        if not spawned:
-            self.entity = None
-
-    def lookAt(self, point: object, force: bool) -> None:  # noqa: N802
-        self.calls.append(("lookAt", point, force))
-
-    def activateEntity(self, entity: object) -> None:  # noqa: N802
-        self.calls.append(("activateEntity", entity))
-
-
-def player_entity(
-    *, x: float = 2.0, y: float = 70.0, z: float = 3.0, height: float = 1.8
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        position=SimpleNamespace(x=x, y=y, z=z),
-        height=height,
-        isValid=True,
-    )
-
-
-def test_use_player_aims_at_live_center_and_activates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
-    target = player_entity(y=76.0, height=2.0)
-    fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
-
-    assert Bot(fake).use_player("Alice") is True
-    assert ("lookAt", (2.0, 77.0, 3.0), True) in fake.calls
-    assert ("activateEntity", target) in fake.calls
-
-
-@pytest.mark.parametrize(
-    "players",
-    [{}, {"Alice": SimpleNamespace(entity=None)}],
-)
-def test_use_player_raises_when_target_is_not_loaded(
-    players: dict[str, object],
-) -> None:
-    from minethon.errors import PlayerNotFoundError
-
-    with pytest.raises(PlayerNotFoundError, match="Alice"):
-        Bot(PlayerUseJs(players)).use_player("Alice")
-
-
-def test_use_player_before_spawn_raises() -> None:
-    from minethon.errors import NotSpawnedError
-
-    with pytest.raises(NotSpawnedError):
-        Bot(PlayerUseJs({}, spawned=False)).use_player("Alice")
-
-
 def test_sneak_toggles_control_and_returns_state() -> None:
     fake = ActJs()
 
