@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 from javascript import Once
 
 from minethon._bridge import get_vec3
-from minethon.errors import NotSpawnedError, PlayerNotFoundError
+from minethon.errors import NotSpawnedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -710,41 +710,6 @@ class Commands:
             self._js.activateBlock(block)
         else:
             self._js.activateItem()
-        return True
-
-    @_paced
-    def use_player(self, username: str) -> bool:
-        """Right-click the named player's current entity.
-
-        Looks at the center of the player's live bounding box immediately
-        before sending the entity-interaction packet, so callers never need to
-        calculate a yaw/pitch for players at different heights. Raises
-        :class:`PlayerNotFoundError` when the player is offline, in another
-        world, or outside the bot's loaded entity range.
-
-        Ref: mineflayer/docs/api.md — bot.players, bot.lookAt,
-        bot.activateEntity.
-        """
-        self._entity()
-        try:
-            player = self._js.players[username]
-        except IndexError, KeyError, TypeError:
-            player = None
-        target = getattr(player, "entity", None)
-        if target is None or not bool(getattr(target, "isValid", True)):
-            msg = (
-                f"找不到玩家 {username!r}。"
-                "請確認對方在線、與機器人在同一世界，且位於已載入範圍內。"
-            )
-            raise PlayerNotFoundError(msg)
-
-        position = target.position
-        center_y = float(position.y) + float(getattr(target, "height", 1.8)) / 2
-        self._js.lookAt(
-            _make_vec3(float(position.x), center_y, float(position.z)),
-            True,
-        )
-        self._js.activateEntity(target)
         return True
 
     def sneak(self, on: bool) -> bool:
