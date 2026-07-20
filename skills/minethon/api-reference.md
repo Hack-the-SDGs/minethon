@@ -99,6 +99,12 @@ walking into a wall can't hang the script.
   reach or the hand is empty (`hold(...)` something first).
 - `use() -> bool` — right-click: interact with the aimed block (door, button,
   lever…), or use the held item if not aiming at a block.
+- `use_player(username) -> bool` — look at the named player's current entity
+  center and right-click it. This reads the live position immediately before
+  interacting, so callers do not calculate yaw/pitch for players at different
+  heights. Returns `True`; raises `PlayerNotFoundError` when the player is
+  offline, in another world, or outside the bot's loaded entity range. The
+  server still enforces its entity-interaction distance.
 - `action(name, value=None) -> None` — ask the **server** to perform a named
   quest action. Sends the vanilla trigger `/trigger <username>_<action>`
   (all lowercased; spaces/hyphens → underscores), with `value` as an optional
