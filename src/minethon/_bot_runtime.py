@@ -186,6 +186,8 @@ def _install_quiet_interrupt() -> None:
 #   many", not "which means what", so that part is out of scope here).
 _REAL_ARGC: dict[str, int] = {
     "chat": 4,
+    "error": 1,
+    "kicked": 2,
     "whisper": 4,
     "resourcePack": 2,
 }
@@ -552,7 +554,9 @@ def create_bot(
     # instead of the raw yggdrasil stack; also unblocks the wait_spawn below,
     # which would otherwise hang forever since 'spawn' never fires.
     Once(js_bot, BotEvent.ERROR.value)(
-        _normalize_handler(_on_login_error, emitter=js_bot)
+        _normalize_handler(
+            _on_login_error, emitter=js_bot, event_name=BotEvent.ERROR.value
+        )
     )
     # Surface the kick reason. mineflayer's logErrors=false (above) plus our
     # own listeners would otherwise swallow it entirely — a version mismatch
