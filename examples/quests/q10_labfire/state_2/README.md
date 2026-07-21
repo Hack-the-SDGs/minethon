@@ -2,6 +2,9 @@
 
 已知迷宮 DFS。
 
+管理員須先用 `function quests:q10_labfire/start {group:N}` 啟動同組任務；
+`create_bot("g_labfire_2")` 會以本機組別登入並進入對應的 `world-g<N>`。
+
 ```bash
 uv run python examples/quests/q10_labfire/state_2/main.py
 ```
