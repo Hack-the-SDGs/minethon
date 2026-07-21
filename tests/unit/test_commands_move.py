@@ -210,6 +210,20 @@ def test_multiple_server_grid_steps_can_outlive_one_stall_window(
     assert clock.now >= 13.5
 
 
+def test_final_progress_sample_is_read_at_stall_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(cmd.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cmd.time, "sleep", lambda _seconds: clock.sleep(1.0))
+    fake = GridLockJs(clock, lock_seconds=cmd._WALK_STALL_TIMEOUT)
+
+    pos = Bot(fake).move_forward(1.0)
+
+    assert pos == (0.0, 64.0, -1.0)
+    assert clock.now == cmd._WALK_STALL_TIMEOUT
+
+
 def test_move_zero_blocks_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     _frozen_clock(monkeypatch)
     fake = MoveJs(step=0.5)

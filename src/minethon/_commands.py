@@ -455,16 +455,19 @@ class Commands:
         last_progress_at = time.monotonic()
         self._js.setControlState(control, True)
         try:
-            while time.monotonic() - last_progress_at < _WALK_STALL_TIMEOUT:
+            while True:
                 pos = self._entity().position
                 progress = (float(pos.x) - sx) * direction_x + (
                     float(pos.z) - sz
                 ) * direction_z
                 if progress >= blocks:
                     break
+                now = time.monotonic()
                 if progress >= best_progress + _WALK_PROGRESS_EPSILON:
                     best_progress = progress
-                    last_progress_at = time.monotonic()
+                    last_progress_at = now
+                elif now - last_progress_at >= _WALK_STALL_TIMEOUT:
+                    break
                 time.sleep(_POLL_SECONDS)
         finally:
             self._js.setControlState(control, False)
