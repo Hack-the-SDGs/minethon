@@ -56,13 +56,12 @@ _DIG_TIMEOUT_MARGIN_SECONDS = 5.0
 _DIG_TIMEOUT_FLOOR_SECONDS = 10.0
 
 # Movement: no "walk N blocks" primitive without pathfinder, so move_* presses a
-# control key and polls position until the horizontal distance travelled reaches
-# the target (or a safety timeout fires). 4.317 b/s is vanilla walking speed.
+# control key and polls position until the requested directional progress is
+# reached (or the position stops making progress).
 # Ref: mineflayer/docs/api.md — bot.setControlState; Minecraft physics.
-_WALK_SPEED_BPS = 4.317
 _POLL_SECONDS = 0.05  # ~one physics tick
-_WALK_TIMEOUT_FACTOR = 3.0  # allow 3x the ideal travel time before giving up
-_WALK_TIMEOUT_FLOOR = 1.0  # always allow at least 1s (short hops)
+_WALK_STALL_TIMEOUT = 5.0  # tolerate eight-tick grid locks even near 2 TPS
+_WALK_PROGRESS_EPSILON = 0.01  # ignore packet jitter when refreshing the stall timer
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
@@ -110,11 +109,16 @@ def _make_vec3(x: float, y: float, z: float) -> Any:
     return get_vec3()(x, y, z)
 
 
-def _walk_timeout(blocks: float) -> float:
-    """Safety deadline (seconds) for walking ``blocks`` so a stuck bot stops."""
-    return max(
-        _WALK_TIMEOUT_FLOOR, abs(blocks) / _WALK_SPEED_BPS * _WALK_TIMEOUT_FACTOR
-    )
+def _control_vector(control: str, yaw: float) -> tuple[float, float]:
+    """Horizontal unit vector for a movement control at ``yaw`` radians."""
+    forward_x, forward_z = -math.sin(yaw), -math.cos(yaw)
+    vectors = {
+        "forward": (forward_x, forward_z),
+        "back": (-forward_x, -forward_z),
+        "left": (forward_z, -forward_x),
+        "right": (-forward_z, forward_x),
+    }
+    return vectors[control]
 
 
 def _attribute_value(prop: Any) -> float:
@@ -434,20 +438,35 @@ class Commands:
     def _walk(self, control: str, blocks: float) -> tuple[float, float, float]:
         """Hold ``control`` until the bot travels ``blocks`` horizontally.
 
-        Movement is relative to the bot's current facing. Stops early on a
-        safety timeout so walking into a wall can't hang the script.
+        Movement is relative to the bot's facing when the call starts. Progress
+        is measured along that intended direction, so sideways collision drift
+        does not satisfy the requested distance. The timeout is stall-based:
+        every meaningful forward gain refreshes it, allowing long walks and
+        server-authoritative grid locks while still stopping at a wall.
         Ref: mineflayer/docs/api.md — bot.setControlState(control, state).
         """
         if blocks <= 0:
             return self.get_pos()
-        start = self._entity().position
+        entity = self._entity()
+        start = entity.position
         sx, sz = float(start.x), float(start.z)
+        direction_x, direction_z = _control_vector(control, float(entity.yaw))
+        best_progress = 0.0
+        last_progress_at = time.monotonic()
         self._js.setControlState(control, True)
-        deadline = time.monotonic() + _walk_timeout(blocks)
         try:
-            while time.monotonic() < deadline:
+            while True:
                 pos = self._entity().position
-                if math.hypot(float(pos.x) - sx, float(pos.z) - sz) >= blocks:
+                progress = (float(pos.x) - sx) * direction_x + (
+                    float(pos.z) - sz
+                ) * direction_z
+                if progress >= blocks:
+                    break
+                now = time.monotonic()
+                if progress >= best_progress + _WALK_PROGRESS_EPSILON:
+                    best_progress = progress
+                    last_progress_at = now
+                elif now - last_progress_at >= _WALK_STALL_TIMEOUT:
                     break
                 time.sleep(_POLL_SECONDS)
         finally:
