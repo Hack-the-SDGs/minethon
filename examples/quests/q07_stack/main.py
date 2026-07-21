@@ -1,6 +1,7 @@
 """q07_stack 本機實機測試解答（刻意不加入 Git）。
 
-先由管理員開啟 q07，真人站在底座當第 1 層，再依序開 9 個終端執行:
+先由管理員 enable q07。真人進入自己的 world-g<N>，右鍵塔心的「開始任務」全像，
+確認金色光柱出現後站在底座當第 1 層，再依序開 9 個終端執行:
 
     # 第 2 層: 疊在真人 TestPlayer 上
     uv run examples/quests/q07_stack/main.py 1 TestPlayer
