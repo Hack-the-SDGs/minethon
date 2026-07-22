@@ -23,7 +23,6 @@ from __future__ import annotations
 import ast
 import inspect
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -2394,9 +2393,10 @@ def normalize_pyi_method_bodies(text: str) -> str:
 
 
 def format_generated_files(*paths: Path) -> None:
-    ruff = shutil.which("ruff")
-    if ruff:
-        subprocess.run([ruff, "format", *(str(path) for path in paths)], check=False)
+    subprocess.run(
+        [sys.executable, "-m", "ruff", "format", *(str(path) for path in paths)],
+        check=True,
+    )
 
 
 def main() -> None:
