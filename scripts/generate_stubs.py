@@ -23,6 +23,7 @@ from __future__ import annotations
 import ast
 import inspect
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -1771,7 +1772,7 @@ def render_event_enum(
 # mineflayer Bot members the student API deliberately replaces with a simpler
 # synchronous version — skipped when rendering the upstream interface so the
 # student signature/docstring is the only one emitted.
-_STUDENT_API_OVERRIDES = frozenset({"chat", "dig"})
+_STUDENT_API_OVERRIDES = frozenset({"chat", "dig", "drop"})
 
 # Minethon's synchronous student API — implemented in _commands.py (mixed into
 # Bot). Listed here so IDE completion surfaces them; the zh-TW hover docstrings
@@ -1808,7 +1809,7 @@ _STUDENT_API_STUB = """\
     def set_height(self, level: int) -> None: ...
     def hold(self, name: str) -> bool: ...
     def unhold(self) -> bool: ...
-    def drop(self) -> bool: ...
+    def drop(self, name_or_id: str | int | None = ..., count: int | None = ...) -> bool: ...
     def dig(self) -> tuple[tuple[int, int, int], str] | None: ...
     def place(self) -> tuple[tuple[int, int, int], str] | None: ...
     def use(self) -> bool: ...
@@ -2393,10 +2394,9 @@ def normalize_pyi_method_bodies(text: str) -> str:
 
 
 def format_generated_files(*paths: Path) -> None:
-    subprocess.run(
-        [sys.executable, "-m", "ruff", "format", *(str(path) for path in paths)],
-        check=True,
-    )
+    ruff = shutil.which("ruff")
+    if ruff:
+        subprocess.run([ruff, "format", *(str(path) for path in paths)], check=False)
 
 
 def main() -> None:

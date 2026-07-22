@@ -607,16 +607,39 @@ class Commands:
         return True
 
     @_paced
-    def drop(self) -> bool:
-        """Throw the entire held stack onto the ground.
+    def drop(
+        self, name_or_id: str | int | None = None, count: int | None = None
+    ) -> bool:
+        """Throw item(s) onto the ground (held item by default, or specified item name/ID).
 
-        Returns ``False`` if the hand was empty. Ref: mineflayer/docs/api.md —
-        bot.tossStack(item).
+        When ``name_or_id`` is ``None``, throws the currently held item stack.
+        When a string name (e.g. ``"gold_ingot"``) is given, searches inventory for that item.
+        If ``count`` is ``None`` or greater than/equal to stack count, throws the full stack.
+        Returns ``True`` on success, ``False`` if hand is empty or item is not carried.
+        Ref: mineflayer/docs/api.md — bot.tossStack(item) / bot.toss(itemType, metadata, count).
         """
-        item = self._js.heldItem
-        if item is None:
-            return False
-        self._js.tossStack(item)
+        if name_or_id is None:
+            item = self._js.heldItem
+            if item is None:
+                return False
+            self._js.tossStack(item)
+            return True
+
+        if isinstance(name_or_id, str):
+            item = self._find_inventory_item(name_or_id)
+            if item is None:
+                return False
+            stack_count = getattr(item, "count", 1)
+            if count is None or count >= stack_count:
+                self._js.tossStack(item)
+            else:
+                item_type = getattr(item, "type", None)
+                if item_type is None:
+                    return False
+                self._js.toss(item_type, None, count)
+            return True
+
+        self._js.toss(name_or_id, None, count)
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────

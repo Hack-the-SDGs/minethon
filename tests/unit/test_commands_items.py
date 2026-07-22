@@ -31,6 +31,11 @@ class InvJs:
     def tossStack(self, the_item: object) -> None:  # noqa: N802
         self.calls.append(("tossStack", the_item))
 
+    def toss(  # noqa: N802
+        self, item_type: int, metadata: object | None, count: int | None
+    ) -> None:
+        self.calls.append(("toss", item_type, metadata, count))
+
 
 def test_hold_equips_matching_item_to_hand() -> None:
     stone = item("stone")
@@ -74,3 +79,34 @@ def test_drop_returns_false_when_empty_handed() -> None:
 
     assert Bot(fake).drop() is False
     assert fake.calls == []
+
+
+def test_drop_by_name_full_stack() -> None:
+    gold = SimpleNamespace(name="gold_ingot", type=266, count=10)
+    fake = InvJs(items=[gold])
+
+    assert Bot(fake).drop("gold_ingot") is True
+    assert fake.calls == [("tossStack", gold)]
+
+
+def test_drop_by_name_partial_count() -> None:
+    gold = SimpleNamespace(name="gold_ingot", type=266, count=10)
+    fake = InvJs(items=[gold])
+
+    assert Bot(fake).drop("gold_ingot", 3) is True
+    assert fake.calls == [("toss", 266, None, 3)]
+
+
+def test_drop_by_name_not_carried() -> None:
+    fake = InvJs(items=[SimpleNamespace(name="dirt", type=3, count=5)])
+
+    assert Bot(fake).drop("gold_ingot") is False
+    assert fake.calls == []
+
+
+def test_drop_by_int_id() -> None:
+    fake = InvJs()
+
+    assert Bot(fake).drop(266, 5) is True
+    assert fake.calls == [("toss", 266, None, 5)]
+
