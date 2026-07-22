@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from minethon._bot_runtime import Bot
 
 
@@ -89,12 +91,12 @@ def test_drop_by_name_full_stack() -> None:
     assert fake.calls == [("tossStack", gold)]
 
 
-def test_drop_by_name_partial_count() -> None:
-    gold = SimpleNamespace(name="gold_ingot", type=266, count=10)
+def test_drop_by_name_partial_count_with_metadata() -> None:
+    gold = SimpleNamespace(name="gold_ingot", type=266, count=10, metadata=5)
     fake = InvJs(items=[gold])
 
     assert Bot(fake).drop("gold_ingot", 3) is True
-    assert fake.calls == [("toss", 266, None, 3)]
+    assert fake.calls == [("toss", 266, 5, 3)]
 
 
 def test_drop_by_name_not_carried() -> None:
@@ -104,9 +106,37 @@ def test_drop_by_name_not_carried() -> None:
     assert fake.calls == []
 
 
-def test_drop_by_int_id() -> None:
-    fake = InvJs()
+def test_drop_by_int_id_present() -> None:
+    gold = SimpleNamespace(name="gold_ingot", type=266, count=10)
+    fake = InvJs(items=[gold])
 
     assert Bot(fake).drop(266, 5) is True
     assert fake.calls == [("toss", 266, None, 5)]
 
+
+def test_drop_by_int_id_absent() -> None:
+    fake = InvJs(items=[SimpleNamespace(name="dirt", type=3, count=5)])
+
+    assert Bot(fake).drop(266, 5) is False
+    assert fake.calls == []
+
+
+def test_drop_invalid_count_raises_value_error() -> None:
+    fake = InvJs(items=[SimpleNamespace(name="gold_ingot", type=266, count=10)])
+
+    with pytest.raises(ValueError, match="count 必須是大於 0 的正整數"):
+        Bot(fake).drop("gold_ingot", 0)
+
+    with pytest.raises(ValueError, match="count 必須是大於 0 的正整數"):
+        Bot(fake).drop("gold_ingot", -5)
+
+    assert fake.calls == []
+
+
+def test_drop_multi_stack_spanning() -> None:
+    stack1 = SimpleNamespace(name="gold_ingot", type=266, count=5, metadata=0)
+    stack2 = SimpleNamespace(name="gold_ingot", type=266, count=32, metadata=0)
+    fake = InvJs(items=[stack1, stack2])
+
+    assert Bot(fake).drop("gold_ingot", 10) is True
+    assert fake.calls == [("tossStack", stack1), ("toss", 266, 0, 5)]

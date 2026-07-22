@@ -577,9 +577,20 @@ class Commands:
         Ref: mineflayer/docs/api.md — bot.inventory.items() (prismarine-windows).
         """
         for item in self._js.inventory.items():
-            if str(item.name) == name:
+            if str(getattr(item, "name", "")) == name:
                 return item
         return None
+
+    def _find_inventory_items(self, name_or_id: str | int) -> list[Any]:
+        """Find all inventory items matching the given string name or integer ID."""
+        matching = []
+        for item in self._js.inventory.items():
+            if isinstance(name_or_id, str):
+                if str(getattr(item, "name", "")) == name_or_id:
+                    matching.append(item)
+            elif getattr(item, "type", None) == name_or_id:
+                matching.append(item)
+        return matching
 
     @_paced
     def hold(self, name: str) -> bool:
@@ -613,11 +624,16 @@ class Commands:
         """Throw item(s) onto the ground (held item by default, or specified item name/ID).
 
         When ``name_or_id`` is ``None``, throws the currently held item stack.
-        When a string name (e.g. ``"gold_ingot"``) is given, searches inventory for that item.
-        If ``count`` is ``None`` or greater than/equal to stack count, throws the full stack.
+        When a string name or integer ID is given, searches inventory for matching items.
+        If ``count`` is ``None`` or greater than/equal to total carried count, throws all matching stacks.
         Returns ``True`` on success, ``False`` if hand is empty or item is not carried.
+        Raises ``ValueError`` if ``count`` is less than or equal to 0.
         Ref: mineflayer/docs/api.md — bot.tossStack(item) / bot.toss(itemType, metadata, count).
         """
+        if count is not None and count <= 0:
+            msg = f"count 必須是大於 0 的正整數，收到 {count}。"
+            raise ValueError(msg)
+
         if name_or_id is None:
             item = self._js.heldItem
             if item is None:
@@ -625,21 +641,29 @@ class Commands:
             self._js.tossStack(item)
             return True
 
-        if isinstance(name_or_id, str):
-            item = self._find_inventory_item(name_or_id)
-            if item is None:
-                return False
-            stack_count = getattr(item, "count", 1)
-            if count is None or count >= stack_count:
+        matching_items = self._find_inventory_items(name_or_id)
+        if not matching_items:
+            return False
+
+        total_carried = sum(getattr(item, "count", 1) for item in matching_items)
+        if count is None or count >= total_carried:
+            for item in matching_items:
                 self._js.tossStack(item)
-            else:
-                item_type = getattr(item, "type", None)
-                if item_type is None:
-                    return False
-                self._js.toss(item_type, None, count)
             return True
 
-        self._js.toss(name_or_id, None, count)
+        remaining = count
+        for item in matching_items:
+            stack_count = getattr(item, "count", 1)
+            if remaining >= stack_count:
+                self._js.tossStack(item)
+                remaining -= stack_count
+            else:
+                item_type = getattr(item, "type", None)
+                if item_type is not None:
+                    metadata = getattr(item, "metadata", None)
+                    self._js.toss(item_type, metadata, remaining)
+                break
+
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────
