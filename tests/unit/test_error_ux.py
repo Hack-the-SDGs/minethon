@@ -47,6 +47,23 @@ def test_handler_keyboard_interrupt_still_propagates() -> None:
         wrapped("x")
 
 
+def test_error_handler_drops_injected_emitter_by_runtime_arity() -> None:
+    """JSPyBridge proxies may not preserve identity for the injected emitter."""
+    registered_emitter = object()
+    callback_emitter_proxy = object()
+    error = SimpleNamespace(message="Invalid credentials")
+    received: list[Any] = []
+
+    wrapped = rt._normalize_handler(
+        received.append,
+        emitter=registered_emitter,
+        event_name="error",
+    )
+    wrapped(callback_emitter_proxy, error)
+
+    assert received == [error]
+
+
 # ── pathfinder guard against the real bridge's None (C1-02) ──────────
 
 
