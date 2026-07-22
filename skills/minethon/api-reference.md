@@ -85,7 +85,7 @@ walking into a wall can't hang the script.
 - `hold(name) -> bool` — equip the inventory item named `name` to the main hand.
   `True` on success, `False` if it isn't carried.
 - `unhold() -> bool` — put the held item back; `False` if already empty-handed.
-- `drop() -> bool` — toss the whole held stack; `False` if empty-handed.
+- `drop(name_or_id=None, count=None) -> bool` — toss the whole held stack if no args; or toss item from inventory by name (e.g. `"gold_ingot"`) or ID. `False` if empty-handed or not carried.
 
 ## Actions (operate on the block/face you're aiming at)
 

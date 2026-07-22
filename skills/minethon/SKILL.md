@@ -71,7 +71,7 @@ bot = create_bot(
 | `set_height(level)` | `None` | Set size 1–5 (else `ValueError`) |
 | `hold(name)` | `bool` | Equip item by name to hand |
 | `unhold()` | `bool` | Put held item away |
-| `drop()` | `bool` | Toss the held stack |
+| `drop(name=None, count=None)` | `bool` | Toss held stack, or item by name/ID (all or count) |
 | `dig()` | `((x,y,z), name)` or `None` | Break the block I'm aiming at |
 | `place()` | `((x,y,z), name)` or `None` | Place held block on the aimed face |
 | `use()` | `bool` | Right-click aimed block, else use item |
