@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -300,6 +302,56 @@ def test_server_grid_provider_is_cached_after_first_scan() -> None:
 
     assert scans_after_discovery == 1
     assert fake.scoreboards.iterations == scans_after_discovery
+
+
+def test_server_grid_serializes_concurrent_calls_before_sequence_read() -> None:
+    fake = ServerGridJs()
+    bot = Bot(fake)
+    first_request_started = threading.Event()
+    release_first_request = threading.Event()
+    second_worker_started = threading.Event()
+    second_request_started = threading.Event()
+    calls_lock = threading.Lock()
+    call_count = 0
+    original_chat = fake.chat
+
+    def delayed_chat(command: str) -> None:
+        nonlocal call_count
+        with calls_lock:
+            call_count += 1
+            current_call = call_count
+        if current_call == 1:
+            first_request_started.set()
+            assert release_first_request.wait(timeout=1.0)
+        else:
+            second_request_started.set()
+        original_chat(command)
+
+    fake.chat = delayed_chat  # type: ignore[method-assign]
+
+    def move_second() -> tuple[float, float, float]:
+        second_worker_started.set()
+        return bot.move_forward(1)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(bot.move_forward, 1)
+        assert first_request_started.wait(timeout=1.0)
+        second = executor.submit(move_second)
+        assert second_worker_started.wait(timeout=1.0)
+
+        # The second call must not reach chat or derive its sequence until the
+        # first transaction has received ACK and released the per-Bot lock.
+        assert not second_request_started.wait(timeout=0.05)
+        release_first_request.set()
+        results = [first.result(timeout=1.0), second.result(timeout=1.0)]
+
+    assert len(results) == 2
+    assert fake.commands == [
+        f"/trigger {fake.objective} set 11",
+        f"/trigger {fake.objective} set 21",
+    ]
+    assert fake.score.value == -21
+    assert fake.entity.position.z == -1.5
 
 
 def test_server_grid_rejects_multiple_providers_with_names() -> None:

@@ -295,6 +295,7 @@ class Commands:
     """
 
     _js: Any  # the mineflayer JS bot proxy, set by Bot.__init__
+    _grid_move_lock: threading.Lock  # per-Bot grid request/ACK serialization
 
     # ── internal helpers ──────────────────────────────────────────────
     def _entity(self) -> Any:
@@ -624,9 +625,13 @@ class Commands:
         """
         if blocks <= 0:
             return self.get_pos()
-        grid_context = self._grid_move_context()
-        if grid_context is not None:
-            return self._walk_server_grid(control, blocks, grid_context)
+        # Provider score is a single per-player request/ACK slot. Discovery,
+        # sequence derivation and ACK waiting must be one transaction; otherwise
+        # concurrent main/callback calls can reuse a sequence and overwrite ACKs.
+        with self._grid_move_lock:
+            grid_context = self._grid_move_context()
+            if grid_context is not None:
+                return self._walk_server_grid(control, blocks, grid_context)
         entity = self._entity()
         start = entity.position
         sx, sz = float(start.x), float(start.z)

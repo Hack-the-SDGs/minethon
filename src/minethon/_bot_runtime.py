@@ -305,6 +305,10 @@ class Bot(Commands):
         """
         object.__setattr__(self, "_js", js_bot)
         object.__setattr__(self, "_instruction_sleep", float(instruction_sleep))
+        # A grid provider exposes one ACK scoreboard slot per player. Serialize
+        # this Bot's movement transactions so concurrent main/callback calls
+        # cannot derive and wait on the same sequence number.
+        object.__setattr__(self, "_grid_move_lock", threading.Lock())
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute reads to the underlying JS bot.
