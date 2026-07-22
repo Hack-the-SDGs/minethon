@@ -22,6 +22,7 @@ import contextlib
 import math
 import threading
 import time
+import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
@@ -646,6 +647,12 @@ class Commands:
             return False
 
         total_carried = sum(getattr(item, "count", 1) for item in matching_items)
+        if count is not None and count > total_carried:
+            warnings.warn(
+                f"count ({count}) 超過持有量 ({total_carried})，將丟出全部。",
+                stacklevel=2,
+            )
+
         if count is None or count >= total_carried:
             for item in matching_items:
                 self._js.tossStack(item)

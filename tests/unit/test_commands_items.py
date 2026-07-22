@@ -140,3 +140,13 @@ def test_drop_multi_stack_spanning() -> None:
 
     assert Bot(fake).drop("gold_ingot", 10) is True
     assert fake.calls == [("tossStack", stack1), ("toss", 266, 0, 5)]
+
+
+def test_drop_count_exceeding_total_issues_warning() -> None:
+    gold = SimpleNamespace(name="gold_ingot", type=266, count=10)
+    fake = InvJs(items=[gold])
+
+    with pytest.warns(UserWarning, match="超過持有量"):
+        assert Bot(fake).drop("gold_ingot", 50) is True
+
+    assert fake.calls == [("tossStack", gold)]
