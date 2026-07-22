@@ -8,7 +8,7 @@ Shorthand → real account (usernames use "_" — never "-"):
 
     create_bot("g_swim")  → username "G<group>_swim"
                             password sha256("Hack-The-SDGs-Python@<group>")
-    create_bot("swim")    → username "<computer>_swim"
+    create_bot("swim")    → username "U<computer>_swim"
                             password sha256("Hack-The-SDGs-Python@<group>:<computer>")
 
 Security note: the salt below lives in importable code, so these passwords are
@@ -33,7 +33,7 @@ IDENTITY_FILE = Path.home() / ".htsdg.json"
 # Baked event defaults — public infrastructure, safe to ship in the SDK.
 _DEFAULTS: dict[str, Any] = {
     "host": "mc.ntust.camp",
-    "port": 25565,
+    "port": 50213,
     "auth": "mojang",
     "auth_server": "https://drasl.ntust.camp/auth",
     "session_server": "https://drasl.ntust.camp/session",
@@ -49,7 +49,9 @@ def _read_identity() -> tuple[int, int]:
         )
         raise MinethonError(msg)
     try:
-        data = json.loads(IDENTITY_FILE.read_text(encoding="utf-8"))
+        # utf-8-sig tolerates a UTF-8 BOM (older PowerShell Set-Content emits
+        # one) so a stray BOM doesn't break json.loads on already-set-up PCs.
+        data = json.loads(IDENTITY_FILE.read_text(encoding="utf-8-sig"))
         return int(data["group"]), int(data["computer"])
     except (ValueError, KeyError, OSError) as exc:
         msg = f"本機識別檔 {IDENTITY_FILE} 內容無效，請重跑 setup.sh / setup.ps1。"
@@ -72,6 +74,6 @@ def resolve_account(shorthand: str) -> dict[str, Any]:
         username = f"G{group}_{task}"
         password = _sha256(f"{_SALT}{group}")
     else:
-        username = f"{computer}_{shorthand}"
+        username = f"U{computer}_{shorthand}"
         password = _sha256(f"{_SALT}{group}:{computer}")
     return {**_DEFAULTS, "username": username, "password": password}

@@ -39,6 +39,11 @@ def _find_runtime_node_modules() -> Path | None:
     candidates = sorted(
         REPO_ROOT.glob(".venv/lib/python*/site-packages/javascript/js/node_modules")
     )
+    if candidates:
+        return candidates[0]
+    candidates = sorted(
+        REPO_ROOT.glob(".venv/Lib/site-packages/javascript/js/node_modules")
+    )
     return candidates[0] if candidates else None
 
 
@@ -83,14 +88,24 @@ def _portable_ref(path: Path) -> str:
     Absolute venv paths differ per developer and would dirty git diffs on
     every regen. Prefer paths relative to the repo; fall back to the
     ``node_modules/...`` suffix when the source lives in the venv.
+
+    The venv interpreter dir differs per platform and Python version
+    (``lib/python3.14`` on POSIX, ``Lib`` on Windows), so it is elided to
+    ``.venv/...`` rather than pinned to one concrete spelling: pinning kept
+    the committed stub stable but pointed the ref at a path that does not
+    exist in half the supported environments.
     """
+    marker = "site-packages/javascript/js/node_modules"
     try:
-        return str(path.relative_to(REPO_ROOT))
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if marker in rel:
+            rel = ".venv/.../" + rel[rel.find(marker) :]
+        return rel
     except ValueError:
         parts = path.parts
         if "node_modules" in parts:
             idx = parts.index("node_modules")
-            return str(Path(*parts[idx:]))
+            return Path(*parts[idx:]).as_posix()
         return path.name
 
 
@@ -1774,7 +1789,9 @@ _STUDENT_API_STUB = """\
     def get_sneak(self) -> bool: ...
     def get_hand(self) -> tuple[str, int] | None: ...
     def get_block(self, x: int, y: int, z: int) -> str | None: ...
+    def get_block_property(self, x: int, y: int, z: int, property_name: str) -> str | int | bool | None: ...
     def look_block(self) -> tuple[tuple[int, int, int], str] | None: ...
+    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None: ...
     def find_block(self, name: str) -> tuple[int, int, int] | None: ...
     def find_blocks(self, name: str, max: int = ...) -> list[tuple[int, int, int]]: ...
     def move_forward(self, blocks: float = ...) -> tuple[float, float, float]: ...
@@ -1795,6 +1812,8 @@ _STUDENT_API_STUB = """\
     def dig(self) -> tuple[tuple[int, int, int], str] | None: ...
     def place(self) -> tuple[tuple[int, int, int], str] | None: ...
     def use(self) -> bool: ...
+    def use_player(self, username: str) -> bool: ...
+    def action(self, name: str, value: int | None = ...) -> None: ...
     def sneak(self, on: bool) -> bool: ...
     def chat(self, obj: object) -> None: ...
 """
@@ -2386,9 +2405,9 @@ def main() -> None:
             "mineflayer-pathfinder 尚未安裝，無法生成 pathfinder 型別。"
             "請先執行 ./setup.sh 安裝 pinned 的 mineflayer / vec3 / pathfinder。"
         )
-    mf_text = MF_INDEX.read_text()
+    mf_text = MF_INDEX.read_text(encoding="utf-8")
     mf_text = strip_ts_comments(mf_text)
-    pathfinder_text = strip_ts_comments(PATHFINDER_INDEX.read_text())
+    pathfinder_text = strip_ts_comments(PATHFINDER_INDEX.read_text(encoding="utf-8"))
 
     out: list[str] = [
         HEADER.format(
@@ -2492,9 +2511,17 @@ def main() -> None:
     # explicit `create_bot(host=..., username=...)` keyword form.
     out.append("")
     out.append("@overload")
-    out.append("def create_bot(account: str, /) -> Bot: ...")
+    out.append(
+        "def create_bot(account: str, /, *, instruction_sleep: float = ..., "
+        "bypass_instruction_sleep: bool = ..., "
+        "**options: Unpack[CreateBotOptions]) -> Bot: ..."
+    )
     out.append("@overload")
-    out.append("def create_bot(**options: Unpack[CreateBotOptions]) -> Bot: ...")
+    out.append(
+        "def create_bot(*, instruction_sleep: float = ..., "
+        "bypass_instruction_sleep: bool = ..., "
+        "**options: Unpack[CreateBotOptions]) -> Bot: ..."
+    )
     out.append("")
 
     raw_text = "\n".join(out)
@@ -2514,9 +2541,9 @@ def main() -> None:
             "first-run regen produces a stub without descriptions"
         )
     final_text = normalize_pyi_method_bodies(final_text)
-    OUT_PATH.write_text(final_text)
+    OUT_PATH.write_text(final_text, encoding="utf-8")
     events_text = render_events_module(event_callbacks)
-    OUT_EVENTS_PATH.write_text(events_text)
+    OUT_EVENTS_PATH.write_text(events_text, encoding="utf-8")
     runtime_inline_aliases = {
         name: type_alias_expressions[name]
         for name in ("DisplaySlot",)
@@ -2525,7 +2552,7 @@ def main() -> None:
     handlers_text = render_handlers_runtime(
         event_callbacks, inline_aliases=runtime_inline_aliases
     )
-    OUT_HANDLERS_PATH.write_text(handlers_text)
+    OUT_HANDLERS_PATH.write_text(handlers_text, encoding="utf-8")
     format_generated_files(OUT_PATH, OUT_EVENTS_PATH, OUT_HANDLERS_PATH)
     final_text = OUT_PATH.read_text(encoding="utf-8")
     events_text = OUT_EVENTS_PATH.read_text(encoding="utf-8")

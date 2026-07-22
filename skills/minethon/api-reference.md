@@ -36,8 +36,17 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
 
 - `get_block(x, y, z) -> str | None` — block name (e.g. `"stone"`) at integer
   coords, or `None` if that chunk isn't loaded.
+- `get_block_property(x, y, z, property_name) -> str | int | bool | None` — get
+  a specific block state property (e.g. `"lit"` for redstone lamps, `"facing"`
+  for furnaces, `"powered"` for levers) of the block at integer coordinates.
+  Returns the property value, or `None` if the chunk isn't loaded or the block
+  does not have this property.
 - `look_block() -> tuple[tuple[int,int,int], str] | None` — the block the bot is
   aiming at as `((x, y, z), name)`, or `None` if nothing is within ~6 blocks.
+- `get_block_in_front() -> tuple[tuple[int,int,int], str] | None` — the solid
+  block one step ahead (feet level first, then head level) as
+  `((x, y, z), name)`, or `None` when only air/liquid is ahead. Fire **is**
+  reported, so a script can check `name == "fire"` before acting.
 - `find_block(name) -> tuple[int,int,int] | None` — nearest block matching the
   name, or `None`. Names are Minecraft ids like `"diamond_ore"`, `"oak_log"`.
 - `find_blocks(name, max=16) -> list[tuple[int,int,int]]` — up to `max` nearest
@@ -81,13 +90,35 @@ walking into a wall can't hang the script.
 
 ## Actions (operate on the block/face you're aiming at)
 
-- `dig() -> ((x,y,z), name) | None` — break the aimed block; returns what was
-  broken, or `None` if nothing is in reach. (No argument — it's the renamed
-  "break" action.)
+- `dig() -> ((x,y,z), name) | None` — break the aimed block; if not aiming at
+  one, falls back to the solid block one step ahead. Returns what was broken,
+  `None` when there is nothing solid to break — or when the block is too hard
+  to break in reasonable time (prints a friendly line). (No argument — it's
+  the renamed "break" action.)
 - `place() -> ((x,y,z), name) | None` — place the held block against the aimed
-  face; returns the new block's position+name, or `None`.
+  face; returns the new block's position+name, or `None` when nothing is in
+  reach or the hand is empty (`hold(...)` something first).
 - `use() -> bool` — right-click: interact with the aimed block (door, button,
   lever…), or use the held item if not aiming at a block.
+- `use_player(username) -> bool` — look at the named player's current entity
+  center and right-click it. This reads the live position immediately before
+  interacting, so callers do not calculate yaw/pitch for players at different
+  heights. Returns `True`; raises `PlayerNotFoundError` when the player is
+  offline, in another world, or outside the bot's loaded entity range. The
+  server still enforces its entity-interaction distance.
+- `action(name, value=None) -> None` — ask the **server** to perform a named
+  quest action. Sends the vanilla trigger `/trigger <username>_<action>`
+  (all lowercased; spaces/hyphens → underscores), with `value` as an optional
+  integer payload (`set <value>`). The competition datapack validates the
+  request (right bot, quest active, target in front…) and performs or silently
+  ignores it — there is **no client-side effect**, so a dropped connection
+  mid-action can never damage the map. Example: bot `G1_labfire_1` calling
+  `action("put out")` fires `/trigger g1_labfire_1_put_out`. Bad characters in
+  `name` raise `ValueError`. Known labfire actions: `action("put out")`
+  (extinguish the fire in front) and `action("snap")` — in labfire stages 2–3
+  the server takes over movement (slower speed, grid snapping / step
+  rejection); `action("snap")` asks it to align the bot to the current cell
+  centre before turning or moving.
 - `sneak(on: bool) -> bool` — hold (`True`) or release (`False`) sneak; a
   persistent state. Returns the new state.
 

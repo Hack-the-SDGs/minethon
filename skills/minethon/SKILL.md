@@ -56,7 +56,9 @@ bot = create_bot(
 | `get_sneak()` | `bool` | Is sneaking? |
 | `get_hand()` | `(name, count)` or `None` | Held item |
 | `get_block(x, y, z)` | `str` or `None` | Block name at coords |
+| `get_block_property(x, y, z, property_name)` | `str/int/bool` or `None` | Get block state property (e.g. "lit", "facing", "powered") |
 | `look_block()` | `((x,y,z), name)` or `None` | Block I'm aiming at |
+| `get_block_in_front()` | `((x,y,z), name)` or `None` | Solid block one step ahead (reports fire) |
 | `find_block(name)` | `(x,y,z)` or `None` | Nearest block by name |
 | `find_blocks(name, max=16)` | `list[(x,y,z)]` | Nearest N blocks by name |
 | `move_forward(blocks=1)` | `(x,y,z)` | Walk forward; also `move_backward/left/right` |
@@ -74,6 +76,8 @@ bot = create_bot(
 | `dig()` | `((x,y,z), name)` or `None` | Break the block I'm aiming at |
 | `place()` | `((x,y,z), name)` or `None` | Place held block on the aimed face |
 | `use()` | `bool` | Right-click aimed block, else use item |
+| `use_player(username)` | `bool` | Aim at and right-click a named player at their current height |
+| `action(name, value=None)` | `None` | Ask the server to run a quest action (vanilla `/trigger`) |
 | `sneak(on)` | `bool` | Hold/release sneak |
 | `chat(obj)` | `None` | Send `str(obj)` to public chat |
 

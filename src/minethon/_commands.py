@@ -18,32 +18,50 @@ below cites the api.md / lib section it relies on.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import threading
 import time
-from typing import Any
+from functools import wraps
+from typing import TYPE_CHECKING, Any
 
 from javascript import Once
 
 from minethon._bridge import get_vec3
-from minethon.errors import NotSpawnedError
+from minethon.errors import NotSpawnedError, PlayerNotFoundError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Cursor reach for "what am I aiming at" — covers look_block/dig/place. Slightly
 # beyond survival reach (~4.5 blocks) so creative interaction still resolves.
 # Ref: mineflayer/docs/api.md — bot.blockAtCursor(maxDistance).
 _REACH_BLOCKS = 6.0
+# Names that aren't worth digging — dig() skips these when picking the block in
+# front so it never "breaks" empty space. Ref: minecraft-data block names.
+_NON_SOLID = frozenset(
+    {"air", "cave_air", "void_air", "water", "lava", "bubble_column"}
+)
 # Default search radius for find_block / find_blocks.
 # Ref: mineflayer/docs/api.md — bot.findBlocks(options.maxDistance) (default 16).
 _FIND_MAX_DISTANCE = 64
+# dig(): longest break we'll wait for. Anything slower (obsidian bare-handed is
+# 250s; bedrock's Infinity arrives over the bridge as None) gets a friendly
+# "too hard" line instead of a JSPyBridge call timeout mid-dig. Deepslate
+# bare-handed (~15s) fits well under.
+_MAX_DIG_SECONDS = 60.0
+# dig(): margin added on top of mineflayer's digTime estimate, and the floor so
+# short digs keep JSPyBridge's default 10s budget.
+_DIG_TIMEOUT_MARGIN_SECONDS = 5.0
+_DIG_TIMEOUT_FLOOR_SECONDS = 10.0
 
 # Movement: no "walk N blocks" primitive without pathfinder, so move_* presses a
-# control key and polls position until the horizontal distance travelled reaches
-# the target (or a safety timeout fires). 4.317 b/s is vanilla walking speed.
+# control key and polls position until the requested directional progress is
+# reached (or the position stops making progress).
 # Ref: mineflayer/docs/api.md — bot.setControlState; Minecraft physics.
-_WALK_SPEED_BPS = 4.317
 _POLL_SECONDS = 0.05  # ~one physics tick
-_WALK_TIMEOUT_FACTOR = 3.0  # allow 3x the ideal travel time before giving up
-_WALK_TIMEOUT_FLOOR = 1.0  # always allow at least 1s (short hops)
+_WALK_STALL_TIMEOUT = 5.0  # tolerate eight-tick grid locks even near 2 TPS
+_WALK_PROGRESS_EPSILON = 0.01  # ignore packet jitter when refreshing the stall timer
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
@@ -58,6 +76,13 @@ _DEFAULT_SCALE_KEY = "minecraft:generic.scale"
 _OP_ADD = 0  # add amount to the base value
 _OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
 _OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
+
+# bot.action(name): the action key is normalised to this charset, then sent as
+# the vanilla trigger `/trigger <username>_<action>`. Server-authoritative — the
+# competition datapack validates and performs the action; the client does
+# nothing in-world. Ref: vanilla /trigger (players can only fire objectives the
+# server enabled for them, so stray calls are harmless).
+_ACTION_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
 
 # Raycast face index (0..5) -> unit offset for placeBlock's faceVector.
 # Ref: mineflayer lib/plugins/digging.js (rayBlock.face) + Minecraft face order.
@@ -84,11 +109,16 @@ def _make_vec3(x: float, y: float, z: float) -> Any:
     return get_vec3()(x, y, z)
 
 
-def _walk_timeout(blocks: float) -> float:
-    """Safety deadline (seconds) for walking ``blocks`` so a stuck bot stops."""
-    return max(
-        _WALK_TIMEOUT_FLOOR, abs(blocks) / _WALK_SPEED_BPS * _WALK_TIMEOUT_FACTOR
-    )
+def _control_vector(control: str, yaw: float) -> tuple[float, float]:
+    """Horizontal unit vector for a movement control at ``yaw`` radians."""
+    forward_x, forward_z = -math.sin(yaw), -math.cos(yaw)
+    vectors = {
+        "forward": (forward_x, forward_z),
+        "back": (-forward_x, -forward_z),
+        "left": (forward_z, -forward_x),
+        "right": (-forward_z, forward_x),
+    }
+    return vectors[control]
 
 
 def _attribute_value(prop: Any) -> float:
@@ -138,6 +168,37 @@ def _scale_to_level(scale: float) -> int:
     return max(_MIN_HEIGHT, min(_MAX_HEIGHT, round(scale)))
 
 
+def _bridge_safe_sleep(seconds: float) -> None:
+    """Block for ``seconds`` without the bot going idle in-world.
+
+    mineflayer's physics loop is a Node-side ``setInterval`` (physics.js), so it
+    keeps ticking — position and control-state packets keep flowing — while the
+    Python thread parks here. That's why a held state (e.g. sneak) stays live
+    across a pause. Ref: mineflayer lib/plugins/physics.js setInterval(doPhysics).
+    """
+    if seconds > 0:
+        threading.Event().wait(seconds)
+
+
+def _paced(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Run an action, then pause ``self._instruction_sleep`` seconds.
+
+    Gives each student action a short trailing beat so a straight-line script's
+    steps are individually visible (turn, pause, turn, pause…). Only leaf actions
+    are wrapped, so ``turn_left`` (which delegates to ``set_turn``) still pauses
+    exactly once. The interval is set by ``create_bot(instruction_sleep=...)`` and
+    is ``0`` when ``bypass_instruction_sleep=True``.
+    """
+
+    @wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = method(self, *args, **kwargs)
+        _bridge_safe_sleep(getattr(self, "_instruction_sleep", 0.0))
+        return result
+
+    return wrapper
+
+
 class Commands:
     """Curated synchronous commands mixed into :class:`Bot`.
 
@@ -184,17 +245,32 @@ class Commands:
         try:
             done.wait()
         except KeyboardInterrupt:
-            pass
+            # Ctrl-C while waiting on a login that never spawns: honor the
+            # project's Ctrl-C contract (goodbye line + clean stop) instead of
+            # swallowing the interrupt and letting the script run on with an
+            # un-spawned bot straight into a NotSpawnedError.
+            from minethon import _bot_runtime  # noqa: PLC0415 — avoids an import cycle
+
+            _bot_runtime._stop_with_message(  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+                _bot_runtime._GOODBYE  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+            )
 
     def wait(self, seconds: float) -> None:
-        """Sleep for ``seconds`` while staying connected.
+        """Pause the script for ``seconds`` without the bot going idle.
 
-        The JSPyBridge Node thread keeps the bot's connection alive during
-        the sleep, so this is a safe pause between actions.
+        Use it to hold a state for a moment::
+
+            bot.sneak(True)
+            bot.wait(0.2)
+            bot.sneak(False)
+
+        Plain ``time.sleep`` works the same way — the bot keeps its place and its
+        held controls (sneak, etc.) in-world during the pause because mineflayer's
+        physics tick runs on the Node side, independent of this Python thread.
+        (``sleep`` is not added as a method name: mineflayer already uses
+        ``bot.sleep`` for sleeping in a bed.)
         """
-        # ponytail: plain sleep — the bridge's event thread drives the bot
-        # independently of the Python main thread, so the connection holds.
-        threading.Event().wait(seconds)
+        _bridge_safe_sleep(seconds)
 
     # ── position & orientation (read) ─────────────────────────────────
     def get_x(self) -> float:
@@ -265,12 +341,60 @@ class Commands:
             return None
         return str(block.name)
 
+    def get_block_property(
+        self, x: int, y: int, z: int, property_name: str
+    ) -> str | int | bool | None:
+        """獲取指定座標方塊的特定狀態屬性（Block State）。
+
+        例如紅石燈的 "lit" 狀態、熔爐的 "facing" 朝向等。
+
+        Args:
+            x: 方塊 X 整數座標
+            y: 方塊 Y 整數座標
+            z: 方塊 Z 整數座標
+            property_name: 屬性名稱（例如 "lit", "facing", "powered"）
+
+        Returns:
+            屬性的值（可能是 str, int, bool），若方塊未載入或無此屬性則回傳 None。
+        """
+        # 呼叫底層 mineflayer 的 blockAt 獲取方塊 Proxy 物件
+        block = self._js.blockAt(_make_vec3(x, y, z))
+        if block is None:
+            return None
+
+        # 呼叫 prismarine-block 的 getProperties() 獲取屬性字典。
+        # JSPyBridge 的 JS 物件 Proxy 對不存在的 key 直接回傳 None（不丟例外），
+        # KeyError 只會在 props 是原生 dict 時出現。
+        # bridge / JS 端的錯誤刻意不攔，讓它往上拋，
+        # 避免「連線壞掉」跟「沒有這個屬性」對呼叫端長得一樣。
+        props = block.getProperties()
+        try:
+            return props[property_name]
+        except KeyError:
+            return None
+
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """Block currently aimed at as ``((x, y, z), name)``, or ``None``.
 
         Ref: mineflayer/docs/api.md — bot.blockAtCursor(maxDistance).
         """
         block = self._js.blockAtCursor(_REACH_BLOCKS)
+        if block is None:
+            return None
+        p = block.position
+        return ((int(p.x), int(p.y), int(p.z)), str(block.name))
+
+    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
+        """Solid block one step ahead as ``((x, y, z), name)``, or ``None``.
+
+        Public face of the forward probe ``dig()`` falls back on: checks the
+        feet-level block one step along the dominant facing axis, then head
+        height. Non-solid names (air/water/lava…) read as "nothing in front";
+        anything else — including fire — is reported, so a script can inspect
+        what it is about to walk into.
+        Ref: mineflayer lib/plugins/ray_trace.js getViewDirection.
+        """
+        block = self._block_in_front()
         if block is None:
             return None
         p = block.position
@@ -314,42 +438,62 @@ class Commands:
     def _walk(self, control: str, blocks: float) -> tuple[float, float, float]:
         """Hold ``control`` until the bot travels ``blocks`` horizontally.
 
-        Movement is relative to the bot's current facing. Stops early on a
-        safety timeout so walking into a wall can't hang the script.
+        Movement is relative to the bot's facing when the call starts. Progress
+        is measured along that intended direction, so sideways collision drift
+        does not satisfy the requested distance. The timeout is stall-based:
+        every meaningful forward gain refreshes it, allowing long walks and
+        server-authoritative grid locks while still stopping at a wall.
         Ref: mineflayer/docs/api.md — bot.setControlState(control, state).
         """
         if blocks <= 0:
             return self.get_pos()
-        start = self._entity().position
+        entity = self._entity()
+        start = entity.position
         sx, sz = float(start.x), float(start.z)
+        direction_x, direction_z = _control_vector(control, float(entity.yaw))
+        best_progress = 0.0
+        last_progress_at = time.monotonic()
         self._js.setControlState(control, True)
-        deadline = time.monotonic() + _walk_timeout(blocks)
         try:
-            while time.monotonic() < deadline:
+            while True:
                 pos = self._entity().position
-                if math.hypot(float(pos.x) - sx, float(pos.z) - sz) >= blocks:
+                progress = (float(pos.x) - sx) * direction_x + (
+                    float(pos.z) - sz
+                ) * direction_z
+                if progress >= blocks:
+                    break
+                now = time.monotonic()
+                if progress >= best_progress + _WALK_PROGRESS_EPSILON:
+                    best_progress = progress
+                    last_progress_at = now
+                elif now - last_progress_at >= _WALK_STALL_TIMEOUT:
                     break
                 time.sleep(_POLL_SECONDS)
         finally:
             self._js.setControlState(control, False)
         return self.get_pos()
 
+    @_paced
     def move_forward(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Walk forward ``blocks`` blocks; returns the new position."""
         return self._walk("forward", blocks)
 
+    @_paced
     def move_backward(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Walk backward ``blocks`` blocks; returns the new position."""
         return self._walk("back", blocks)
 
+    @_paced
     def move_left(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Strafe left ``blocks`` blocks; returns the new position."""
         return self._walk("left", blocks)
 
+    @_paced
     def move_right(self, blocks: float = 1.0) -> tuple[float, float, float]:
         """Strafe right ``blocks`` blocks; returns the new position."""
         return self._walk("right", blocks)
 
+    @_paced
     def jump(self) -> tuple[float, float, float]:
         """Jump once; returns the position right after the hop begins.
 
@@ -361,6 +505,7 @@ class Commands:
         return self.get_pos()
 
     # ── orientation (write) ───────────────────────────────────────────
+    @_paced  # turn / turn_left / turn_right delegate here, so they pace once
     def set_turn(self, yaw: float) -> tuple[float, float]:
         """Face an absolute ``yaw`` (degrees); returns the new ``(yaw, pitch)``.
 
@@ -386,6 +531,7 @@ class Commands:
         """Turn 90° to the right; returns the new ``(yaw, pitch)``."""
         return self.turn(-_DEGREES_PER_TURN)
 
+    @_paced
     def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
         """Face the exact point ``(x, y, z)``; returns the new ``(yaw, pitch)``.
 
@@ -403,6 +549,7 @@ class Commands:
         """
         return _scale_to_level(_read_scale(self._entity()))
 
+    @_paced
     def set_height(self, level: int) -> None:
         """Request a size ``level`` in ``1..5``; raises ``ValueError`` otherwise.
 
@@ -434,6 +581,7 @@ class Commands:
                 return item
         return None
 
+    @_paced
     def hold(self, name: str) -> bool:
         """Equip the inventory item named ``name`` in the main hand.
 
@@ -446,6 +594,7 @@ class Commands:
         self._js.equip(item, "hand")
         return True
 
+    @_paced
     def unhold(self) -> bool:
         """Move the held item back into the inventory.
 
@@ -457,6 +606,7 @@ class Commands:
         self._js.unequip("hand")
         return True
 
+    @_paced
     def drop(self) -> bool:
         """Throw the entire held stack onto the ground.
 
@@ -495,26 +645,93 @@ class Commands:
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────
-    def dig(self) -> tuple[tuple[int, int, int], str] | None:
-        """Break the block currently aimed at; returns its ``((x, y, z), name)``.
+    def _front_cell(self) -> tuple[int, int, int]:
+        """Feet-level grid cell one step ahead along the dominant facing axis.
 
-        Returns ``None`` when nothing is in reach. (This renames mineflayer's
-        ``break`` action.) Ref: mineflayer/docs/api.md — bot.dig(block).
+        Ref: mineflayer lib/plugins/ray_trace.js getViewDirection — forward =
+        (-sin(yaw), 0, -cos(yaw)).
+        """
+        ent = self._entity()
+        yaw = float(ent.yaw)
+        dx, dz = -math.sin(yaw), -math.cos(yaw)
+        step = (
+            (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dz) else (0, 1 if dz > 0 else -1)
+        )
+        return (
+            math.floor(float(ent.position.x)) + step[0],
+            math.floor(float(ent.position.y)),
+            math.floor(float(ent.position.z)) + step[1],
+        )
+
+    def _block_in_front(self) -> Any:
+        """Solid block one step ahead of the bot, or ``None`` if only air.
+
+        Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
+        looking level over flat ground, where blockAtCursor sees only air).
+        Steps along the dominant horizontal facing axis and checks the feet
+        block first, then head height. The public native-type view of the same
+        probe is :meth:`get_block_in_front`.
+        """
+        bx, by, bz = self._front_cell()
+        for y in (by, by + 1):  # feet level, then head level
+            block = self._js.blockAt(_make_vec3(bx, y, bz))
+            if block is not None and str(block.name) not in _NON_SOLID:
+                return block
+        return None
+
+    @_paced
+    def dig(self) -> tuple[tuple[int, int, int], str] | None:
+        """Break the block in front of the bot; returns its ``((x, y, z), name)``.
+
+        Uses whatever the bot is aiming at; if it isn't aiming at a block (e.g.
+        looking straight ahead over flat ground), falls back to the solid block
+        one step forward. Returns ``None`` when there's nothing solid to break,
+        or when the block is too hard to break in a reasonable time (prints a
+        friendly line in that case). (This renames mineflayer's ``break``
+        action.) Ref: mineflayer/docs/api.md — bot.dig(block), bot.digTime.
         """
         block = self._js.blockAtCursor(_REACH_BLOCKS)
+        if block is None:
+            block = self._block_in_front()
         if block is None:
             return None
         p = block.position
         result = ((int(p.x), int(p.y), int(p.z)), str(block.name))
-        self._js.dig(block)
+        # Long digs (deepslate bare-handed is ~15s) outlive JSPyBridge's 10s
+        # per-call budget: the student got a raw English timeout stack and the
+        # late JS reply then poisoned the bridge IO loop. Size the call timeout
+        # from mineflayer's own estimate; refuse effectively unbreakable blocks.
+        # Unbreakable (bedrock) digTime is Infinity, which the bridge's JSON
+        # serialization delivers as None — float(None) raises, leaving the
+        # sentinel in place, so None routes to the "too hard" line too.
+        dig_ms: float | None = None
+        with contextlib.suppress(Exception):
+            dig_ms = float(self._js.digTime(block))
+        if (
+            dig_ms is None
+            or not math.isfinite(dig_ms)
+            or dig_ms > _MAX_DIG_SECONDS * 1000
+        ):
+            print(f"「{result[1]}」太硬了，挖不動。", flush=True)  # noqa: T201 — student-facing
+            return None
+        timeout = max(
+            _DIG_TIMEOUT_FLOOR_SECONDS, dig_ms / 1000 + _DIG_TIMEOUT_MARGIN_SECONDS
+        )
+        # mineflayer looks at the block itself (forceLook)
+        self._js.dig(block, timeout=timeout)
         return result
 
+    @_paced
     def place(self) -> tuple[tuple[int, int, int], str] | None:
         """Place the held block against the face being aimed at.
 
-        Returns the new block's ``((x, y, z), name)`` or ``None`` if nothing is
-        in reach. Ref: mineflayer/docs/api.md — bot.placeBlock(ref, faceVector).
+        Returns the new block's ``((x, y, z), name)``, or ``None`` if nothing
+        is in reach or the hand is empty (hold something first — mineflayer
+        would otherwise throw a raw "must be holding an item" error).
+        Ref: mineflayer/docs/api.md — bot.placeBlock(ref, faceVector).
         """
+        if self._js.heldItem is None:
+            return None
         ref = self._js.blockAtCursor(_REACH_BLOCKS)
         if ref is None:
             return None
@@ -526,6 +743,7 @@ class Commands:
         name = str(placed.name) if placed is not None else ""
         return (pos, name)
 
+    @_paced
     def use(self) -> bool:
         """Right-click: interact with the aimed block, else use the held item.
 
@@ -538,6 +756,41 @@ class Commands:
             self._js.activateItem()
         return True
 
+    @_paced
+    def use_player(self, username: str) -> bool:
+        """Right-click the named player's current entity.
+
+        Looks at the center of the player's live bounding box immediately
+        before sending the entity-interaction packet, so callers never need to
+        calculate a yaw/pitch for players at different heights. Raises
+        :class:`PlayerNotFoundError` when the player is offline, in another
+        world, or outside the bot's loaded entity range.
+
+        Ref: mineflayer/docs/api.md — bot.players, bot.lookAt,
+        bot.activateEntity.
+        """
+        self._entity()
+        try:
+            player = self._js.players[username]
+        except IndexError, KeyError, TypeError:
+            player = None
+        target = getattr(player, "entity", None)
+        if target is None or not bool(getattr(target, "isValid", True)):
+            msg = (
+                f"找不到玩家 {username!r}。"
+                "請確認對方在線、與機器人在同一世界，且位於已載入範圍內。"
+            )
+            raise PlayerNotFoundError(msg)
+
+        position = target.position
+        center_y = float(position.y) + float(getattr(target, "height", 1.8)) / 2
+        self._js.lookAt(
+            _make_vec3(float(position.x), center_y, float(position.z)),
+            True,
+        )
+        self._js.activateEntity(target)
+        return True
+
     def sneak(self, on: bool) -> bool:
         """Hold or release sneak (a persistent state); returns ``on``.
 
@@ -546,7 +799,40 @@ class Commands:
         self._js.setControlState("sneak", on)
         return on
 
+    # ── high-level named actions (bot.action) ─────────────────────────
+    @_paced
+    def action(self, name: str, value: int | None = None) -> None:
+        """Ask the server to run the named quest action (e.g. ``"put out"``).
+
+        Server-authoritative by design: this only sends the vanilla trigger
+        ``/trigger <username>_<action>`` (username lowercased; action
+        lowercased with spaces/hyphens collapsed to underscores) and does
+        **nothing** client-side — no block edits, no item use, so a lost
+        connection mid-action can never damage the map. Bot ``G1_labfire_1``
+        calling ``action("put out")`` fires ``/trigger g1_labfire_1_put_out``.
+        ``value``, when given, is attached as the trigger's integer payload
+        (``set <value>``) for quests that want a parameter. The competition
+        datapack validates the request (right bot, quest active, target in
+        front…) and performs or silently ignores it; players can only fire
+        trigger objectives the server has enabled for them, so a stray call
+        is harmless. Ref: mineflayer/docs/api.md — bot.chat(message);
+        vanilla /trigger.
+        """
+        key = "_".join(str(name).strip().lower().replace("-", " ").split())
+        if not key or not all(c in _ACTION_NAME_CHARS for c in key):
+            msg = f"動作名稱只能包含英文字母、數字、空格、連字號或底線，收到 {name!r}。"
+            raise ValueError(msg)
+        username = getattr(self._js, "username", None)
+        if username is None:
+            msg = "機器人還沒登入伺服器。請先呼叫 bot.wait_spawn()。"
+            raise NotSpawnedError(msg)
+        command = f"/trigger {str(username).lower()}_{key}"
+        if value is not None:
+            command += f" set {int(value)}"
+        self._js.chat(command)
+
     # ── chat ──────────────────────────────────────────────────────────
+    @_paced
     def chat(self, obj: object) -> None:
         """Send ``obj`` (converted to text) as a normal public chat message.
 

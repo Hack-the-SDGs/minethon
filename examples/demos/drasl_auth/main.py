@@ -27,8 +27,6 @@ def main() -> None:
         auth="mojang",
         auth_server=os.environ["MC_AUTH_SERVER"],
         session_server=os.environ["MC_SESSION_SERVER"],
-        # Pin protocol version when the server runs a version mineflayer can't
-        # speak directly (e.g. behind ViaVersion/ViaBackwards). Unset = autoVersion.
         version=os.environ.get("MC_VERSION") or None,
     )
 

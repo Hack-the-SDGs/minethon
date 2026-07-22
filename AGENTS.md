@@ -60,6 +60,10 @@ bot.bind(Greeter())
 - `chat(obj)` 送一般公開聊天（`str(obj)`）；分組可見性由伺服器插件處理
 - 與事件 API 並存：直線動作跑主執行緒，`EventAdaptor` + `bind` 處理反應，最後 `run_forever` 保活
 - `dig` / `chat` 兩個名稱刻意覆寫 mineflayer 同名方法；generator 用 `_STUDENT_API_OVERRIDES` 在 `bot.pyi` 裡略過 upstream 版本，避免重複定義
+- **不新增 `bot.sleep`**：mineflayer 已用 `bot.sleep(bedBlock)`（上床睡覺）。暫停用既有的 `bot.wait(seconds)` 或直接 `time.sleep`；因為 mineflayer 的 physics tick 跑在 Node 端（`physics.js` 的 `setInterval`），Python 主執行緒 block 不會凍結遊戲內角色，控制狀態（sneak 等）也會維持
+- **具名進階動作走 `bot.action(name, value=None)`——伺服器權威**：客戶端不模擬行為，只送 vanilla `/trigger <username>_<action>`（全小寫、空格/連字號→底線；`value` 為可選整數 payload），由關卡 datapack 驗證（執行者身分、任務狀態、目標存在）後代為執行或忽略。客戶端零副作用——不動方塊、不用物品，斷線也不會損壞地圖；trigger 未被伺服器 enable 時指令安全無效。名稱含不合法字元丟 `ValueError`；關卡專屬示範放 `examples/quests/<quest_id>/`
+- **玩家互動走 `bot.use_player(username)`**：每次呼叫先讀 named player 的即時 entity 位置、瞄準碰撞箱中心，再送 mineflayer `activateEntity`；不同高度不需學員自行算 yaw/pitch。玩家離線、不同世界或不在已載入範圍時丟 `PlayerNotFoundError`；實際可互動距離仍由伺服器的 entity-interaction range 驗證。
+- **每個行為指令收尾有 `instruction_sleep` 停頓**（預設 0.2s），讓學員逐行看出動作。實作是 `_commands.py` 的 `_paced` decorator，只掛在「葉節點」動作上（`turn_left`→`turn`→`set_turn` 只有 `set_turn` 被 pace，避免重複停頓）；讀取類指令（`get_*`/`find_*`）不 pace；`sneak` 也刻意不 pace，讓 sneak 開關的 toggle 迴圈不被延遲拖慢。`create_bot(instruction_sleep=0.1)` 調整間隔、`bypass_instruction_sleep=True` 關閉（設成 0）；值存在 `Bot._instruction_sleep`
 - 完整方法清單與中文 hover 見 `src/minethon/bot.pyi`；AI 替學員寫程式用的說明見 `skills/minethon/`
 
 ## IDE 與型別層
@@ -118,7 +122,7 @@ bot.bind(Greeter())
   - `mineflayer-pathfinder`
 - 對 bundled package，可省略版本
 - 對其他 npm 套件，`bot.load_plugin(...)` / `bot.require(...)` 必須顯式版本
-- Python 端的 `javascript` (JSPyBridge) 套件在 `pyproject.toml` 用 minor 級 ceiling 鎖（目前 `>=1!1.2.6,<1!1.3`）。理由：minethon 依賴 `On`/`Once` 的 emitter 注入與 Promise `await`-before-return 行為，這兩件事是實作細節不是正式契約；升 minor 前要先跑 `./scripts/format.sh` 與 integration smoke。
+- Python 端的 `javascript` (JSPyBridge) 套件在 `pyproject.toml` 用 minor 級 ceiling 鎖（目前 `>=1!1.2.6,<1!1.3`）。理由：minethon 依賴 `On`/`Once` 在 pinned runtime **不注入 emitter**（`needsNodePatches` 只在 Node 14/15 成立）與 Promise `await`-before-return 行為，這兩件事是實作細節不是正式契約；升 minor 前要先跑 `./scripts/format.sh` 與 integration smoke。
 
 理由：
 
@@ -137,7 +141,8 @@ bot.bind(Greeter())
 
 - 所有 event handler 跑在 JSPyBridge callback thread
 - handler 內不要 blocking
-- bridge 層必須處理 JSPyBridge 可選的 emitter 注入，以及 runtime 少於 d.ts 宣告參數的情況
+- pinned runtime（Node 22+ / javascript 1.2.x）**不會**注入 emitter（`needsNodePatches` 只在 Node 14/15 成立）；`_normalize_handler` 的 emitter 偵測僅靠 `_REAL_ARGC` 已知表與 emitter identity，多餘參數一律**從尾端截斷**（短簽名 handler 拿到的是最前面的參數）
+- handler 內未捕捉的例外由 `_normalize_handler` 攔截：印友善訊息＋traceback 後略過該次事件，不回流 JS（避免 unhandled rejection 殺死 node 進程）
 
 ## 錯誤處理
 
@@ -150,6 +155,24 @@ bot.bind(Greeter())
 - `VersionPinRequiredError`
 
 使用者訊息優先告訴下一步該做什麼。
+
+登入失敗（帳密錯誤）不可外洩 yggdrasil 原始 stack。`create_bot` 註冊 `Once(bot, 'error')` →
+`_on_login_error`：偵測 `invalid credentials` / `invalid username or password` 時印
+「找不到此任務。請檢查任務名稱是否正確，或是任務是否開放」再 clean exit（`_stop_with_message`
+→ 關 node bridge + `os._exit`）；同時也解掉會永久卡住的 `wait_spawn`（登入失敗 `spawn`
+永不觸發）。註冊任一 `error` listener 也讓 mineflayer 的 EventEmitter 不再 throw 原始錯誤。
+
+其他失敗路徑的規則：
+
+- exit code：正常結束（quit / 伺服器關閉 session）為 0；失敗（登入錯誤、bridge 逾時/斷線）
+  為 1，讓 shell / CI 能分辨。`_stop_with_message(code=...)` 統一處理並先 flush 輸出。
+- `create_bot` 另註冊 `Once(bot, 'kicked')` 印出被踢原因（版本不合、白名單、任務踢線），
+  否則 `logErrors=False` 下原因會被整條吞掉。
+- JSPyBridge 的 per-call 逾時（`Call to 'X' timed out.`）由 excepthook 轉成友善訊息後
+  結束（逾時後的遲到回應會毒化 bridge IO loop，不硬撐）。
+- `bind()` 對「拼錯的 `on_xxx`（不對應任何事件）」印提醒，不再靜默忽略。
+- `bot.pathfinder` 未載入時（真實 bridge 回 `None`）拋 `PluginNotInstalledError`
+   並附下一步指引。
 
 ## 檢查指令
 
@@ -170,6 +193,16 @@ uv run pyright src/
 uv run pytest -m "not integration" --tb=short -q
 uv run python scripts/check_stubs.py        # TS d.ts ↔ bot.pyi drift gate
 ```
+
+Integration smoke（bridge↔mineflayer 實連路徑，JSPyBridge / bundled npm 升版前必跑）：
+
+```bash
+uv run pytest -m integration   # 需要可連線的 Minecraft 伺服器
+```
+
+預設連 `localhost:25565`（offline mode），可用 `MINETHON_IT_HOST` /
+`MINETHON_IT_PORT` / `MINETHON_IT_USERNAME` 覆寫；伺服器連不上時測試會
+skip（不會卡死）。預設的 `pytest -m "not integration"` 與 CI 不會執行它。
 
 `scripts/parse_dts.py` 是 TS 解析器的 stable public surface（目前 façade
 re-export 自 `generate_stubs.py`）；`scripts/check_stubs.py` 用它比對
