@@ -151,6 +151,71 @@ class ServerGridJs(MoveJs):
             self.score = item
 
 
+class ScorelessServerGridJs(MoveJs):
+    """Grid provider whose trigger score is never broadcast to the client."""
+
+    def __init__(
+        self,
+        *,
+        acknowledge: bool = True,
+        objective: str = "q.labfire.step",
+    ) -> None:
+        super().__init__()
+        self._x = 0.5
+        self._z = 0.5
+        self.username = "G1_labfire_1"
+        self.objective = objective
+        self.scoreboards = CountingScoreboards()
+        self.scoreboards[objective] = SimpleNamespace(
+            title={
+                "type": "string",
+                "value": cmd._GRID_MOVE_PROVIDER_TITLE,
+            },
+            itemsMap={},
+        )
+        self.commands: list[str] = []
+        self.tab_queries: list[tuple[str, bool, bool, int]] = []
+        self.enabled = True
+        self.additional_enabled: set[str] = set()
+        self.acknowledge = acknowledge
+        self.move = True
+        self._pending_payload: int | None = None
+
+    def tabComplete(  # noqa: N802
+        self,
+        text: str,
+        assume_command: bool,
+        send_block_in_sight: bool,
+        timeout: int,
+    ) -> list[dict[str, object]]:
+        self.tab_queries.append((text, assume_command, send_block_in_sight, timeout))
+        if self._pending_payload is not None and self.acknowledge:
+            direction = self._pending_payload % cmd._GRID_MOVE_SEQUENCE_BASE
+            dx, dz = {
+                cmd._GRID_MOVE_DIRECTIONS["north"]: (0.0, -1.0),
+                cmd._GRID_MOVE_DIRECTIONS["east"]: (1.0, 0.0),
+                cmd._GRID_MOVE_DIRECTIONS["south"]: (0.0, 1.0),
+                cmd._GRID_MOVE_DIRECTIONS["west"]: (-1.0, 0.0),
+            }[direction]
+            if self.move:
+                self._x += dx
+                self._z += dz
+            self._pending_payload = None
+            self.enabled = True
+        objectives = set(self.additional_enabled)
+        if self.enabled:
+            objectives.add(self.objective)
+        # Modern minecraft-protocol represents each match as an object.
+        return [
+            {"match": objective, "tooltip": None} for objective in sorted(objectives)
+        ]
+
+    def chat(self, command: str) -> None:
+        self.commands.append(command)
+        self.enabled = False
+        self._pending_payload = int(command.rsplit(" ", maxsplit=1)[1])
+
+
 @pytest.fixture(autouse=True)
 def _no_real_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make time.sleep a no-op so polling loops run instantly."""
@@ -419,6 +484,7 @@ def test_server_grid_provider_can_be_rediscovered_after_rebuild() -> None:
             "text": "minethon:",
             "extra": [{"text": "grid_move:"}, {"text": "v1"}],
         },
+        {"type": "string", "value": cmd._GRID_MOVE_PROVIDER_TITLE},
     ],
 )
 def test_server_grid_provider_title_plaintext_forms_match(title: object) -> None:
@@ -442,6 +508,103 @@ def test_server_grid_provider_title_requires_exact_plaintext() -> None:
 
     assert fake.commands == []
     assert fake.history == [("forward", True), ("forward", False)]
+
+
+def test_server_grid_uses_trigger_reenable_ack_when_score_is_not_broadcast() -> None:
+    fake = ScorelessServerGridJs()
+
+    pos = Bot(fake).move_forward(2)
+
+    assert pos == (0.5, 64.0, -1.5)
+    assert fake.commands == [
+        f"/trigger {fake.objective} set 11",
+        f"/trigger {fake.objective} set 21",
+    ]
+    assert fake.history == []
+    assert all(query == ("/trigger ", True, False, 1000) for query in fake.tab_queries)
+
+
+def test_server_grid_scoreless_provider_times_out_if_trigger_is_not_reenabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(cmd.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cmd.time, "sleep", clock.sleep)
+    fake = ScorelessServerGridJs(acknowledge=False)
+
+    with pytest.raises(cmd.MinethonError, match="未重新啟用"):
+        Bot(fake).move_forward(1)
+
+    assert fake.commands == [f"/trigger {fake.objective} set 11"]
+    assert fake.history == []
+    assert clock.now >= cmd._GRID_MOVE_TIMEOUT
+
+
+def test_server_grid_scoreless_provider_must_be_enabled_for_this_bot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _frozen_clock(monkeypatch)
+    fake = ScorelessServerGridJs()
+    fake.enabled = False
+    fake._step = 0.5
+
+    pos = Bot(fake).move_forward(1)
+
+    assert pos == (0.5, 64.0, -0.5)
+    assert fake.commands == []
+    assert fake.history == [("forward", True), ("forward", False)]
+
+
+def test_server_grid_rejects_multiple_enabled_scoreless_providers() -> None:
+    fake = ScorelessServerGridJs(objective="maze.step")
+    fake.scoreboards["parkour.move"] = SimpleNamespace(
+        title=cmd._GRID_MOVE_PROVIDER_TITLE,
+        itemsMap={},
+    )
+    fake.additional_enabled.add("parkour.move")
+
+    with pytest.raises(
+        cmd.MinethonError,
+        match=r"maze\.step, parkour\.move.*只為這個機器人保留一個",
+    ):
+        Bot(fake).move_forward(1)
+
+    assert fake.commands == []
+    assert fake.history == []
+
+
+def test_server_grid_scoreless_adversarial_sequence_never_reuses_ack() -> None:
+    fake = ScorelessServerGridJs()
+    bot = Bot(fake)
+    cases = [
+        ("move_forward", 0.0, (0.0, -1.0), 1),
+        ("move_right", 0.0, (1.0, 0.0), 2),
+        ("move_backward", 0.0, (0.0, 1.0), 3),
+        ("move_left", 0.0, (-1.0, 0.0), 4),
+        ("move_forward", cmd.math.pi / 2, (-1.0, 0.0), 4),
+        ("move_forward", -cmd.math.pi / 2, (1.0, 0.0), 2),
+        ("move_forward", cmd.math.pi, (0.0, 1.0), 3),
+    ]
+    expected_x = 0.5
+    expected_z = 0.5
+
+    for index in range(400):
+        method, yaw, (dx, dz), direction = cases[index % len(cases)]
+        fake.yaw = yaw
+        fake.move = index % 7 != 0
+        if fake.move:
+            expected_x += dx
+            expected_z += dz
+
+        pos = getattr(bot, method)(1)
+        sequence = index + 1
+        expected_payload = sequence * cmd._GRID_MOVE_SEQUENCE_BASE + direction
+
+        assert pos == (expected_x, 64.0, expected_z)
+        assert fake.commands[-1] == (
+            f"/trigger {fake.objective} set {expected_payload}"
+        )
+        assert fake.history == []
 
 
 def test_server_grid_blocked_move_acknowledges_without_position_drift() -> None:

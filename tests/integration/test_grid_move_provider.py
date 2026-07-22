@@ -8,7 +8,8 @@ environment flag is present. They document the two deployment-sensitive facts:
   any display slot. Vanilla does not track it to the client, so discovery must
   return no provider.
 * ``MINETHON_IT_Q10_GRID=1`` requires an active q10 stage-one run for the test
-  bot. Ten public ``move_forward(1)`` calls must each commit one exact cell.
+  bot. Ten public ``move_forward(1)`` calls must each commit one exact cell,
+  whether ACK arrives as a score packet or trigger re-enable completion.
 """
 
 from __future__ import annotations
@@ -119,8 +120,13 @@ for _ in range(10):
     assert abs(after[0] % 1.0 - 0.5) <= 1e-9, after
     assert abs(after[2] % 1.0 - 0.5) <= 1e-9, after
     objective, username, ack = bot._grid_move_context()
-    assert ack < 0, ack
-    sequences.append(abs(ack) // 10)
+    assert objective == "q.labfire.step", objective
+    if ack is None:
+        assert objective in bot._enabled_trigger_objectives()
+        sequences.append(bot._grid_move_sequence)
+    else:
+        assert ack < 0, ack
+        sequences.append(abs(ack) // 10)
 assert all(right == left + 1 for left, right in zip(sequences, sequences[1:]))
 print("Q10_GRID_MOVE_OK", flush=True)
 bot.quit()

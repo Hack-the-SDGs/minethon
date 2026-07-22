@@ -56,11 +56,13 @@ bot.bind(Greeter())
 - 實作在 `src/minethon/_commands.py` 的 `Commands` mixin；`Bot` 繼承它，所以方法直接掛在 `Bot` 上，未覆寫的名稱仍走 `__getattr__` 委託回 JS proxy
 - 全部回傳原生型別（`tuple` / `str` / `bool` / `int`），不對學員暴露 `Vec3` / `Block` / `Item` 物件
 - 不依賴 pathfinder：datapack 可用任意名稱的 trigger objective 宣告 grid-move provider，但 display title
-  必須精確為 `minethon:grid_move:v1`、objective 必須放進同步 display slot，且只為已授權 bot 建立分數。
-  `move_*` 從 `bot.scoreboards` 自動發現唯一 provider，整數 `blocks>1` 拆成逐格 trigger／負 payload ack；
-  找不到 provider 時維持 `setControlState` + 位置輪詢 fallback，多個 provider 則明確報錯。SDK 不解析 group、
-  帳號格式或關卡命名；快取只保存 objective 名，每次使用仍驗證 objective 與本帳號分數存在。同一 Bot 的
-  provider discovery／sequence／ACK 交易必須由 per-instance lock 序列化，避免 main 與 callback 共用 ACK slot
+  必須精確為 `minethon:grid_move:v1`、objective 必須放進同步 display slot，且只為已授權 bot enable trigger。
+  `move_*` 從 `bot.scoreboards` 自動發現唯一 provider，整數 `blocks>1` 拆成逐格 trigger；若 client 收得到
+  score，使用負 payload ACK，否則用 Brigadier completion 驗證 trigger 對本 bot 已 enable，並以 datapack
+  重新 enable trigger 作 ACK。找不到 provider 時維持 `setControlState` + 位置輪詢 fallback，多個 provider
+  則明確報錯。SDK 不解析 group、帳號格式或關卡命名；快取只保存 objective 名，每次使用仍驗證 marker
+  及本 bot 的 score／trigger 授權。同一 Bot 的 provider discovery／sequence／ACK 交易必須由 per-instance
+  lock 序列化，避免 main 與 callback 共用 ACK channel
 - 角度一律「度」；`get_height`/`set_height` 是大小等級 1~5，讀寫 entity `scale` 屬性（實際縮放仍需伺服器端配合）
 - `chat(obj)` 送一般公開聊天（`str(obj)`）；分組可見性由伺服器插件處理
 - 與事件 API 並存：直線動作跑主執行緒，`EventAdaptor` + `bind` 處理反應，最後 `run_forever` 保活
