@@ -233,11 +233,12 @@ bot.equip(helmet_item, "head")
 ### `bot.unequip(destination)`
 卸除指定部位的裝備。
 
-### `bot.toss(item_type, metadata, count)`
-丟棄指定數量的物品。
-
-### `bot.tossStack(item)`
-丟棄整個物品堆疊。
+### `bot.drop(name_or_id=None, count=None) -> bool`
+丟棄物品至地上。
+- 不傳參數時：丟出手上拿著的物品（若空手回傳 `False`）。
+- 傳入物品名稱字串（如 `"gold_ingot"`）或數字 ID 時：搜尋背包中對應物品並丟出。
+- 可搭配 `count` 指定丟棄數量；若未傳入 `count` 或數量大於等於總持有量則丟出全部。
+- 背包無此物品時回傳 `False`；若 `count <= 0` 則拋出 `ValueError`。
 
 ### `bot.moveSlotItem(source_slot, dest_slot)`
 在背包內移動物品。

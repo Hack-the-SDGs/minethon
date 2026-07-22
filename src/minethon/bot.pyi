@@ -2948,7 +2948,7 @@ class Bot:
     def unhold(self) -> bool:
         """把手上的物品收回背包；本來就空手回傳 `False`"""
 
-    def drop(self) -> bool:
+    def drop(self, name_or_id: str | int | None = ..., count: int | None = ...) -> bool:
         """把手上整疊物品丟到地上；空手回傳 `False`"""
 
     def dig(self) -> tuple[tuple[int, int, int], str] | None:

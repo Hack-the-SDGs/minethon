@@ -22,6 +22,7 @@ import contextlib
 import math
 import threading
 import time
+import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
@@ -577,9 +578,20 @@ class Commands:
         Ref: mineflayer/docs/api.md — bot.inventory.items() (prismarine-windows).
         """
         for item in self._js.inventory.items():
-            if str(item.name) == name:
+            if str(getattr(item, "name", "")) == name:
                 return item
         return None
+
+    def _find_inventory_items(self, name_or_id: str | int) -> list[Any]:
+        """Find all inventory items matching the given string name or integer ID."""
+        matching = []
+        for item in self._js.inventory.items():
+            if isinstance(name_or_id, str):
+                if str(getattr(item, "name", "")) == name_or_id:
+                    matching.append(item)
+            elif getattr(item, "type", None) == name_or_id:
+                matching.append(item)
+        return matching
 
     @_paced
     def hold(self, name: str) -> bool:
@@ -607,16 +619,58 @@ class Commands:
         return True
 
     @_paced
-    def drop(self) -> bool:
-        """Throw the entire held stack onto the ground.
+    def drop(
+        self, name_or_id: str | int | None = None, count: int | None = None
+    ) -> bool:
+        """Throw item(s) onto the ground (held item by default, or specified item name/ID).
 
-        Returns ``False`` if the hand was empty. Ref: mineflayer/docs/api.md —
-        bot.tossStack(item).
+        When ``name_or_id`` is ``None``, throws the currently held item stack.
+        When a string name or integer ID is given, searches inventory for matching items.
+        If ``count`` is ``None`` or greater than/equal to total carried count, throws all matching stacks.
+        Returns ``True`` on success, ``False`` if hand is empty or item is not carried.
+        Raises ``ValueError`` if ``count`` is less than or equal to 0.
+        Ref: mineflayer/docs/api.md — bot.tossStack(item) / bot.toss(itemType, metadata, count).
         """
-        item = self._js.heldItem
-        if item is None:
+        if count is not None and count <= 0:
+            msg = f"count 必須是大於 0 的正整數，收到 {count}。"
+            raise ValueError(msg)
+
+        if name_or_id is None:
+            item = self._js.heldItem
+            if item is None:
+                return False
+            self._js.tossStack(item)
+            return True
+
+        matching_items = self._find_inventory_items(name_or_id)
+        if not matching_items:
             return False
-        self._js.tossStack(item)
+
+        total_carried = sum(getattr(item, "count", 1) for item in matching_items)
+        if count is not None and count > total_carried:
+            warnings.warn(
+                f"count ({count}) 超過持有量 ({total_carried})，將丟出全部。",
+                stacklevel=2,
+            )
+
+        if count is None or count >= total_carried:
+            for item in matching_items:
+                self._js.tossStack(item)
+            return True
+
+        remaining = count
+        for item in matching_items:
+            stack_count = getattr(item, "count", 1)
+            if remaining >= stack_count:
+                self._js.tossStack(item)
+                remaining -= stack_count
+            else:
+                item_type = getattr(item, "type", None)
+                if item_type is not None:
+                    metadata = getattr(item, "metadata", None)
+                    self._js.toss(item_type, metadata, remaining)
+                break
+
         return True
 
     # ── actions (on the block/face being aimed at) ────────────────────
