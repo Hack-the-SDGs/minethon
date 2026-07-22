@@ -19,17 +19,18 @@ below cites the api.md / lib section it relies on.
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 import threading
 import time
 import warnings
 from functools import wraps
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from javascript import Once
 
 from minethon._bridge import get_vec3
-from minethon.errors import NotSpawnedError, PlayerNotFoundError
+from minethon.errors import MinethonError, NotSpawnedError, PlayerNotFoundError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,13 +57,29 @@ _MAX_DIG_SECONDS = 60.0
 _DIG_TIMEOUT_MARGIN_SECONDS = 5.0
 _DIG_TIMEOUT_FLOOR_SECONDS = 10.0
 
-# Movement: no "walk N blocks" primitive without pathfinder, so move_* presses a
-# control key and polls position until the requested directional progress is
-# reached (or the position stops making progress).
-# Ref: mineflayer/docs/api.md — bot.setControlState; Minecraft physics.
+# Movement: a datapack can advertise an exact-grid provider with any trigger
+# objective whose display title is `minethon:grid_move:v1`. The objective must
+# occupy a display slot so its definition reaches the client, but vanilla
+# 1.21.11 may still omit that bot's score. Prefer the negative score ACK when it
+# is visible; otherwise use Brigadier's per-player enabled-trigger suggestions
+# for authorization and re-enable ACK. Other servers retain the mineflayer
+# control-state + position-polling fallback.
 _POLL_SECONDS = 0.05  # ~one physics tick
 _WALK_STALL_TIMEOUT = 5.0  # tolerate eight-tick grid locks even near 2 TPS
 _WALK_PROGRESS_EPSILON = 0.01  # ignore packet jitter when refreshing the stall timer
+_GRID_MOVE_PROVIDER_TITLE = "minethon:grid_move:v1"
+_GRID_MOVE_PROVIDER_CACHE_ATTR = "_grid_move_provider_objective"
+_GRID_MOVE_SEQUENCE_ATTR = "_grid_move_sequence"
+_GRID_MOVE_TIMEOUT = 5.0
+_GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS = 1000
+_GRID_MOVE_SEQUENCE_BASE = 10
+_GRID_MOVE_MAX_SEQUENCE = 200_000_000
+_GRID_MOVE_DIRECTIONS = {
+    "north": 1,
+    "east": 2,
+    "south": 3,
+    "west": 4,
+}
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
@@ -120,6 +137,83 @@ def _control_vector(control: str, yaw: float) -> tuple[float, float]:
         "right": (-forward_z, forward_x),
     }
     return vectors[control]
+
+
+def _grid_direction(control: str, yaw: float) -> int:
+    """Quantise a relative control to an absolute cardinal direction code."""
+    direction_x, direction_z = _control_vector(control, yaw)
+    if abs(direction_x) >= abs(direction_z):
+        return (
+            _GRID_MOVE_DIRECTIONS["east"]
+            if direction_x > 0
+            else _GRID_MOVE_DIRECTIONS["west"]
+        )
+    return (
+        _GRID_MOVE_DIRECTIONS["south"]
+        if direction_z > 0
+        else _GRID_MOVE_DIRECTIONS["north"]
+    )
+
+
+def _mapping_item(mapping: Any, key: str) -> Any:
+    """Read a dict-like JS proxy entry, treating an absent key as ``None``."""
+    if mapping is None:
+        return None
+    try:
+        return mapping[key]
+    except AttributeError, KeyError, TypeError:
+        return None
+
+
+def _mapping_keys(mapping: Any) -> list[str]:
+    """List keys from a Python mapping or a JSPyBridge plain-object proxy.
+
+    Ref: javascript/proxy.py — ``Proxy.__iter__`` requests the JS object's own
+    keys when it has no array length.
+    """
+    if mapping is None:
+        return []
+    try:
+        return [str(key) for key in mapping]
+    except TypeError:
+        return []
+
+
+def _component_plaintext(component: Any) -> str:  # noqa: PLR0911
+    """Flatten the text/extra subset of a JSON text component.
+
+    Pinned mineflayer already turns a scoreboard title into ``str``. Accepting
+    raw JSON strings and mapping-shaped components here keeps provider discovery
+    correct for fake proxies and future upstream representations without using
+    prefix or substring matching.
+    """
+    if component is None:
+        return ""
+    if isinstance(component, str):
+        original = component
+        try:
+            component = json.loads(component)
+        except json.JSONDecodeError:
+            return original
+        if not isinstance(component, str | list | dict):
+            return original
+    if isinstance(component, list | tuple):
+        return "".join(_component_plaintext(part) for part in component)
+
+    component_type = _mapping_item(component, "type")
+    component_value = _mapping_item(component, "value")
+    if str(component_type) == "string" and component_value is not None:
+        # minecraft-protocol 1.21.11 exposes anonymous-NBT strings through
+        # JSPyBridge as ``{type: "string", value: "..."}``.
+        return _component_plaintext(component_value)
+
+    text = _mapping_item(component, "text")
+    extra = _mapping_item(component, "extra")
+    if text is None and extra is None:
+        return str(component)
+    prefix = "" if text is None else str(text)
+    suffix = "" if extra is None else _component_plaintext(extra)
+    return prefix + suffix
 
 
 def _attribute_value(prop: Any) -> float:
@@ -209,6 +303,8 @@ class Commands:
     """
 
     _js: Any  # the mineflayer JS bot proxy, set by Bot.__init__
+    _grid_move_lock: threading.Lock  # per-Bot grid request/ACK serialization
+    _grid_move_sequence: int  # last locally issued scoreless-provider sequence
 
     # ── internal helpers ──────────────────────────────────────────────
     def _entity(self) -> Any:
@@ -436,18 +532,177 @@ class Commands:
         return [(int(p.x), int(p.y), int(p.z)) for p in points]
 
     # ── movement ──────────────────────────────────────────────────────
-    def _walk(self, control: str, blocks: float) -> tuple[float, float, float]:
-        """Hold ``control`` until the bot travels ``blocks`` horizontally.
+    def _scoreboard_value(self, objective: str, username: str) -> int | None:
+        """Read one player's score from mineflayer's client-side scoreboard."""
+        scoreboard = _mapping_item(getattr(self._js, "scoreboards", None), objective)
+        if scoreboard is None:
+            return None
+        item = _mapping_item(getattr(scoreboard, "itemsMap", None), username)
+        if item is None:
+            return None
+        value = getattr(item, "value", None)
+        return None if value is None else int(value)
 
-        Movement is relative to the bot's facing when the call starts. Progress
-        is measured along that intended direction, so sideways collision drift
-        does not satisfy the requested distance. The timeout is stall-based:
-        every meaningful forward gain refreshes it, allowing long walks and
-        server-authoritative grid locks while still stopping at a wall.
-        Ref: mineflayer/docs/api.md — bot.setControlState(control, state).
+    def _is_grid_provider(self, scoreboards: Any, objective: str) -> bool:
+        """Whether an objective advertises the exact grid-move v1 title."""
+        scoreboard = _mapping_item(scoreboards, objective)
+        if scoreboard is None:
+            return False
+        title = _component_plaintext(getattr(scoreboard, "title", None))
+        return title == _GRID_MOVE_PROVIDER_TITLE
+
+    def _enabled_trigger_objectives(self) -> set[str]:
+        """Return trigger objectives currently enabled for this player.
+
+        Vanilla Brigadier only suggests objectives accepted by ``/trigger`` for
+        the requesting player. This is also an ordered server round-trip, so an
+        objective disappearing after a request and becoming suggestible again
+        is a usable ACK when the server does not broadcast its score packets.
+
+        Ref: mineflayer ``bot.tabComplete`` and minecraft-protocol 1.21.11
+        ``packet_tab_complete.matches[].match``.
+        """
+        tab_complete = getattr(self._js, "tabComplete", None)
+        if not callable(tab_complete):
+            return set()
+        raw_matches = tab_complete(
+            "/trigger ",
+            True,
+            False,
+            _GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS,
+        )
+        if raw_matches is None:
+            return set()
+        try:
+            matches = list(cast("Any", raw_matches))
+        except TypeError:
+            return set()
+
+        objectives: set[str] = set()
+        for item in matches:
+            match = _mapping_item(item, "match")
+            value = item if match is None else match
+            candidate = _component_plaintext(value).strip()
+            if candidate.startswith("/trigger "):
+                candidate = candidate.removeprefix("/trigger ").split(maxsplit=1)[0]
+            if candidate:
+                objectives.add(candidate)
+        return objectives
+
+    def _grid_move_context(self) -> tuple[str, str, int | None] | None:
+        """Discover or validate the advertised grid-move v1 provider."""
+        username_value = getattr(self._js, "username", None)
+        if username_value is None:
+            return None
+        username = str(username_value)
+        scoreboards = getattr(self._js, "scoreboards", None)
+
+        cached = getattr(self, _GRID_MOVE_PROVIDER_CACHE_ATTR, None)
+        if cached is not None:
+            if self._is_grid_provider(scoreboards, cached):
+                score = self._scoreboard_value(cached, username)
+                if score is not None:
+                    return cached, username, score
+                if cached in self._enabled_trigger_objectives():
+                    return cached, username, None
+            object.__setattr__(self, _GRID_MOVE_PROVIDER_CACHE_ATTR, None)
+
+        marked = [
+            objective
+            for objective in _mapping_keys(scoreboards)
+            if self._is_grid_provider(scoreboards, objective)
+        ]
+
+        providers: list[tuple[str, int | None]] = []
+        enabled: set[str] | None = None
+        for objective in marked:
+            score = self._scoreboard_value(objective, username)
+            if score is not None:
+                providers.append((objective, score))
+                continue
+            if enabled is None:
+                enabled = self._enabled_trigger_objectives()
+            if objective in enabled:
+                providers.append((objective, None))
+
+        if len(providers) > 1:
+            names = ", ".join(sorted(objective for objective, _score in providers))
+            msg = (
+                f"伺服器同時提供多個精確移動 provider: {names}。"
+                "請檢查伺服器 datapack，只為這個機器人保留一個 grid_move v1 provider。"
+            )
+            raise MinethonError(msg)
+        if not providers:
+            return None
+
+        objective, score = providers[0]
+        object.__setattr__(self, _GRID_MOVE_PROVIDER_CACHE_ATTR, objective)
+        return objective, username, score
+
+    def _walk_server_grid(
+        self,
+        control: str,
+        blocks: float,
+        context: tuple[str, str, int | None],
+    ) -> tuple[float, float, float]:
+        """Send sequenced one-cell trigger requests and wait for exact server ack."""
+        requested = float(blocks)
+        if not requested.is_integer():
+            msg = "此任務使用精確格狀移動，move_* 的格數必須是整數。"
+            raise ValueError(msg)
+        objective, username, score = context
+        if score is None:
+            sequence = getattr(self, _GRID_MOVE_SEQUENCE_ATTR, 0) + 1
+        else:
+            sequence = abs(score) // _GRID_MOVE_SEQUENCE_BASE + 1
+        direction = _grid_direction(control, float(self._entity().yaw))
+        for _ in range(int(requested)):
+            if sequence > _GRID_MOVE_MAX_SEQUENCE:
+                sequence = 1
+            payload = sequence * _GRID_MOVE_SEQUENCE_BASE + direction
+            self._js.chat(f"/trigger {objective} set {payload}")
+            deadline = time.monotonic() + _GRID_MOVE_TIMEOUT
+            while True:
+                score_ack = self._scoreboard_value(objective, username) == -payload
+                trigger_ack = score is None and (
+                    objective in self._enabled_trigger_objectives()
+                )
+                if score_ack or trigger_ack:
+                    break
+                if time.monotonic() >= deadline:
+                    if score is None:
+                        msg = (
+                            "伺服器未完成精確格狀移動: provider trigger 未重新啟用。"
+                            "請確認任務已開始，且 datapack 與 minethon 版本一致。"
+                        )
+                    else:
+                        msg = (
+                            "伺服器未完成精確格狀移動。請確認任務已開始，且 "
+                            "datapack 與 minethon 版本一致; 也請確認 provider objective "
+                            "的 criteria 是 trigger，而不是 dummy。"
+                        )
+                    raise MinethonError(msg)
+                time.sleep(_POLL_SECONDS)
+            object.__setattr__(self, _GRID_MOVE_SEQUENCE_ATTR, sequence)
+            sequence += 1
+        return self.get_pos()
+
+    def _walk(self, control: str, blocks: float) -> tuple[float, float, float]:
+        """Move through an advertised server grid, or fall back to client physics.
+
+        The server-grid protocol is authoritative and acknowledges every exact
+        one-cell move. The fallback is relative to the facing when the call
+        starts and polls directional progress with a stall timeout.
         """
         if blocks <= 0:
             return self.get_pos()
+        # The score or enabled-trigger state is one per-player request/ACK slot.
+        # Discovery, sequence derivation and ACK waiting must be one transaction;
+        # otherwise concurrent main/callback calls can reuse a sequence.
+        with self._grid_move_lock:
+            grid_context = self._grid_move_context()
+            if grid_context is not None:
+                return self._walk_server_grid(control, blocks, grid_context)
         entity = self._entity()
         start = entity.position
         sx, sz = float(start.x), float(start.z)
