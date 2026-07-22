@@ -469,6 +469,31 @@ class Commands:
         self._js.tossStack(item)
         return True
 
+    def toss(self, name_or_id: str | int, count: int | None = None) -> bool:
+        """Toss item(s) from inventory by item name (e.g. ``"stone"``) or item ID integer.
+
+        If a string name is provided, searches inventory for the item.
+        If ``count`` is ``None`` or greater than/equal to stack count, tosses the full stack.
+        Returns ``True`` on success, ``False`` if the item is not carried.
+        Ref: mineflayer/docs/api.md — bot.tossStack(item) / bot.toss(itemType, metadata, count).
+        """
+        if isinstance(name_or_id, str):
+            item = self._find_inventory_item(name_or_id)
+            if item is None:
+                return False
+            stack_count = getattr(item, "count", 1)
+            if count is None or count >= stack_count:
+                self._js.tossStack(item)
+            else:
+                item_type = getattr(item, "type", None)
+                if item_type is None:
+                    return False
+                self._js.toss(item_type, None, count)
+            return True
+
+        self._js.toss(name_or_id, None, count)
+        return True
+
     # ── actions (on the block/face being aimed at) ────────────────────
     def dig(self) -> tuple[tuple[int, int, int], str] | None:
         """Break the block currently aimed at; returns its ``((x, y, z), name)``.

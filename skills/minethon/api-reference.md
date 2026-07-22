@@ -77,6 +77,7 @@ walking into a wall can't hang the script.
   `True` on success, `False` if it isn't carried.
 - `unhold() -> bool` — put the held item back; `False` if already empty-handed.
 - `drop() -> bool` — toss the whole held stack; `False` if empty-handed.
+- `toss(name_or_id, count=None) -> bool` — toss item from inventory by name (e.g. `"stone"`) or ID. Tosses full stack if `count` is `None`; `False` if not carried.
 
 ## Actions (operate on the block/face you're aiming at)
 

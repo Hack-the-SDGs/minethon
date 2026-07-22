@@ -36,8 +36,12 @@ OUT_HANDLERS_PATH = REPO_ROOT / "src/minethon/_handlers.py"
 
 
 def _find_runtime_node_modules() -> Path | None:
-    candidates = sorted(
-        REPO_ROOT.glob(".venv/lib/python*/site-packages/javascript/js/node_modules")
+    candidates = (
+        sorted(
+            REPO_ROOT.glob(".venv/lib/python*/site-packages/javascript/js/node_modules")
+        )
+        + sorted(REPO_ROOT.glob(".venv/Lib/site-packages/javascript/js/node_modules"))
+        + sorted(REPO_ROOT.glob(".venv/lib/site-packages/javascript/js/node_modules"))
     )
     return candidates[0] if candidates else None
 
@@ -1756,7 +1760,7 @@ def render_event_enum(
 # mineflayer Bot members the student API deliberately replaces with a simpler
 # synchronous version — skipped when rendering the upstream interface so the
 # student signature/docstring is the only one emitted.
-_STUDENT_API_OVERRIDES = frozenset({"chat", "dig"})
+_STUDENT_API_OVERRIDES = frozenset({"chat", "dig", "toss"})
 
 # Minethon's synchronous student API — implemented in _commands.py (mixed into
 # Bot). Listed here so IDE completion surfaces them; the zh-TW hover docstrings
@@ -1792,6 +1796,7 @@ _STUDENT_API_STUB = """\
     def hold(self, name: str) -> bool: ...
     def unhold(self) -> bool: ...
     def drop(self) -> bool: ...
+    def toss(self, name_or_id: str | int, count: int | None = ...) -> bool: ...
     def dig(self) -> tuple[tuple[int, int, int], str] | None: ...
     def place(self) -> tuple[tuple[int, int, int], str] | None: ...
     def use(self) -> bool: ...
@@ -2514,9 +2519,9 @@ def main() -> None:
             "first-run regen produces a stub without descriptions"
         )
     final_text = normalize_pyi_method_bodies(final_text)
-    OUT_PATH.write_text(final_text)
+    OUT_PATH.write_text(final_text, encoding="utf-8")
     events_text = render_events_module(event_callbacks)
-    OUT_EVENTS_PATH.write_text(events_text)
+    OUT_EVENTS_PATH.write_text(events_text, encoding="utf-8")
     runtime_inline_aliases = {
         name: type_alias_expressions[name]
         for name in ("DisplaySlot",)
@@ -2525,7 +2530,7 @@ def main() -> None:
     handlers_text = render_handlers_runtime(
         event_callbacks, inline_aliases=runtime_inline_aliases
     )
-    OUT_HANDLERS_PATH.write_text(handlers_text)
+    OUT_HANDLERS_PATH.write_text(handlers_text, encoding="utf-8")
     format_generated_files(OUT_PATH, OUT_EVENTS_PATH, OUT_HANDLERS_PATH)
     final_text = OUT_PATH.read_text(encoding="utf-8")
     events_text = OUT_EVENTS_PATH.read_text(encoding="utf-8")

@@ -4,15 +4,15 @@
 # This file is the IDE completion overlay for src/minethon/bot.py.
 # Runtime behavior lives in bot.py; types live here.
 #
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer--342e33372e30/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/vec3--302e312e3130/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-entity/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-block/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-item/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
-# Ref: .venv/lib/python3.14/site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\mineflayer--342e33372e30\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\vec3--302e312e3130\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-entity\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-block\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-item\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-chat\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-windows\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\prismarine-recipe\index.d.ts
+# Ref: .venv\Lib\site-packages\javascript\js\node_modules\mineflayer-pathfinder--322e342e35\index.d.ts
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
@@ -2313,17 +2313,6 @@ class Bot:
             item: 物品欄中的 `Item`
         """
 
-    def toss(
-        self, item_type: float, metadata: float | None, count: float | None
-    ) -> None:
-        """丟出指定數量的物品
-
-        Args:
-            itemType: 物品 ID 整數
-            metadata: 物品的 metadata 值，不關心就傳 `None`
-            count: 要丟的數量
-        """
-
     def stopDigging(self) -> None:
         """停止當前挖掘動作
         會觸發 `"diggingAborted"` 事件
@@ -2930,6 +2919,15 @@ class Bot:
 
     def drop(self) -> bool:
         """把手上整疊物品丟到地上；空手回傳 `False`"""
+
+    def toss(self, name_or_id: str | int, count: int | None = ...) -> bool:
+        """丟出指定數量的物品
+
+        Args:
+            itemType: 物品 ID 整數
+            metadata: 物品的 metadata 值，不關心就傳 `None`
+            count: 要丟的數量
+        """
 
     def dig(self) -> tuple[tuple[int, int, int], str] | None:
         """挖掉準心正對著的方塊，回傳被挖方塊的 `((x, y, z), 名稱)`
