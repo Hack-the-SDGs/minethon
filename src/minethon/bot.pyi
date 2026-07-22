@@ -12,7 +12,7 @@
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
-# Ref: .venv/.../site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
+# Ref: src/mineflayer/js/node_modules/mineflayer-pathfinder/index.d.ts
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
@@ -2860,31 +2860,38 @@ class Bot:
     def move_forward(self, blocks: float = ...) -> tuple[float, float, float]:
         """往面向的方向前進 `blocks` 格，回傳前進後的新位置
 
-        撞牆卡住時會在安全逾時後自動停下。
+        支援精確格狀移動的任務會由伺服器逐格完成並確認；其他伺服器沿用
+        Mineflayer 物理移動，撞牆卡住時會在安全逾時後自動停下。
 
         Args:
-            blocks: 要前進的格數（預設 1）
+            blocks: 要前進的格數（預設 1）；精確格狀任務只接受整數
         """
 
     def move_backward(self, blocks: float = ...) -> tuple[float, float, float]:
         """往後退 `blocks` 格，回傳後退後的新位置
 
+        支援精確格狀移動的任務會由伺服器逐格完成並確認。
+
         Args:
-            blocks: 要後退的格數（預設 1）
+            blocks: 要後退的格數（預設 1）；精確格狀任務只接受整數
         """
 
     def move_left(self, blocks: float = ...) -> tuple[float, float, float]:
         """往左平移 `blocks` 格，回傳平移後的新位置
 
+        支援精確格狀移動的任務會由伺服器逐格完成並確認。
+
         Args:
-            blocks: 要平移的格數（預設 1）
+            blocks: 要平移的格數（預設 1）；精確格狀任務只接受整數
         """
 
     def move_right(self, blocks: float = ...) -> tuple[float, float, float]:
         """往右平移 `blocks` 格，回傳平移後的新位置
 
+        支援精確格狀移動的任務會由伺服器逐格完成並確認。
+
         Args:
-            blocks: 要平移的格數（預設 1）
+            blocks: 要平移的格數（預設 1）；精確格狀任務只接受整數
         """
 
     def jump(self) -> tuple[float, float, float]:
