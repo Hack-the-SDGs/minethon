@@ -9,5 +9,7 @@ while True:
     block = bot.get_block_in_front()
     if block is not None and str(block[1]).endswith("fire"):
         bot.action("put out")
+    elif block is not None:
+        break
     else:
         bot.move_forward()
