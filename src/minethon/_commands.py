@@ -666,8 +666,25 @@ class Commands:
         if sequence > _GRID_MOVE_MAX_SEQUENCE:
             sequence = 1
         payload = sequence * _GRID_MOVE_SEQUENCE_BASE + code
-        self._js.chat(f"/trigger {objective} set {payload}")
         deadline = time.monotonic() + _GRID_MOVE_TIMEOUT
+        if score is None:
+            # The scoreless ACK ("trigger enabled again") carries no payload
+            # identity, so a timed-out request's delayed re-enable could be
+            # misread as the next request's ACK. Drain it *before* sending:
+            # only send once the trigger is observed enabled, which means any
+            # earlier request has been fully processed. Every enabled state
+            # seen after our send can then only come from our own request
+            # (the provider re-enables in the same tick it processes).
+            while objective not in self._enabled_trigger_objectives():
+                if time.monotonic() >= deadline:
+                    msg = (
+                        f"伺服器未完成{action}: 前一筆 provider 請求仍未被伺服器"
+                        "處理（trigger 尚未重新啟用），已放棄送出新請求。"
+                        "請確認任務進行中，且 datapack 與 minethon 版本一致。"
+                    )
+                    raise MinethonError(msg)
+                time.sleep(_POLL_SECONDS)
+        self._js.chat(f"/trigger {objective} set {payload}")
         while True:
             score_ack = self._scoreboard_value(objective, username) == -payload
             trigger_ack = score is None and (

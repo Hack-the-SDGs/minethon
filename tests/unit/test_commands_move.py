@@ -560,6 +560,56 @@ def test_server_grid_scoreless_provider_times_out_if_trigger_is_not_reenabled(
     assert clock.now >= cmd._GRID_MOVE_TIMEOUT
 
 
+def test_server_grid_scoreless_drain_refuses_to_send_on_dirty_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending (un-reenabled) request blocks the next send instead of ack theft."""
+    clock = FakeClock()
+    monkeypatch.setattr(cmd.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cmd.time, "sleep", clock.sleep)
+    fake = ScorelessServerGridJs()
+    fake.enabled = False  # earlier request consumed the trigger; server still busy
+    bot = Bot(fake)
+
+    with pytest.raises(cmd.MinethonError, match="已放棄送出新請求"):
+        bot._grid_transaction(
+            (fake.objective, fake.username, None), 1, 1, "精確格狀移動"
+        )
+
+    assert fake.commands == []  # nothing was sent on a dirty channel
+
+
+def test_server_grid_scoreless_stale_reenable_is_drained_before_next_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(cmd.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cmd.time, "sleep", clock.sleep)
+    fake = ScorelessServerGridJs(acknowledge=False)
+    bot = Bot(fake)
+
+    with pytest.raises(cmd.MinethonError):
+        bot.move_forward(1)  # request never processed in time
+
+    # The server processes the old request much later: cell applied and the
+    # stale re-enable arrives before the next transaction starts.
+    fake._z -= 1.0
+    fake._pending_payload = None
+    fake.enabled = True
+    fake.acknowledge = True
+    clock.now = 0.0  # fresh timeout budget for the next call
+
+    pos = bot.move_forward(1)
+
+    # The stale re-enable was consumed pre-send; the second call sent its own
+    # request and only returned after that request's processing.
+    assert fake.commands == [
+        f"/trigger {fake.objective} set 11",
+        f"/trigger {fake.objective} set 11",
+    ]
+    assert pos == (0.5, 64.0, -1.5)
+
+
 def test_server_grid_scoreless_provider_must_be_enabled_for_this_bot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
