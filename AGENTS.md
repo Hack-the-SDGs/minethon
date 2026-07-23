@@ -60,7 +60,11 @@ bot.bind(Greeter())
   `move_*` 從 `bot.scoreboards` 自動發現唯一 provider，整數 `blocks>1` 拆成逐格 trigger；若 client 收得到
   score，使用負 payload ACK，否則用 Brigadier completion 驗證 trigger 對本 bot 已 enable，並以 datapack
   重新 enable trigger 作 ACK。找不到 provider 時維持 `setControlState` + 位置輪詢 fallback，多個 provider
-  則明確報錯。SDK 不解析 group、帳號格式或關卡命名；快取只保存 objective 名，每次使用仍驗證 marker
+  則明確報錯。轉向亦為伺服器權威：provider 存在時 `set_turn`（含 `turn`/`turn_left`/`turn_right` 委託路徑）
+  把目標 yaw 量化到最近四正向，送出轉向碼 payload（方向碼＋4，即 5..8＝面向北東南西）並等相同交易的
+  ACK；datapack 以帶絕對角度的 tp 執行，ACK 返回時 client/server yaw 保證一致。理由：client `look` 封包
+  無送達保證（撞上伺服器 teleport confirm 窗口會被丟棄且 mineflayer 去重後不重送），會造成遊戲內朝向
+  與 SDK 認知永久分歧。無 provider 時 `set_turn` 維持原本 client-side `look` fallback。SDK 不解析 group、帳號格式或關卡命名；快取只保存 objective 名，每次使用仍驗證 marker
   及本 bot 的 score／trigger 授權。同一 Bot 的 provider discovery／sequence／ACK 交易必須由 per-instance
   lock 序列化，避免 main 與 callback 共用 ACK channel
 - 角度一律「度」；`get_height`/`set_height` 是大小等級 1~5，讀寫 entity `scale` 屬性（實際縮放仍需伺服器端配合）

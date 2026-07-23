@@ -80,6 +80,11 @@ _GRID_MOVE_DIRECTIONS = {
     "south": 3,
     "west": 4,
 }
+# Turn-in-place codes share the provider's ones digit: direction code + 4
+# (5..8 = face north/east/south/west). The datapack rotates the bot with an
+# absolute-rotation tp, so the ack also syncs the client yaw to the exact
+# cardinal — rotation becomes server-authoritative like grid moves.
+_GRID_TURN_OFFSET = 4
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
@@ -639,6 +644,71 @@ class Commands:
         object.__setattr__(self, _GRID_MOVE_PROVIDER_CACHE_ATTR, objective)
         return objective, username, score
 
+    def _next_grid_sequence(self, score: int | None) -> int:
+        """First sequence number for a new provider transaction batch."""
+        if score is None:
+            return getattr(self, _GRID_MOVE_SEQUENCE_ATTR, 0) + 1
+        return abs(score) // _GRID_MOVE_SEQUENCE_BASE + 1
+
+    def _grid_transaction(
+        self,
+        context: tuple[str, str, int | None],
+        sequence: int,
+        code: int,
+        action: str,
+    ) -> int:
+        """Send one sequenced provider request and wait for its exact ack.
+
+        Returns the effective (wrap-adjusted) sequence that was used, so the
+        caller can continue a multi-step batch with ``+ 1``.
+        """
+        objective, username, score = context
+        if sequence > _GRID_MOVE_MAX_SEQUENCE:
+            sequence = 1
+        payload = sequence * _GRID_MOVE_SEQUENCE_BASE + code
+        deadline = time.monotonic() + _GRID_MOVE_TIMEOUT
+        if score is None:
+            # The scoreless ACK ("trigger enabled again") carries no payload
+            # identity, so a timed-out request's delayed re-enable could be
+            # misread as the next request's ACK. Drain it *before* sending:
+            # only send once the trigger is observed enabled, which means any
+            # earlier request has been fully processed. Every enabled state
+            # seen after our send can then only come from our own request
+            # (the provider re-enables in the same tick it processes).
+            while objective not in self._enabled_trigger_objectives():
+                if time.monotonic() >= deadline:
+                    msg = (
+                        f"伺服器未完成{action}: 前一筆 provider 請求仍未被伺服器"
+                        "處理（trigger 尚未重新啟用），已放棄送出新請求。"
+                        "請確認任務進行中，且 datapack 與 minethon 版本一致。"
+                    )
+                    raise MinethonError(msg)
+                time.sleep(_POLL_SECONDS)
+        self._js.chat(f"/trigger {objective} set {payload}")
+        while True:
+            score_ack = self._scoreboard_value(objective, username) == -payload
+            trigger_ack = score is None and (
+                objective in self._enabled_trigger_objectives()
+            )
+            if score_ack or trigger_ack:
+                break
+            if time.monotonic() >= deadline:
+                if score is None:
+                    msg = (
+                        f"伺服器未完成{action}: provider trigger 未重新啟用。"
+                        "請確認任務已開始，且 datapack 與 minethon 版本一致。"
+                    )
+                else:
+                    msg = (
+                        f"伺服器未完成{action}。請確認任務已開始，且 "
+                        "datapack 與 minethon 版本一致; 也請確認 provider objective "
+                        "的 criteria 是 trigger，而不是 dummy。"
+                    )
+                raise MinethonError(msg)
+            time.sleep(_POLL_SECONDS)
+        object.__setattr__(self, _GRID_MOVE_SEQUENCE_ATTR, sequence)
+        return sequence
+
     def _walk_server_grid(
         self,
         control: str,
@@ -650,42 +720,31 @@ class Commands:
         if not requested.is_integer():
             msg = "此任務使用精確格狀移動，move_* 的格數必須是整數。"
             raise ValueError(msg)
-        objective, username, score = context
-        if score is None:
-            sequence = getattr(self, _GRID_MOVE_SEQUENCE_ATTR, 0) + 1
-        else:
-            sequence = abs(score) // _GRID_MOVE_SEQUENCE_BASE + 1
+        sequence = self._next_grid_sequence(context[2])
         direction = _grid_direction(control, float(self._entity().yaw))
         for _ in range(int(requested)):
-            if sequence > _GRID_MOVE_MAX_SEQUENCE:
-                sequence = 1
-            payload = sequence * _GRID_MOVE_SEQUENCE_BASE + direction
-            self._js.chat(f"/trigger {objective} set {payload}")
-            deadline = time.monotonic() + _GRID_MOVE_TIMEOUT
-            while True:
-                score_ack = self._scoreboard_value(objective, username) == -payload
-                trigger_ack = score is None and (
-                    objective in self._enabled_trigger_objectives()
-                )
-                if score_ack or trigger_ack:
-                    break
-                if time.monotonic() >= deadline:
-                    if score is None:
-                        msg = (
-                            "伺服器未完成精確格狀移動: provider trigger 未重新啟用。"
-                            "請確認任務已開始，且 datapack 與 minethon 版本一致。"
-                        )
-                    else:
-                        msg = (
-                            "伺服器未完成精確格狀移動。請確認任務已開始，且 "
-                            "datapack 與 minethon 版本一致; 也請確認 provider objective "
-                            "的 criteria 是 trigger，而不是 dummy。"
-                        )
-                    raise MinethonError(msg)
-                time.sleep(_POLL_SECONDS)
-            object.__setattr__(self, _GRID_MOVE_SEQUENCE_ATTR, sequence)
+            sequence = self._grid_transaction(
+                context, sequence, direction, "精確格狀移動"
+            )
             sequence += 1
         return self.get_pos()
+
+    def _turn_server_grid(
+        self,
+        yaw: float,
+        context: tuple[str, str, int | None],
+    ) -> tuple[float, float]:
+        """Ask the server to face the cardinal nearest ``yaw`` (degrees).
+
+        The turn is one provider transaction (code = direction + 4). The
+        datapack applies an absolute-rotation tp, so once the ack arrives both
+        the server and this client agree on the exact cardinal yaw — a
+        subsequent ``action("put out")`` can never race the rotation.
+        """
+        code = _grid_direction("forward", math.radians(yaw)) + _GRID_TURN_OFFSET
+        sequence = self._next_grid_sequence(context[2])
+        self._grid_transaction(context, sequence, code, "精確轉向")
+        return (self.get_yaw(), self.get_pitch())
 
     def _walk(self, control: str, blocks: float) -> tuple[float, float, float]:
         """Move through an advertised server grid, or fall back to client physics.
@@ -766,9 +825,23 @@ class Commands:
         """Face an absolute ``yaw`` (degrees); returns the new ``(yaw, pitch)``.
 
         ``0`` faces -Z (north); larger yaw turns counter-clockwise. Pitch is
-        left unchanged. Ref: mineflayer/docs/api.md — bot.look(yaw, pitch, force).
+        left unchanged. On a server that advertises the grid-move provider the
+        turn is server-authoritative: ``yaw`` is quantised to the nearest
+        cardinal and sent as a provider transaction, and the method returns
+        only after the server has rotated the bot and acknowledged — client
+        ``look`` packets alone have no delivery guarantee (a look racing a
+        server teleport's confirm window is dropped and never resent), which
+        used to leave the in-world facing stale. Without a provider this
+        falls back to the plain client-side look.
+        Ref: mineflayer/docs/api.md — bot.look(yaw, pitch, force).
         """
         entity = self._entity()
+        # Same transaction discipline as _walk: discovery, sequence derivation
+        # and ACK waiting must happen under the per-Bot lock.
+        with self._grid_move_lock:
+            grid_context = self._grid_move_context()
+            if grid_context is not None:
+                return self._turn_server_grid(yaw, grid_context)
         self._js.look(math.radians(yaw), float(entity.pitch), True)
         return (self.get_yaw(), self.get_pitch())
 
