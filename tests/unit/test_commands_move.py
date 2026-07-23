@@ -36,6 +36,7 @@ class MoveJs:
         return SimpleNamespace(
             position=SimpleNamespace(x=self._x, y=64.0, z=self._z),
             yaw=self.yaw,
+            pitch=0.0,
         )
 
     def setControlState(self, control: str, state: bool) -> None:  # noqa: N802
@@ -73,7 +74,17 @@ class GridLockJs(MoveJs):
         return SimpleNamespace(
             position=SimpleNamespace(x=self._x, y=64.0, z=self._z),
             yaw=self.yaw,
+            pitch=0.0,
         )
+
+
+# Provider turn codes (direction + 4) -> resulting mineflayer yaw in radians.
+TURN_YAWS = {
+    cmd._GRID_MOVE_DIRECTIONS["north"] + cmd._GRID_TURN_OFFSET: 0.0,
+    cmd._GRID_MOVE_DIRECTIONS["east"] + cmd._GRID_TURN_OFFSET: 3 * cmd.math.pi / 2,
+    cmd._GRID_MOVE_DIRECTIONS["south"] + cmd._GRID_TURN_OFFSET: cmd.math.pi,
+    cmd._GRID_MOVE_DIRECTIONS["west"] + cmd._GRID_TURN_OFFSET: cmd.math.pi / 2,
+}
 
 
 class CountingScoreboards(dict[str, SimpleNamespace]):
@@ -142,9 +153,14 @@ class ServerGridJs(MoveJs):
             cmd._GRID_MOVE_DIRECTIONS["west"]: (-1.0, 0.0),
         }
         if self.move:
-            dx, dz = offsets[direction]
-            self._x += dx
-            self._z += dz
+            if direction in offsets:
+                dx, dz = offsets[direction]
+                self._x += dx
+                self._z += dz
+            else:
+                # Turn code: the server rotates the bot and the absolute-
+                # rotation tp syncs the client yaw to the exact cardinal.
+                self.yaw = TURN_YAWS[direction]
         item = self.scoreboards[objective].itemsMap[self.username]
         item.value = -payload
         if objective == self.objective:
@@ -191,15 +207,19 @@ class ScorelessServerGridJs(MoveJs):
         self.tab_queries.append((text, assume_command, send_block_in_sight, timeout))
         if self._pending_payload is not None and self.acknowledge:
             direction = self._pending_payload % cmd._GRID_MOVE_SEQUENCE_BASE
-            dx, dz = {
+            offsets = {
                 cmd._GRID_MOVE_DIRECTIONS["north"]: (0.0, -1.0),
                 cmd._GRID_MOVE_DIRECTIONS["east"]: (1.0, 0.0),
                 cmd._GRID_MOVE_DIRECTIONS["south"]: (0.0, 1.0),
                 cmd._GRID_MOVE_DIRECTIONS["west"]: (-1.0, 0.0),
-            }[direction]
+            }
             if self.move:
-                self._x += dx
-                self._z += dz
+                if direction in offsets:
+                    dx, dz = offsets[direction]
+                    self._x += dx
+                    self._z += dz
+                else:
+                    self.yaw = TURN_YAWS[direction]
             self._pending_payload = None
             self.enabled = True
         objectives = set(self.additional_enabled)
@@ -615,6 +635,101 @@ def test_server_grid_blocked_move_acknowledges_without_position_drift() -> None:
     assert pos == (0.5, 64.0, 0.5)
     assert fake.commands == [f"/trigger {fake.objective} set 11"]
     assert fake.score.value == -11
+
+
+@pytest.mark.parametrize(
+    ("target_yaw", "payload", "expected_yaw"),
+    [
+        (0.0, 15, 0.0),  # north
+        (270.0, 16, 270.0),  # east
+        (180.0, 17, 180.0),  # south
+        (90.0, 18, 90.0),  # west
+        (30.0, 15, 0.0),  # quantised to the nearest cardinal (north)
+        (359.0, 15, 0.0),  # wraps and quantises to north
+    ],
+)
+def test_server_grid_turn_is_a_provider_transaction(
+    target_yaw: float,
+    payload: int,
+    expected_yaw: float,
+) -> None:
+    fake = ServerGridJs()
+
+    result = Bot(fake).set_turn(target_yaw)
+
+    assert fake.commands == [f"/trigger {fake.objective} set {payload}"]
+    assert fake.score.value == -payload
+    assert result[0] == pytest.approx(expected_yaw)
+    assert result[1] == pytest.approx(0.0)
+    assert fake.history == []  # never touches client controls or look
+
+
+def test_turn_left_and_right_ride_the_provider_and_stay_cardinal() -> None:
+    fake = ServerGridJs()  # yaw 0.0 -> facing north
+    bot = Bot(fake)
+
+    left = bot.turn_left()  # 0 + 90 = west
+    right = bot.turn_right()  # 90 - 90 = north
+
+    assert fake.commands == [
+        f"/trigger {fake.objective} set 18",
+        f"/trigger {fake.objective} set 25",
+    ]
+    assert left[0] == pytest.approx(90.0)
+    assert right[0] == pytest.approx(0.0)
+    assert fake.history == []
+
+
+def test_server_grid_move_then_turn_shares_the_sequence_space() -> None:
+    fake = ServerGridJs()
+    bot = Bot(fake)
+
+    bot.move_forward(1)  # north, payload 11
+    bot.set_turn(90.0)  # west turn, payload 28
+    pos = bot.move_forward(1)  # forward now faces west, payload 34
+
+    assert fake.commands == [
+        f"/trigger {fake.objective} set 11",
+        f"/trigger {fake.objective} set 28",
+        f"/trigger {fake.objective} set 34",
+    ]
+    assert pos == (-0.5, 64.0, -0.5)
+    assert fake.score.value == -34
+
+
+def test_server_grid_refused_turn_acks_without_yaw_change() -> None:
+    fake = ServerGridJs(move=False)
+
+    result = Bot(fake).set_turn(90.0)
+
+    assert fake.commands == [f"/trigger {fake.objective} set 18"]
+    assert fake.score.value == -18
+    # The server kept the old facing; set_turn reports what is actually true.
+    assert result[0] == pytest.approx(0.0)
+
+
+def test_server_grid_scoreless_provider_turns_with_reenable_ack() -> None:
+    fake = ScorelessServerGridJs()
+
+    result = Bot(fake).set_turn(180.0)
+
+    assert fake.commands == [f"/trigger {fake.objective} set 17"]
+    assert result[0] == pytest.approx(180.0)
+    assert fake.history == []
+
+
+def test_server_grid_turn_times_out_with_turn_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(cmd.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cmd.time, "sleep", clock.sleep)
+    fake = ServerGridJs(acknowledge=False)
+
+    with pytest.raises(cmd.MinethonError, match="精確轉向"):
+        Bot(fake).set_turn(0.0)
+
+    assert clock.now >= cmd._GRID_MOVE_TIMEOUT
 
 
 def test_server_grid_quantises_facing_before_request() -> None:
