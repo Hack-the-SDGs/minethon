@@ -1,6 +1,6 @@
 [project]
 name = "minethon"
-version = "0.4.6"
+version = "0.4.7"
 description = "A Python-first Mineflayer SDK with a synchronous, IDE-friendly callback API."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -145,6 +145,7 @@ mccabe.max-complexity = 20
     "TC001", "TC003",      # type-checking imports not needed in standalone scripts
     "PLR0915",             # long main() functions OK in demos
     "SIM113",              # enumerate not always clearer
+    "PLW0603",             # module-level state (e.g. DFS heading) OK in demos
 ]
 
 [tool.pyright]
