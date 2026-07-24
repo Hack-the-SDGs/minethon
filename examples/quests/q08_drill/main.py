@@ -18,7 +18,11 @@ import sys
 from minethon import PlayerNotFoundError, create_bot
 
 guide = "使用者 ID"  # ← 帶隊玩家的遊戲名稱
-number = sys.argv[1] if len(sys.argv) > 1 else "1"  # 機器人編號 1..5（從指令參數帶入）
+# 機器人編號 1..5（從指令參數帶入）；先驗證，避免打錯組成無效帳號難以除錯
+arg = sys.argv[1] if len(sys.argv) > 1 else "1"
+if not arg.isdigit() or not 1 <= int(arg) <= 5:
+    raise SystemExit("機器人編號只能是 1 到 5，例如：uv run main.py 3")
+number = int(arg)
 
 bot = create_bot(f"g_drill_{number}", instruction_sleep=0)
 bot.wait_spawn()
