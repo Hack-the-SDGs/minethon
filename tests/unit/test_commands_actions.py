@@ -180,6 +180,37 @@ def test_use_player_before_spawn_raises() -> None:
         Bot(PlayerUseJs({}, spawned=False)).use_player("Alice")
 
 
+def test_get_player_pos_returns_native_float_tuple() -> None:
+    # ints in -> floats out, so follow loops get a plain (x, y, z), never a Vec3.
+    target = SimpleNamespace(position=SimpleNamespace(x=2, y=70, z=3), isValid=True)
+    fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
+
+    result = Bot(fake).get_player_pos("Alice")
+
+    assert result == (2.0, 70.0, 3.0)
+    assert all(type(value) is float for value in result)
+
+
+@pytest.mark.parametrize(
+    "players",
+    [{}, {"Alice": SimpleNamespace(entity=None)}],
+)
+def test_get_player_pos_raises_when_target_is_not_loaded(
+    players: dict[str, object],
+) -> None:
+    from minethon.errors import PlayerNotFoundError
+
+    with pytest.raises(PlayerNotFoundError, match="Alice"):
+        Bot(PlayerUseJs(players)).get_player_pos("Alice")
+
+
+def test_get_player_pos_before_spawn_raises() -> None:
+    from minethon.errors import NotSpawnedError
+
+    with pytest.raises(NotSpawnedError):
+        Bot(PlayerUseJs({}, spawned=False)).get_player_pos("Alice")
+
+
 def test_sneak_toggles_control_and_returns_state() -> None:
     fake = ActJs()
 
