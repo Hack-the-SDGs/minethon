@@ -2982,6 +2982,18 @@ class Bot:
         永遠回傳 `True`。
         """
 
+    def get_player_pos(self, username: str) -> tuple[float, float, float]:
+        """讀取指定玩家的即時座標 `(x, y, z)`——用來跟隨或瞄準
+
+        回傳原生 float tuple（不是 Vec3），所以跟隨迴圈可以直接寫
+        `bot.look_at(*bot.get_player_pos(名字))` 再 `bot.move_forward()`。
+        若玩家不在線、不同世界，或不在機器人的已載入實體範圍內，丟出
+        `PlayerNotFoundError`。
+
+        Args:
+            username: 要讀取座標的玩家名稱
+        """
+
     def use_player(self, username: str) -> bool:
         """面向指定玩家實體的中心並互動
 
