@@ -1113,6 +1113,33 @@ class Commands:
             self._js.activateItem()
         return True
 
+    def get_player_pos(self, username: str) -> tuple[float, float, float]:
+        """Live ``(x, y, z)`` of the named player — for following or aiming.
+
+        Reads the player's current entity position immediately (the same lookup
+        :meth:`use_player` uses) and returns native floats, so a follow loop can
+        write ``bot.look_at(*bot.get_player_pos(name))`` then
+        ``bot.move_forward()`` without touching ``Vec3``. Raises
+        :class:`PlayerNotFoundError` when the player is offline, in another
+        world, or outside the bot's loaded entity range.
+
+        Ref: mineflayer/docs/api.md — bot.players[name].entity.position.
+        """
+        self._entity()
+        try:
+            player = self._js.players[username]
+        except IndexError, KeyError, TypeError:
+            player = None
+        target = getattr(player, "entity", None)
+        if target is None or not bool(getattr(target, "isValid", True)):
+            msg = (
+                f"找不到玩家 {username!r}。"
+                "請確認對方在線、與機器人在同一世界，且位於已載入範圍內。"
+            )
+            raise PlayerNotFoundError(msg)
+        position = target.position
+        return (float(position.x), float(position.y), float(position.z))
+
     @_paced
     def use_player(self, username: str) -> bool:
         """Right-click the named player's current entity.
