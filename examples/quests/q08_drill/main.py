@@ -24,7 +24,9 @@ if not arg.isdigit() or not 1 <= int(arg) <= 5:
     raise SystemExit("機器人編號只能是 1 到 5，例如：uv run main.py 3")
 number = int(arg)
 
-bot = create_bot(f"g_drill_{number}", instruction_sleep=0)
+# view_distance="short"：只載最近的區塊，一台電腦同時跑多隻時較不卡。
+# 本關只讀座標＋移動、不對別的實體互動（不像 q07 要疊到人身上），縮短視距是安全的。
+bot = create_bot(f"g_drill_{number}", instruction_sleep=0, view_distance="short")
 bot.wait_spawn()
 
 while True:
