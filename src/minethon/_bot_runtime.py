@@ -550,11 +550,6 @@ def create_bot(
     # top of our friendly message. Turn it off; _on_login_error handles errors.
     # Ref: mineflayer lib/loader.js — options.logErrors ?? true.
     js_options.setdefault("logErrors", False)
-    # Default to a "short" (~64-block) view so each bot stays light: many bots on
-    # one machine — or a weak server — keep up, while still covering
-    # find_block/find_blocks' 64-block search range. Pass view_distance=... to
-    # override (e.g. "tiny" to cram even more bots onto one test PC).
-    js_options.setdefault("viewDistance", "short")
     mineflayer = get_mineflayer()
     _install_quiet_interrupt()
     js_bot = mineflayer.createBot(js_options)
