@@ -1118,13 +1118,14 @@ class Commands:
         """Right-click the named player's current entity.
 
         Looks at the center of the player's live bounding box immediately
-        before sending the entity-interaction packet, so callers never need to
-        calculate a yaw/pitch for players at different heights. Raises
+        before sending the same INTERACT_AT then INTERACT sequence as a real
+        client right-click, so callers never need to calculate a yaw/pitch for
+        players at different heights. Raises
         :class:`PlayerNotFoundError` when the player is offline, in another
         world, or outside the bot's loaded entity range.
 
-        Ref: mineflayer/docs/api.md — bot.players, bot.lookAt,
-        bot.activateEntity.
+        Ref: mineflayer index.d.ts and lib/plugins/inventory.js —
+        bot.players, bot.activateEntityAt, bot.activateEntity.
         """
         self._entity()
         try:
@@ -1141,10 +1142,12 @@ class Commands:
 
         position = target.position
         center_y = float(position.y) + float(getattr(target, "height", 1.8)) / 2
-        self._js.lookAt(
-            _make_vec3(float(position.x), center_y, float(position.z)),
-            True,
+        click_point = _make_vec3(
+            float(position.x),
+            center_y,
+            float(position.z),
         )
+        self._js.activateEntityAt(target, click_point)
         self._js.activateEntity(target)
         return True
 

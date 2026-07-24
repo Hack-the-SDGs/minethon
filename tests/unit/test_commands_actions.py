@@ -131,8 +131,8 @@ class PlayerUseJs(ActJs):
         if not spawned:
             self.entity = None
 
-    def lookAt(self, point: object, force: bool) -> None:  # noqa: N802
-        self.calls.append(("lookAt", point, force))
+    def activateEntityAt(self, entity: object, point: object) -> None:  # noqa: N802
+        self.calls.append(("activateEntityAt", entity, point))
 
     def activateEntity(self, entity: object) -> None:  # noqa: N802
         self.calls.append(("activateEntity", entity))
@@ -148,7 +148,7 @@ def player_entity(
     )
 
 
-def test_use_player_aims_at_live_center_and_activates(
+def test_use_player_interacts_at_live_center_then_activates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
@@ -156,21 +156,73 @@ def test_use_player_aims_at_live_center_and_activates(
     fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
 
     assert Bot(fake).use_player("Alice") is True
-    assert ("lookAt", (2.0, 77.0, 3.0), True) in fake.calls
-    assert ("activateEntity", target) in fake.calls
+    assert fake.calls == [
+        ("activateEntityAt", target, (2.0, 77.0, 3.0)),
+        ("activateEntity", target),
+    ]
+
+
+def test_use_player_uses_default_height_with_negative_fractional_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    target = SimpleNamespace(
+        position=SimpleNamespace(x=-12.5, y=-4.25, z=0.125),
+        isValid=True,
+    )
+    fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
+
+    assert Bot(fake).use_player("Alice") is True
+    assert fake.calls == [
+        ("activateEntityAt", target, (-12.5, -3.35, 0.125)),
+        ("activateEntity", target),
+    ]
+
+
+def test_use_player_does_not_fall_through_when_interact_at_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    target = player_entity()
+    fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
+
+    def fail_interact_at(entity: object, point: object) -> None:
+        fake.calls.append(("activateEntityAt", entity, point))
+        msg = "INTERACT_AT failed"
+        raise RuntimeError(msg)
+
+    fake.activateEntityAt = fail_interact_at  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="INTERACT_AT failed"):
+        Bot(fake).use_player("Alice")
+    assert fake.calls == [("activateEntityAt", target, (2.0, 70.9, 3.0))]
 
 
 @pytest.mark.parametrize(
     "players",
-    [{}, {"Alice": SimpleNamespace(entity=None)}],
+    [
+        {},
+        {"Alice": SimpleNamespace(entity=None)},
+        {"Alice": SimpleNamespace(entity=player_entity())},
+    ],
+    ids=["missing-player", "missing-entity", "invalid-entity"],
 )
 def test_use_player_raises_when_target_is_not_loaded(
     players: dict[str, object],
 ) -> None:
     from minethon.errors import PlayerNotFoundError
 
-    with pytest.raises(PlayerNotFoundError, match="Alice"):
-        Bot(PlayerUseJs(players)).use_player("Alice")
+    target = getattr(players.get("Alice"), "entity", None)
+    if target is not None:
+        target.isValid = False
+
+    fake = PlayerUseJs(players)
+    with pytest.raises(PlayerNotFoundError, match="Alice") as exc_info:
+        Bot(fake).use_player("Alice")
+    assert str(exc_info.value) == (
+        "找不到玩家 'Alice'。請確認對方在線、與機器人在同一世界，且位於已載入範圍內。"
+    )
+    assert fake.calls == []
 
 
 def test_use_player_before_spawn_raises() -> None:
