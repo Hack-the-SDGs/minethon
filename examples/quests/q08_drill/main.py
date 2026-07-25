@@ -1,9 +1,8 @@
 from minethon import create_bot
 
 guide = "玩家名稱"
-number = input()
 
-bot = create_bot(f"g_drill_{number}")
+bot = create_bot("g_drill_1")
 
 while True:
     x, y, z = bot.get_player_pos(guide)
