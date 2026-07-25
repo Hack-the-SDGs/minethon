@@ -276,7 +276,7 @@ def test_get_block_in_front_reports_fire(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
     fake = ActJs(block_at=block("fire", 0, 64, -1))
 
-    assert Bot(fake).get_block_in_front() == ((0, 64, -1), "fire")
+    assert Bot(fake).get_block_in_front() == "fire"
 
 
 def test_get_block_in_front_none_over_open_ground(

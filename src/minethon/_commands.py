@@ -486,21 +486,27 @@ class Commands:
         p = block.position
         return ((int(p.x), int(p.y), int(p.z)), str(block.name))
 
-    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
-        """Solid block one step ahead as ``((x, y, z), name)``, or ``None``.
+    def get_block_in_front(self) -> str | None:
+        """Name of the solid block one step ahead, or ``None`` when clear.
 
         Public face of the forward probe ``dig()`` falls back on: checks the
         feet-level block one step along the dominant facing axis, then head
         height. Non-solid names (air/water/lava…) read as "nothing in front";
         anything else — including fire — is reported, so a script can inspect
         what it is about to walk into.
+
+        Beware the difference from :meth:`get_block`: there ``None`` means the
+        point isn't loaded and open air comes back as ``"air"``, while here
+        ``None`` means "nothing solid ahead" — the cell may be air, water or
+        lava. No coordinate is returned because it is always one step along the
+        facing axis; use :meth:`find_block` or :meth:`look_block` when the
+        position matters.
         Ref: mineflayer lib/plugins/ray_trace.js getViewDirection.
         """
         block = self._block_in_front()
         if block is None:
             return None
-        p = block.position
-        return ((int(p.x), int(p.y), int(p.z)), str(block.name))
+        return str(block.name)
 
     def find_block(self, name: str) -> tuple[int, int, int] | None:
         """Nearest block named ``name`` as ``(x, y, z)`` or ``None``.

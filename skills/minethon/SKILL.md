@@ -58,7 +58,7 @@ bot = create_bot(
 | `get_block(x, y, z)` | `str` or `None` | Block name at coords |
 | `get_block_property(x, y, z, property_name)` | `str/int/bool` or `None` | Get block state property (e.g. "lit", "facing", "powered") |
 | `look_block()` | `((x,y,z), name)` or `None` | Block I'm aiming at |
-| `get_block_in_front()` | `((x,y,z), name)` or `None` | Solid block one step ahead (reports fire) |
+| `get_block_in_front()` | `str` or `None` | Name of the solid block one step ahead (reports fire); `None` = nothing solid |
 | `find_block(name)` | `(x,y,z)` or `None` | Nearest block by name |
 | `find_blocks(name, max=16)` | `list[(x,y,z)]` | Nearest N blocks by name |
 | `move_forward(blocks=1)` | `(x,y,z)` | Walk forward; also `move_backward/left/right` |
