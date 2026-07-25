@@ -29,10 +29,10 @@ def move_to(direction):
     turn_to(direction)
     block = bot.get_block_in_front()
 
-    if block is not None and not str(block[1]).endswith("fire"):
+    if block is not None and not block.endswith("fire"):
         return False
 
-    while block is not None and str(block[1]).endswith("fire"):
+    while block is not None and block.endswith("fire"):
         bot.action("put out")
         block = bot.get_block_in_front()
 
