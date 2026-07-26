@@ -43,10 +43,10 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
   does not have this property.
 - `look_block() -> tuple[tuple[int,int,int], str] | None` — the block the bot is
   aiming at as `((x, y, z), name)`, or `None` if nothing is within ~6 blocks.
-- `get_block_in_front() -> str | None` — name of the solid block one step ahead
+- `get_front_block() -> str | None` — name of the solid block one step ahead
   (feet level first, then head level), or `None` when only air/liquid is ahead.
   Fire **is** reported, so a script can check
-  `bot.get_block_in_front() == "fire"` before acting. No coordinate: it is
+  `bot.get_front_block() == "fire"` before acting. No coordinate: it is
   always one step along the facing axis. Note `None` here means "nothing solid
   ahead", not "read failed" as it does for `get_block`.
 - `find_block(name) -> tuple[int,int,int] | None` — nearest block matching the

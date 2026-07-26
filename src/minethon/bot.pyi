@@ -2832,7 +2832,7 @@ class Bot:
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
 
-    def get_block_in_front(self) -> str | None:
+    def get_front_block(self) -> str | None:
         """正前方一格的方塊名稱；前方沒有固體方塊時回傳 `None`
 
         沿目前朝向的主軸往前一格，先看腳的高度、再看頭的高度。

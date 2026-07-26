@@ -35,7 +35,7 @@ class ActJs:
         self.dig_timeouts: list[float] = []
         self.controls: dict[str, bool] = {}
         # Spawned at (0, 64, 0) facing yaw 0 (south, +z) — lets dig() fall back
-        # to _block_in_front when nothing is aimed at.
+        # to _front_block when nothing is aimed at.
         self.entity = SimpleNamespace(
             position=SimpleNamespace(x=0.0, y=64.0, z=0.0), yaw=0.0
         )
@@ -83,7 +83,7 @@ def test_dig_returns_none_when_only_air_in_front() -> None:
     assert Bot(ActJs(cursor=None, block_at=None)).dig() is None
 
 
-def test_dig_falls_back_to_block_in_front(
+def test_dig_falls_back_to_front_block(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Not aiming at anything, but a solid block sits one step forward (yaw 0
@@ -271,20 +271,20 @@ def test_sneak_toggles_control_and_returns_state() -> None:
     assert Bot(fake).sneak(False) is False
 
 
-def test_get_block_in_front_reports_fire(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_front_block_reports_fire(monkeypatch: pytest.MonkeyPatch) -> None:
     # Fire is not in the non-solid skip list, so the forward probe reports it.
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
     fake = ActJs(block_at=block("fire", 0, 64, -1))
 
-    assert Bot(fake).get_block_in_front() == "fire"
+    assert Bot(fake).get_front_block() == "fire"
 
 
-def test_get_block_in_front_none_over_open_ground(
+def test_get_front_block_none_over_open_ground(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
 
-    assert Bot(ActJs(block_at=None)).get_block_in_front() is None
+    assert Bot(ActJs(block_at=None)).get_front_block() is None
 
 
 class TriggerJs(ActJs):

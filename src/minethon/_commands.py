@@ -486,7 +486,7 @@ class Commands:
         p = block.position
         return ((int(p.x), int(p.y), int(p.z)), str(block.name))
 
-    def get_block_in_front(self) -> str | None:
+    def get_front_block(self) -> str | None:
         """Name of the solid block one step ahead, or ``None`` when clear.
 
         Public face of the forward probe ``dig()`` falls back on: checks the
@@ -503,7 +503,7 @@ class Commands:
         position matters.
         Ref: mineflayer lib/plugins/ray_trace.js getViewDirection.
         """
-        block = self._block_in_front()
+        block = self._front_block()
         if block is None:
             return None
         return str(block.name)
@@ -1026,14 +1026,14 @@ class Commands:
             math.floor(float(ent.position.z)) + step[1],
         )
 
-    def _block_in_front(self) -> Any:
+    def _front_block(self) -> Any:
         """Solid block one step ahead of the bot, or ``None`` if only air.
 
         Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
         looking level over flat ground, where blockAtCursor sees only air).
         Steps along the dominant horizontal facing axis and checks the feet
         block first, then head height. The public native-type view of the same
-        probe is :meth:`get_block_in_front`.
+        probe is :meth:`get_front_block`.
         """
         bx, by, bz = self._front_cell()
         for y in (by, by + 1):  # feet level, then head level
@@ -1055,7 +1055,7 @@ class Commands:
         """
         block = self._js.blockAtCursor(_REACH_BLOCKS)
         if block is None:
-            block = self._block_in_front()
+            block = self._front_block()
         if block is None:
             return None
         p = block.position
