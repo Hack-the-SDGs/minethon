@@ -54,6 +54,7 @@ bot = create_bot(
 | `get_pos()` | `(x, y, z)` | Position tuple |
 | `get_yaw() / get_pitch()` | `float` | Facing, in **degrees** |
 | `get_sneak()` | `bool` | Is sneaking? |
+| `is_riding()` | `bool` | Am I sitting on / riding another entity? |
 | `get_hand()` | `(name, count)` or `None` | Held item |
 | `get_block(x, y, z)` | `str` or `None` | Block name at coords |
 | `get_block_property(x, y, z, property_name)` | `str/int/bool` or `None` | Get block state property (e.g. "lit", "facing", "powered") |

@@ -76,7 +76,7 @@ bot.bind(Greeter())
 - `action()` 的 `<username>_<action>` 是既有公開契約；grid-move provider 則刻意採 scoreboard title 自動發現，
   兩者不共用命名推導。不要把 group／stage 或 provider objective 參數加進公開 `move_*` API
 - **玩家互動走 `bot.use_player(username)`**：每次呼叫先讀 named player 的即時 entity 位置，以碰撞箱中心為絕對點依序呼叫 mineflayer `activateEntityAt`、`activateEntity`，送出與真實客戶端右鍵相同的 INTERACT_AT → INTERACT；不同高度不需學員自行算 yaw/pitch。玩家離線、不同世界或不在已載入範圍時丟 `PlayerNotFoundError`；實際可互動距離仍由伺服器的 entity-interaction range 驗證。
-- **每個行為指令收尾有 `instruction_sleep` 停頓**（預設 0.2s），讓學員逐行看出動作。實作是 `_commands.py` 的 `_paced` decorator，只掛在「葉節點」動作上（`turn_left`→`turn`→`set_turn` 只有 `set_turn` 被 pace，避免重複停頓）；讀取類指令（`get_*`/`find_*`）不 pace；`sneak` 也刻意不 pace，讓 sneak 開關的 toggle 迴圈不被延遲拖慢。`create_bot(instruction_sleep=0.1)` 調整間隔、`bypass_instruction_sleep=True` 關閉（設成 0）；值存在 `Bot._instruction_sleep`
+- **每個行為指令收尾有 `instruction_sleep` 停頓**（預設 0.2s），讓學員逐行看出動作。實作是 `_commands.py` 的 `_paced` decorator，只掛在「葉節點」動作上（`turn_left`→`turn`→`set_turn` 只有 `set_turn` 被 pace，避免重複停頓）；讀取類指令（`get_*`/`find_*`/`is_*`）不 pace；`sneak` 也刻意不 pace，讓 sneak 開關的 toggle 迴圈不被延遲拖慢。`create_bot(instruction_sleep=0.1)` 調整間隔、`bypass_instruction_sleep=True` 關閉（設成 0）；值存在 `Bot._instruction_sleep`
 - 完整方法清單與中文 hover 見 `src/minethon/bot.pyi`；AI 替學員寫程式用的說明見 `skills/minethon/`
 
 ## IDE 與型別層

@@ -412,6 +412,21 @@ class Commands:
         """
         return bool(self._js.getControlState("sneak"))
 
+    def is_riding(self) -> bool:
+        """Whether the bot is currently sitting on / riding another entity.
+
+        Reads mineflayer's own ``bot.vehicle`` rather than
+        ``bot.entity.vehicle``. It is the accessor the docs point at, it is
+        maintained for this bot specifically (including clearing it when the
+        vehicle despawns), and it is only ever ``null`` or an entity — the
+        per-entity field is ``delete``d on one detach path, so that one can
+        also be missing entirely.
+
+        Ref: mineflayer/docs/api.md — "mount" event, "use bot.vehicle";
+        lib/plugins/entities.js — attach_entity / set_passengers / entityGone.
+        """
+        return self._js.vehicle is not None
+
     def get_hand(self) -> tuple[str, int] | None:
         """Held item as ``(name, count)`` or ``None`` when empty-handed.
 

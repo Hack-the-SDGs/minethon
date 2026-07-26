@@ -29,6 +29,10 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
 ## State (read)
 
 - `get_sneak() -> bool` — currently sneaking?
+- `is_riding() -> bool` — currently sitting on / riding another entity (a boat,
+  a minecart, or another player via the server's sit plugin). Use it to wait for
+  a mount to take effect: `while not bot.is_riding(): ...`. Prefer it over
+  `bot.entity.vehicle`, which can be missing rather than `None`.
 - `get_hand() -> tuple[str, int] | None` — `(item_name, count)`, or `None` when
   empty-handed.
 

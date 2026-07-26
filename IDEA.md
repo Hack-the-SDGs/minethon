@@ -19,6 +19,7 @@ class Bot:
     # ── 狀態（讀） ──
     def get_height(self) -> int: ...                  # 目前大小等級 1~5
     def get_sneak(self) -> bool: ...
+    def is_riding(self) -> bool: ...  # ＋補：是否正坐在／騎在別的實體上
     def get_hand(self) -> tuple[str, int] | None: ... # (物品名, 數量) 或 None
 
     # ── 世界感知（讀）← 競賽必備，建議新增 ──
