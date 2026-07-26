@@ -1,60 +1,57 @@
-"""q10_labfire state 3: 用 online DFS 探索未知迷宮。"""
-
 from minethon import create_bot
 
 DIRS = [(-1, 0), (0, 1), (1, 0), (0, -1)]
 
 bot = create_bot("g_labfire_3")
-bot.wait_spawn()
 
 visited = set()
-current_direction = 0  # 出生面向北，也就是方向 0
+walls = set()
 
 
-def turn_to(direction):
-    """用 turn_left / turn_right 轉到指定方向。"""
-    global current_direction
-    steps = (direction - current_direction) % 4
-    if steps == 1:
-        bot.turn_right()
-    elif steps == 2:
-        bot.turn_right()
-        bot.turn_right()
-    elif steps == 3:
-        bot.turn_left()
-    current_direction = direction % 4
-
-
-def move_to(direction):
-    turn_to(direction)
-    block = bot.get_front_block()
-
-    if block is not None and not block.endswith("fire"):
-        return False
-
-    while block is not None and block.endswith("fire"):
+def scan(here, facing):
+    while bot.get_front_block() == "fire":
         bot.action("put out")
-        block = bot.get_front_block()
+    if bot.get_front_block() is not None:
+        dr, dc = DIRS[facing]
+        walls.add((here[0] + dr, here[1] + dc))
 
-    bot.move_forward(1)
-    return True
+
+def turn_to(here, facing, direction):
+    while facing != direction:
+        if (direction - facing) % 4 == 3:
+            bot.turn_left()
+            facing = (facing - 1) % 4
+        else:
+            bot.turn_right()
+            facing = (facing + 1) % 4
+        scan(here, facing)
+    return facing
 
 
-def dfs(row, col):
-    visited.add((row, col))
+def step(here, facing):
+    bot.move_forward()
+    scan(here, facing)
+
+
+def explore(here, facing):
+    visited.add(here)
 
     for direction, (dr, dc) in enumerate(DIRS):
-        next_row = row + dr
-        next_col = col + dc
-
-        if (next_row, next_col) in visited:
+        target = (here[0] + dr, here[1] + dc)
+        if target in visited or target in walls:
             continue
-        if not move_to(direction):
+
+        facing = turn_to(here, facing, direction)
+        if target in walls:
             continue
-        dfs(next_row, next_col)
 
-        turn_to(direction + 2)
-        bot.move_forward(1)
+        step(target, facing)
+        facing = explore(target, facing)
+        facing = turn_to(target, facing, (direction + 2) % 4)
+        step(here, facing)
+
+    return facing
 
 
-dfs(0, 0)
+scan((0, 0), 0)
+explore((0, 0), 0)
