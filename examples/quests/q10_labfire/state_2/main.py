@@ -1,5 +1,3 @@
-"""q10_labfire state 2: 在已知迷宮上執行 DFS。"""
-
 from minethon import create_bot
 
 START_ROW = 34
@@ -46,7 +44,6 @@ MAZE = [
 DIRS = [(-1, 0), (0, 1), (1, 0), (0, -1)]
 
 bot = create_bot("g_labfire_2")
-bot.wait_spawn()
 
 visited = set()
 current_direction = 0  # 出生面向北，也就是方向 0
@@ -57,7 +54,6 @@ def is_open(row, col):
 
 
 def turn_to(direction):
-    """用 turn_left / turn_right 轉到指定方向。"""
     global current_direction
     steps = (direction - current_direction) % 4
     if steps == 1:
@@ -72,11 +68,9 @@ def turn_to(direction):
 
 def move_to(direction):
     turn_to(direction)
-    block = bot.get_front_block()
-    while block is not None and block.endswith("fire"):
+    while bot.get_front_block() == "fire":
         bot.action("put out")
-        block = bot.get_front_block()
-    bot.move_forward(1)
+    bot.move_forward()
 
 
 def dfs(row, col):
@@ -93,7 +87,7 @@ def dfs(row, col):
         dfs(next_row, next_col)
 
         turn_to(direction + 2)
-        bot.move_forward(1)
+        bot.move_forward()
 
 
 dfs(START_ROW, START_COL)
