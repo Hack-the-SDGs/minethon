@@ -1832,9 +1832,11 @@ def render_bot(
     members = parse_members(bot_body)
     lines = [
         "class Bot:",
-        '    """Pythonic façade over a mineflayer Bot proxy.\n\n'
-        "    Every property and method below mirrors mineflayer's Bot interface.\n\n"
-        '    Ref: mineflayer/index.d.ts — interface Bot\n    """',
+        (
+            '    """Pythonic façade over a mineflayer Bot proxy.\n\n'
+            "    Every property and method below mirrors mineflayer's Bot interface.\n\n"
+            '    Ref: mineflayer/index.d.ts — interface Bot\n    """'
+        ),
         "    def __init__(self, js_bot: object) -> None: ...",
     ]
     # Skip private `_client` field (exposed as raw JS only) and any member the
@@ -1921,13 +1923,15 @@ def render_bot_options(body: str) -> list[str]:
     members = _bot_options_members(body)
     lines = [
         "class BotOptions(TypedDict, total=False):",
-        '    """Raw mineflayer options (camelCase).\n\n'
-        "    Matches mineflayer's `BotOptions` exactly — useful when you\n"
-        "    need to construct options programmatically. For the common\n"
-        "    keyword-argument path, prefer `create_bot(host=..., "
-        "auth_server=...)`\n"
-        "    which is typed by `CreateBotOptions` (snake_case).\n\n"
-        '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """',
+        (
+            '    """Raw mineflayer options (camelCase).\n\n'
+            "    Matches mineflayer's `BotOptions` exactly — useful when you\n"
+            "    need to construct options programmatically. For the common\n"
+            "    keyword-argument path, prefer `create_bot(host=..., "
+            "auth_server=...)`\n"
+            "    which is typed by `CreateBotOptions` (snake_case).\n\n"
+            '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """'
+        ),
     ]
     for m in members:
         if m.is_method:
@@ -1948,11 +1952,13 @@ def render_create_bot_options(body: str) -> list[str]:
     members = _bot_options_members(body)
     lines = [
         "class CreateBotOptions(TypedDict, total=False):",
-        '    """Snake-case options accepted by `create_bot(**opts)`.\n\n'
-        "    Every field mirrors `BotOptions` but uses the Python spelling\n"
-        "    (`auth_server` instead of `authServer`). `create_bot` converts\n"
-        "    each key to camelCase before calling mineflayer.\n\n"
-        '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """',
+        (
+            '    """Snake-case options accepted by `create_bot(**opts)`.\n\n'
+            "    Every field mirrors `BotOptions` but uses the Python spelling\n"
+            "    (`auth_server` instead of `authServer`). `create_bot` converts\n"
+            "    each key to camelCase before calling mineflayer.\n\n"
+            '    Ref: mineflayer/index.d.ts — interface BotOptions\n    """'
+        ),
     ]
     emitted: set[str] = set()
     for m in members:

@@ -43,6 +43,7 @@ ignore = [
 
     # project-wide opt-outs
     "D",       # docstring rules (managed separately)
+    "CPY001",  # copyright header — this repo ships none anywhere
     # ARG is handled per-file below (tests, stubs) — AGENTS.md lint policy
     "FBT001", "FBT002",  # boolean-typed parameters
     "N818",    # exception naming
