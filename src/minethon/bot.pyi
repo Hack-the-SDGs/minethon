@@ -2805,6 +2805,14 @@ class Bot:
     def get_sneak(self) -> bool:
         """目前是否正在潛行（蹲下）"""
 
+    def is_riding(self) -> bool:
+        """目前是否正坐在／騎在別的實體上（船、礦車，或伺服器讓你坐到玩家身上）
+
+        等待「坐上去」生效時用它輪詢：`while not bot.is_riding(): ...`。
+        比 `bot.entity.vehicle` 可靠 —— 那個欄位在某些情況下會被整個刪掉，
+        不是變成 `None`。
+        """
+
     def get_hand(self) -> tuple[str, int] | None:
         """手上物品，回傳 `(名稱, 數量)`；空手回傳 `None`"""
 
