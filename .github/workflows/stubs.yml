@@ -1,0 +1,80 @@
+name: Stub Drift
+
+# Separate workflow, not a job in ci.yml, because GitHub's `paths:` filter is
+# workflow-level: ci.yml's test/lint/type-check must run on every PR, this must
+# not. Scoping it here avoids pulling in a third-party paths-filter action.
+#
+# Why it's gated at all: this job needs Node + a real `npm install` (see below),
+# so it costs 1-3 min of network-dependent setup. Generated-stub drift can only
+# be introduced by editing the generator or bumping BUNDLED_VERSIONS — both rare,
+# deliberate acts — so it runs only when one of those inputs actually changes.
+#
+# NOTE: do not mark this a required check in branch protection. A paths-filtered
+# workflow reports no status on PRs that don't touch these files, which would
+# block them forever.
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - scripts/generate_stubs.py
+      - scripts/check_stubs.py
+      - scripts/parse_dts.py
+      - scripts/format.sh
+      - src/minethon/_bridge.py # BUNDLED_VERSIONS — bumping a pin changes the .d.ts
+      - src/minethon/bot.pyi
+      - src/minethon/_events.py
+      - src/minethon/_handlers.py
+      - .github/workflows/stubs.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/generate_stubs.py
+      - scripts/check_stubs.py
+      - scripts/parse_dts.py
+      - scripts/format.sh
+      - src/minethon/_bridge.py
+      - src/minethon/bot.pyi
+      - src/minethon/_events.py
+      - src/minethon/_handlers.py
+      - .github/workflows/stubs.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stubs:
+    name: Stub Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      # generate_stubs.py reads the mineflayer .d.ts files, which exist only in
+      # JSPyBridge's node_modules. src/mineflayer/js/node_modules is NOT tracked,
+      # so a fresh checkout has neither — setup.sh primes the venv copy via
+      # JSPyBridge's own install pipeline (plain `npm install` won't register the
+      # version-aliased names require() looks for).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Prime JSPyBridge module cache
+        run: ./setup.sh
+
+      # Runs the whole script rather than re-implementing the gate: format.sh is
+      # the single source of truth for the generated-file list and the `# Ref:`
+      # exclusion, so this can't drift from it. Re-running lint/pyright/pytest
+      # here is redundant with ci.yml but free in practice — this job is
+      # paths-gated and rarely fires.
+      - name: format.sh --check (incl. stub drift gate + check_stubs)
+        run: ./scripts/format.sh --check
