@@ -132,8 +132,8 @@ def _make_vec3(x: float, y: float, z: float) -> Any:
     return get_vec3()(x, y, z)
 
 
-def _aim_before_activate(js: Any, point: Any) -> None:
-    """Pre-aim at ``point`` only when mineflayer's own aiming would deadlock.
+def _aim_before_activate(js: Any, point: Any, *, always: bool = False) -> None:
+    """Pre-aim at ``point`` so mineflayer's own aiming cannot deadlock.
 
     ``activateEntity`` / ``activateEntityAt`` start with
     ``await bot.lookAt(point, false)``. That non-forced look turns the bot
@@ -150,18 +150,24 @@ def _aim_before_activate(js: Any, point: Any) -> None:
     return. Nothing is lost by skipping the gradual turn — physics is off, so
     no look packet reaches the server while mounted either way.
 
-    When not riding, do nothing: mineflayer's own look is what turns the bot
-    toward the target the way a real client does before a right-click. Forcing
-    it here would make the bot interact without ever facing the player, since
-    a forced look only updates ``lastSentYaw`` and the packet carrying it is
-    not written until the next physics tick — which lands well after the
-    interact packets have already gone out.
+    ``always=False`` skips the pre-aim while ``bot.vehicle`` is null and lets
+    mineflayer turn the bot itself: that gradual look is what makes the bot
+    face the player before right-clicking, the way a real client does. Forcing
+    it unconditionally would interact without ever facing the target, since a
+    forced look only updates ``lastSentYaw`` and the packet carrying it is not
+    written until the next physics tick — which lands well after the interact
+    packets have gone out.
+
+    That check is a snapshot, though: the mount notification can arrive after
+    it and while mineflayer's look is still awaiting, which deadlocks just the
+    same. Pass ``always=True`` from any call site that has already sent an
+    interact this call, where a mount is expected imminently.
 
     Ref: mineflayer lib/plugins/physics.js — bot.look, bot.on('mount'),
     updatePosition/shouldUsePhysics; lib/plugins/inventory.js —
     activateEntity / activateEntityAt.
     """
-    if js.vehicle is not None:
+    if always or js.vehicle is not None:
         js.lookAt(point, True)
 
 
@@ -1212,13 +1218,17 @@ class Commands:
         )
         _aim_before_activate(self._js, click_point)
         self._js.activateEntityAt(target, click_point)
-        # Re-checked per call: the mount usually lands on the INTERACT_AT above,
-        # so this is the one that would hang. activateEntity aims one block above
-        # the entity's *current* position, so re-read it too.
+        # Unconditional: the INTERACT_AT above may already have mounted the bot,
+        # and the notification can land after any vehicle check we make here —
+        # including while activateEntity's own look is awaiting. The bot is
+        # already aimed at the bounding-box centre by now, so snapping the last
+        # 0.1 block up costs nothing visually. activateEntity aims one block
+        # above the entity's *current* position, so re-read it too.
         position = target.position
         _aim_before_activate(
             self._js,
             _make_vec3(float(position.x), float(position.y) + 1.0, float(position.z)),
+            always=True,
         )
         self._js.activateEntity(target)
         return True

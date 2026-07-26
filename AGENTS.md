@@ -76,9 +76,12 @@ bot.bind(Greeter())
 - `action()` 的 `<username>_<action>` 是既有公開契約；grid-move provider 則刻意採 scoreboard title 自動發現，
   兩者不共用命名推導。不要把 group／stage 或 provider objective 參數加進公開 `move_*` API
 - **玩家互動走 `bot.use_player(username)`**：每次呼叫先讀 named player 的即時 entity 位置，以碰撞箱中心為絕對點依序呼叫 mineflayer `activateEntityAt`、`activateEntity`，送出與真實客戶端右鍵相同的 INTERACT_AT → INTERACT；不同高度不需學員自行算 yaw/pitch。玩家離線、不同世界或不在已載入範圍時丟 `PlayerNotFoundError`；實際可互動距離仍由伺服器的 entity-interaction range 驗證。
-  轉頭交給 mineflayer 自己做（`activateEntity*` 開頭的 `await bot.lookAt(point, false)` 就是
-  真實客戶端右鍵前那個「慢慢轉過去」），**只有 `bot.vehicle` 非 null 時**才在每個 activate 前
-  補一次 `lookAt(point, force=True)`（`activateEntity` 瞄的是呼叫當下位置 +1，所以要重讀）。
+  第一發 INTERACT_AT 的轉頭交給 mineflayer 自己做（`activateEntity*` 開頭的
+  `await bot.lookAt(point, false)` 就是真實客戶端右鍵前那個「慢慢轉過去」），只有
+  `bot.vehicle` 非 null 時才先補 `lookAt(point, force=True)`；第二發 INTERACT 則**無條件**
+  先 force 對準（`activateEntity` 瞄的是呼叫當下位置 +1，所以要重讀）——此時 INTERACT_AT
+  已經送出，mount 通知可能落在 `bot.vehicle` 檢查之後、mineflayer 那次 look 還在 await 的
+  空檔，檢查擋不住；而機器人早已對準碰撞箱中心，補那 0.1 格的瞬移看不出來。
   理由：非 force 的 look 等的是 physics tick 發出的 `'move'`，而 `bot.on('mount', ...)` 會關掉
   `shouldUsePhysics`（只有伺服器 teleport 會重開），因此機器人一旦騎在別的實體上，該 promise
   永不 settle，JSPyBridge 會在 10 秒 per-call timeout 砍掉程式；force look 立即返回，殘餘角度

@@ -166,9 +166,11 @@ def test_use_player_interacts_at_live_center_then_activates(
     fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
 
     assert Bot(fake).use_player("Alice") is True
-    # Not riding: mineflayer's own lookAt turns the bot, so no pre-aim here.
+    # Not riding, so mineflayer's own lookAt turns the bot for the INTERACT_AT.
+    # The INTERACT that follows is always pre-aimed — see the riding tests.
     assert fake.calls == [
         ("activateEntityAt", target, (2.0, 77.0, 3.0)),
+        ("lookAt", (2.0, 77.0, 3.0), True),
         ("activateEntity", target),
     ]
 
@@ -186,6 +188,7 @@ def test_use_player_uses_default_height_with_negative_fractional_coordinates(
     assert Bot(fake).use_player("Alice") is True
     assert fake.calls == [
         ("activateEntityAt", target, (-12.5, -3.35, 0.125)),
+        ("lookAt", (-12.5, -3.25, 0.125), True),
         ("activateEntity", target),
     ]
 
@@ -233,26 +236,31 @@ def test_use_player_forces_the_look_while_riding(
     ]
 
 
-def test_use_player_forces_the_look_once_the_mount_lands_mid_call(
+def test_use_player_forces_the_look_before_interact_even_when_not_yet_mounted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The usual case: INTERACT_AT mounts the bot, so only INTERACT would hang.
+    """The INTERACT pre-aim must not depend on `bot.vehicle` still being null.
 
-    The second pre-aim also re-reads the entity position, because
-    activateEntity aims one block above where the entity is *at call time*.
+    INTERACT_AT has already gone out by then, so the mount notification can
+    land after the check and while activateEntity's own look is awaiting —
+    physics goes off mid-await and that look never settles. `bot.vehicle` here
+    is still null, and the forced look has to happen anyway.
+
+    The pre-aim also re-reads the entity position, because activateEntity aims
+    one block above where the entity is *at call time*.
     """
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
     target = player_entity()
     fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
 
-    def mount_then_interact_at(entity: object, point: object) -> None:
+    def move_then_interact_at(entity: object, point: object) -> None:
         fake.calls.append(("activateEntityAt", entity, point))
-        fake.vehicle = entity
         target.position = SimpleNamespace(x=8.0, y=71.0, z=9.0)
 
-    fake.activateEntityAt = mount_then_interact_at  # type: ignore[method-assign]
+    fake.activateEntityAt = move_then_interact_at  # type: ignore[method-assign]
 
     assert Bot(fake).use_player("Alice") is True
+    assert fake.vehicle is None
     assert fake.calls == [
         ("activateEntityAt", target, (2.0, 70.9, 3.0)),
         ("lookAt", (8.0, 72.0, 9.0), True),
