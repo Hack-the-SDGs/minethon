@@ -125,6 +125,12 @@ def test_use_activates_held_item_without_target() -> None:
 
 
 class PlayerUseJs(ActJs):
+    """Bot proxy for use_player.
+
+    Deliberately has no `activateEntity`/`activateEntityAt`: use_player must
+    never reach for them, and an AttributeError here says so loudly.
+    """
+
     def __init__(
         self,
         players: dict[str, object],
@@ -137,25 +143,36 @@ class PlayerUseJs(ActJs):
         self.vehicle = vehicle
         if not spawned:
             self.entity = None
+        self._client = SimpleNamespace(write=self._write)
+
+    def _write(self, name: str, payload: dict) -> None:
+        self.calls.append(("write", name, payload))
 
     def lookAt(self, point: object, force: bool) -> None:  # noqa: N802
         self.calls.append(("lookAt", point, force))
-
-    def activateEntityAt(self, entity: object, point: object) -> None:  # noqa: N802
-        self.calls.append(("activateEntityAt", entity, point))
-
-    def activateEntity(self, entity: object) -> None:  # noqa: N802
-        self.calls.append(("activateEntity", entity))
 
 
 def player_entity(
     *, x: float = 2.0, y: float = 70.0, z: float = 3.0, height: float = 1.8
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        id=17,
         position=SimpleNamespace(x=x, y=y, z=z),
         height=height,
         isValid=True,
     )
+
+
+def interact(**overrides: object) -> tuple:
+    """Expected `use_entity` write. mouse 0 == INTERACT, 2 == INTERACT_AT."""
+    payload: dict[str, object] = {
+        "target": 17,
+        "mouse": 0,
+        "sneaking": False,
+        "hand": 0,
+    }
+    payload.update(overrides)
+    return ("write", "use_entity", payload)
 
 
 def test_use_player_interacts_at_live_center_then_activates(
@@ -166,12 +183,12 @@ def test_use_player_interacts_at_live_center_then_activates(
     fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
 
     assert Bot(fake).use_player("Alice") is True
-    # Not riding, so mineflayer's own lookAt turns the bot for the INTERACT_AT.
-    # The INTERACT that follows is always pre-aimed — see the riding tests.
+    # Aim at the hitbox centre first, then INTERACT_AT (hit vector relative to
+    # the entity) and INTERACT, exactly as a real client right-click does.
     assert fake.calls == [
-        ("activateEntityAt", target, (2.0, 77.0, 3.0)),
         ("lookAt", (2.0, 77.0, 3.0), True),
-        ("activateEntity", target),
+        interact(mouse=2, x=0.0, y=1.0, z=0.0),
+        interact(),
     ]
 
 
@@ -180,6 +197,7 @@ def test_use_player_uses_default_height_with_negative_fractional_coordinates(
 ) -> None:
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
     target = SimpleNamespace(
+        id=17,
         position=SimpleNamespace(x=-12.5, y=-4.25, z=0.125),
         isValid=True,
     )
@@ -187,9 +205,9 @@ def test_use_player_uses_default_height_with_negative_fractional_coordinates(
 
     assert Bot(fake).use_player("Alice") is True
     assert fake.calls == [
-        ("activateEntityAt", target, (-12.5, -3.35, 0.125)),
-        ("lookAt", (-12.5, -3.25, 0.125), True),
-        ("activateEntity", target),
+        ("lookAt", (-12.5, -3.35, 0.125), True),
+        interact(mouse=2, x=0.0, y=0.9, z=0.0),
+        interact(),
     ]
 
 
@@ -200,71 +218,44 @@ def test_use_player_does_not_fall_through_when_interact_at_fails(
     target = player_entity()
     fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
 
-    def fail_interact_at(entity: object, point: object) -> None:
-        fake.calls.append(("activateEntityAt", entity, point))
+    def fail_first_write(name: str, payload: dict) -> None:
+        fake.calls.append(("write", name, payload))
         msg = "INTERACT_AT failed"
         raise RuntimeError(msg)
 
-    fake.activateEntityAt = fail_interact_at  # type: ignore[method-assign]
+    fake._client.write = fail_first_write
 
     with pytest.raises(RuntimeError, match="INTERACT_AT failed"):
         Bot(fake).use_player("Alice")
-    assert fake.calls == [("activateEntityAt", target, (2.0, 70.9, 3.0))]
+    assert fake.calls == [
+        ("lookAt", (2.0, 70.9, 3.0), True),
+        interact(mouse=2, x=0.0, y=0.9, z=0.0),
+    ]
 
 
-def test_use_player_forces_the_look_while_riding(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("vehicle", [None, SimpleNamespace()], ids=["free", "riding"])
+def test_use_player_is_identical_whether_or_not_the_bot_is_riding(
+    monkeypatch: pytest.MonkeyPatch, vehicle: object | None
 ) -> None:
-    """A mounted bot must pre-aim, or mineflayer's own lookAt never resolves.
+    """No mineflayer activate helper, no vehicle check, no state to get wrong.
 
-    physics.js turns `shouldUsePhysics` off on 'mount', so the 'move' event
-    that settles a non-forced lookAt stops firing and the activate call hangs
-    until JSPyBridge's per-call timeout kills the script.
+    Those helpers open with `await bot.lookAt(point, false)`, whose lookingTask
+    is only settled by the physics tick's 'move' event — and physics.js turns
+    `shouldUsePhysics` off on 'mount'. Calling them only when `bot.vehicle` is
+    null does not help: the mount can land after the check, while their look is
+    already awaiting. Neither does pre-aiming, since they recompute the angle
+    from entity.position and bot.entity.position at call time. Writing the
+    packets ourselves is the only version a student cannot hang.
     """
     monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
     target = player_entity()
-    fake = PlayerUseJs(
-        {"Alice": SimpleNamespace(entity=target)}, vehicle=SimpleNamespace()
-    )
+    fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)}, vehicle=vehicle)
 
     assert Bot(fake).use_player("Alice") is True
     assert fake.calls == [
         ("lookAt", (2.0, 70.9, 3.0), True),
-        ("activateEntityAt", target, (2.0, 70.9, 3.0)),
-        ("lookAt", (2.0, 71.0, 3.0), True),
-        ("activateEntity", target),
-    ]
-
-
-def test_use_player_forces_the_look_before_interact_even_when_not_yet_mounted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The INTERACT pre-aim must not depend on `bot.vehicle` still being null.
-
-    INTERACT_AT has already gone out by then, so the mount notification can
-    land after the check and while activateEntity's own look is awaiting —
-    physics goes off mid-await and that look never settles. `bot.vehicle` here
-    is still null, and the forced look has to happen anyway.
-
-    The pre-aim also re-reads the entity position, because activateEntity aims
-    one block above where the entity is *at call time*.
-    """
-    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
-    target = player_entity()
-    fake = PlayerUseJs({"Alice": SimpleNamespace(entity=target)})
-
-    def move_then_interact_at(entity: object, point: object) -> None:
-        fake.calls.append(("activateEntityAt", entity, point))
-        target.position = SimpleNamespace(x=8.0, y=71.0, z=9.0)
-
-    fake.activateEntityAt = move_then_interact_at  # type: ignore[method-assign]
-
-    assert Bot(fake).use_player("Alice") is True
-    assert fake.vehicle is None
-    assert fake.calls == [
-        ("activateEntityAt", target, (2.0, 70.9, 3.0)),
-        ("lookAt", (8.0, 72.0, 9.0), True),
-        ("activateEntity", target),
+        interact(mouse=2, x=0.0, y=0.9, z=0.0),
+        interact(),
     ]
 
 
