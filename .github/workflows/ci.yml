@@ -44,11 +44,20 @@ jobs:
           python-version: "3.14"
           allow-prereleases: true
 
+      # Keep these two in sync with scripts/format.sh steps 2-3.
+      # CI can't just call `./scripts/format.sh --check`: its step 1 runs
+      # generate_stubs.py, which needs the mineflayer .d.ts files. Those live
+      # only in the venv's JSPyBridge node_modules (installed by setup.sh) or in
+      # the untracked src/mineflayer/js/node_modules — neither exists on a fresh
+      # checkout, so it would fail before reaching the lint steps.
       - name: Check formatting
-        run: uv run ruff format --check src/ tests/
+        run: uv run ruff format --check src/ scripts/ tests/
 
+      # --no-fix is required, not cosmetic: pyproject.toml sets `fix = true`, so a
+      # bare `ruff check` REWRITES files and reports green on anything
+      # auto-fixable — CI would never prove the commit was lint-clean.
       - name: Check lint
-        run: uv run ruff check src/
+        run: uv run ruff check --no-fix src/ scripts/ tests/
 
   type-check:
     name: Type Check
