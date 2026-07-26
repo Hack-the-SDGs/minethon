@@ -132,6 +132,39 @@ def _make_vec3(x: float, y: float, z: float) -> Any:
     return get_vec3()(x, y, z)
 
 
+def _aim_before_activate(js: Any, point: Any) -> None:
+    """Pre-aim at ``point`` only when mineflayer's own aiming would deadlock.
+
+    ``activateEntity`` / ``activateEntityAt`` start with
+    ``await bot.lookAt(point, false)``. That non-forced look turns the bot
+    gradually and awaits a ``lookingTask`` which only settles when the physics
+    tick emits ``'move'`` — and ``bot.on('mount', () => { shouldUsePhysics =
+    false })`` stops those emits for good (only a server teleport turns them
+    back on). So an activate issued while the bot is riding something never
+    resolves: JSPyBridge waits on that promise and kills the script with its
+    10s per-call timeout.
+
+    While riding, aim with ``force=True`` first. It returns immediately and
+    leaves the residual angle under one sensitivity step, so mineflayer's own
+    look takes ``bot.look``'s ``yawChange === 0 && pitchChange === 0`` early
+    return. Nothing is lost by skipping the gradual turn — physics is off, so
+    no look packet reaches the server while mounted either way.
+
+    When not riding, do nothing: mineflayer's own look is what turns the bot
+    toward the target the way a real client does before a right-click. Forcing
+    it here would make the bot interact without ever facing the player, since
+    a forced look only updates ``lastSentYaw`` and the packet carrying it is
+    not written until the next physics tick — which lands well after the
+    interact packets have already gone out.
+
+    Ref: mineflayer lib/plugins/physics.js — bot.look, bot.on('mount'),
+    updatePosition/shouldUsePhysics; lib/plugins/inventory.js —
+    activateEntity / activateEntityAt.
+    """
+    if js.vehicle is not None:
+        js.lookAt(point, True)
+
+
 def _control_vector(control: str, yaw: float) -> tuple[float, float]:
     """Horizontal unit vector for a movement control at ``yaw`` radians."""
     forward_x, forward_z = -math.sin(yaw), -math.cos(yaw)
@@ -1151,6 +1184,9 @@ class Commands:
         :class:`PlayerNotFoundError` when the player is offline, in another
         world, or outside the bot's loaded entity range.
 
+        mineflayer turns the bot toward the target itself, except while the bot
+        is already riding something — see :func:`_aim_before_activate`.
+
         Ref: mineflayer index.d.ts and lib/plugins/inventory.js —
         bot.players, bot.activateEntityAt, bot.activateEntity.
         """
@@ -1174,7 +1210,16 @@ class Commands:
             center_y,
             float(position.z),
         )
+        _aim_before_activate(self._js, click_point)
         self._js.activateEntityAt(target, click_point)
+        # Re-checked per call: the mount usually lands on the INTERACT_AT above,
+        # so this is the one that would hang. activateEntity aims one block above
+        # the entity's *current* position, so re-read it too.
+        position = target.position
+        _aim_before_activate(
+            self._js,
+            _make_vec3(float(position.x), float(position.y) + 1.0, float(position.z)),
+        )
         self._js.activateEntity(target)
         return True
 

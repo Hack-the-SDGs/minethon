@@ -76,6 +76,16 @@ bot.bind(Greeter())
 - `action()` 的 `<username>_<action>` 是既有公開契約；grid-move provider 則刻意採 scoreboard title 自動發現，
   兩者不共用命名推導。不要把 group／stage 或 provider objective 參數加進公開 `move_*` API
 - **玩家互動走 `bot.use_player(username)`**：每次呼叫先讀 named player 的即時 entity 位置，以碰撞箱中心為絕對點依序呼叫 mineflayer `activateEntityAt`、`activateEntity`，送出與真實客戶端右鍵相同的 INTERACT_AT → INTERACT；不同高度不需學員自行算 yaw/pitch。玩家離線、不同世界或不在已載入範圍時丟 `PlayerNotFoundError`；實際可互動距離仍由伺服器的 entity-interaction range 驗證。
+  轉頭交給 mineflayer 自己做（`activateEntity*` 開頭的 `await bot.lookAt(point, false)` 就是
+  真實客戶端右鍵前那個「慢慢轉過去」），**只有 `bot.vehicle` 非 null 時**才在每個 activate 前
+  補一次 `lookAt(point, force=True)`（`activateEntity` 瞄的是呼叫當下位置 +1，所以要重讀）。
+  理由：非 force 的 look 等的是 physics tick 發出的 `'move'`，而 `bot.on('mount', ...)` 會關掉
+  `shouldUsePhysics`（只有伺服器 teleport 會重開），因此機器人一旦騎在別的實體上，該 promise
+  永不 settle，JSPyBridge 會在 10 秒 per-call timeout 砍掉程式；force look 立即返回，殘餘角度
+  小於一個 sensitivity step，mineflayer 自己那次 look 就會走
+  `yawChange === 0 && pitchChange === 0` 早退。反過來，沒騎乘時**不能**先 force look：
+  force 只寫 `lastSentYaw`，封包要等下一個 physics tick 才由 `updatePosition()` 送出，而
+  interact 封包在那之前就送完了 —— 結果是機器人看都不看就互動。
 - **每個行為指令收尾有 `instruction_sleep` 停頓**（預設 0.2s），讓學員逐行看出動作。實作是 `_commands.py` 的 `_paced` decorator，只掛在「葉節點」動作上（`turn_left`→`turn`→`set_turn` 只有 `set_turn` 被 pace，避免重複停頓）；讀取類指令（`get_*`/`find_*`）不 pace；`sneak` 也刻意不 pace，讓 sneak 開關的 toggle 迴圈不被延遲拖慢。`create_bot(instruction_sleep=0.1)` 調整間隔、`bypass_instruction_sleep=True` 關閉（設成 0）；值存在 `Bot._instruction_sleep`
 - 完整方法清單與中文 hover 見 `src/minethon/bot.pyi`；AI 替學員寫程式用的說明見 `skills/minethon/`
 
