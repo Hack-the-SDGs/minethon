@@ -9,9 +9,9 @@ walls = set()
 
 
 def scan(here, facing):
-    while bot.get_block_in_front() == "fire":
+    while bot.get_front_block() == "fire":
         bot.action("put out")
-    if bot.get_block_in_front() is not None:
+    if bot.get_front_block() is not None:
         dr, dc = DIRS[facing]
         walls.add((here[0] + dr, here[1] + dc))
 

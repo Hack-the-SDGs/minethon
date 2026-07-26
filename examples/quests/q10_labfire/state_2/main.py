@@ -68,7 +68,7 @@ def turn_to(direction):
 
 def move_to(direction):
     turn_to(direction)
-    while bot.get_block_in_front() == "fire":
+    while bot.get_front_block() == "fire":
         bot.action("put out")
     bot.move_forward()
 
