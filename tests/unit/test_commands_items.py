@@ -33,9 +33,7 @@ class InvJs:
     def tossStack(self, the_item: object) -> None:  # noqa: N802
         self.calls.append(("tossStack", the_item))
 
-    def toss(  # noqa: N802
-        self, item_type: int, metadata: object | None, count: int | None
-    ) -> None:
+    def toss(self, item_type: int, metadata: object | None, count: int | None) -> None:
         self.calls.append(("toss", item_type, metadata, count))
 
 
