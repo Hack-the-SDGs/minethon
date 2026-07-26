@@ -34,10 +34,13 @@ class FakeJs:
         entity: object | None = None,
         controls: dict[str, bool] | None = None,
         held: object | None = None,
+        vehicle: object | None = None,
     ) -> None:
         self.entity = entity
         self._controls = controls or {}
         self.heldItem = held
+        # mineflayer keeps bot.vehicle null while the bot rides nothing.
+        self.vehicle = vehicle
 
     def getControlState(self, control: str) -> bool:  # noqa: N802
         return self._controls.get(control, False)
@@ -82,6 +85,11 @@ def test_reads_before_spawn_raise_not_spawned() -> None:
 def test_get_sneak_reflects_control_state() -> None:
     assert Bot(FakeJs(controls={"sneak": True})).get_sneak() is True
     assert Bot(FakeJs(controls={})).get_sneak() is False
+
+
+def test_is_riding_reflects_bot_vehicle() -> None:
+    assert Bot(FakeJs()).is_riding() is False
+    assert Bot(FakeJs(vehicle=SimpleNamespace(name="minecart"))).is_riding() is True
 
 
 def test_get_hand_returns_name_count_or_none() -> None:

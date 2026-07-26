@@ -107,6 +107,11 @@ _OP_MULTIPLY_TOTAL = 2  # multiply the running total by (1 + amount)
 # server enabled for them, so stray calls are harmless).
 _ACTION_NAME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
 
+# use_entity `mouse` values, as written by mineflayer's own helpers.
+# Ref: mineflayer lib/plugins/inventory.js — activateEntity / activateEntityAt.
+_INTERACT = 0  # plain right-click on the entity
+_INTERACT_AT = 2  # right-click at a point on the entity's hitbox
+
 # Raycast face index (0..5) -> unit offset for placeBlock's faceVector.
 # Ref: mineflayer lib/plugins/digging.js (rayBlock.face) + Minecraft face order.
 _FACE_VECTORS = (
@@ -130,6 +135,73 @@ def _make_vec3(x: float, y: float, z: float) -> Any:
     Ref: vec3 module — the package export is callable as ``vec3(x, y, z)``.
     """
     return get_vec3()(x, y, z)
+
+
+def _write_use_entity(
+    js: Any,
+    target: Any,
+    mouse: int,
+    offset: tuple[float, float, float] | None = None,
+) -> None:
+    """Write the right-click packet mineflayer's activate helpers end with.
+
+    Used *instead of* ``bot.activateEntity`` / ``bot.activateEntityAt``, never
+    alongside them. Both helpers open with ``await bot.lookAt(point, false)``,
+    and a non-forced look awaits a ``lookingTask`` that only settles when the
+    physics tick emits ``'move'`` — which ``bot.on('mount', () => {
+    shouldUsePhysics = false })`` stops for good (only a server teleport turns
+    it back on). Called while the bot rides something, they never resolve:
+    JSPyBridge waits on that promise and kills the script with its 10s
+    per-call timeout.
+
+    Calling them only when ``bot.vehicle`` is null is not enough, and neither
+    is pre-aiming with ``force=True``. The mount notification can land after any
+    check we make, including while their look is already awaiting; and they
+    recompute the angle at call time from both ``entity.position`` and
+    ``bot.entity.position``, either of which a packet can update between our
+    snapshot and their read. Both leave a window where a student's script dies
+    on a bridge timeout, so the helpers are not called at all — writing the
+    packet ourselves removes the awaited look from every code path.
+
+    The payload mirrors inventory.js exactly: ``mouse`` 0 is INTERACT, 2 is
+    INTERACT_AT and carries the hit vector relative to the entity's position.
+
+    Ref: mineflayer lib/plugins/inventory.js — activateEntity /
+    activateEntityAt; lib/plugins/physics.js — bot.look, bot.on('mount'),
+    updatePosition/shouldUsePhysics.
+    """
+    payload: dict[str, Any] = {
+        "target": int(target.id),
+        "mouse": mouse,
+        "sneaking": False,
+        "hand": 0,  # main hand
+    }
+    if offset is not None:
+        payload["x"], payload["y"], payload["z"] = offset
+    js._client.write("use_entity", payload)  # noqa: SLF001
+
+
+def _face(js: Any, point: Any) -> None:
+    """Aim at ``point``, keeping the SDK's own yaw/pitch honest.
+
+    ``force=True`` so nothing is awaited: a forced look returns as soon as it
+    has set ``bot.entity.yaw``/``pitch`` and ``lastSentYaw``/``lastSentPitch``,
+    with no ``lookingTask`` involved. That is what makes this safe to call in
+    any state, riding or not, and it keeps ``get_yaw``/``get_pitch`` consistent
+    with what the caller asked for.
+
+    It does **not** reliably turn the bot in-world, and no amount of waiting
+    here would change that. A client ``look`` has no delivery guarantee on the
+    competition server — one racing a server teleport's confirm window is
+    dropped, and mineflayer's dedupe never resends it. That is the same finding
+    that made :meth:`Commands.set_turn` server-authoritative via the grid-move
+    provider, and there is no provider payload for an arbitrary look angle, so
+    a visible turn before an interact is currently out of reach.
+
+    Ref: mineflayer lib/plugins/physics.js — bot.look (the `force` branch sets
+    lastSentYaw and returns), updatePosition / sendPacketLook.
+    """
+    js.lookAt(point, True)
 
 
 def _control_vector(control: str, yaw: float) -> tuple[float, float]:
@@ -412,6 +484,21 @@ class Commands:
         """
         return bool(self._js.getControlState("sneak"))
 
+    def is_riding(self) -> bool:
+        """Whether the bot is currently sitting on / riding another entity.
+
+        Reads mineflayer's own ``bot.vehicle`` rather than
+        ``bot.entity.vehicle``. It is the accessor the docs point at, it is
+        maintained for this bot specifically (including clearing it when the
+        vehicle despawns), and it is only ever ``null`` or an entity — the
+        per-entity field is ``delete``d on one detach path, so that one can
+        also be missing entirely.
+
+        Ref: mineflayer/docs/api.md — "mount" event, "use bot.vehicle";
+        lib/plugins/entities.js — attach_entity / set_passengers / entityGone.
+        """
+        return self._js.vehicle is not None
+
     def get_hand(self) -> tuple[str, int] | None:
         """Held item as ``(name, count)`` or ``None`` when empty-handed.
 
@@ -486,21 +573,27 @@ class Commands:
         p = block.position
         return ((int(p.x), int(p.y), int(p.z)), str(block.name))
 
-    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
-        """Solid block one step ahead as ``((x, y, z), name)``, or ``None``.
+    def get_front_block(self) -> str | None:
+        """Name of the solid block one step ahead, or ``None`` when clear.
 
         Public face of the forward probe ``dig()`` falls back on: checks the
         feet-level block one step along the dominant facing axis, then head
         height. Non-solid names (air/water/lava…) read as "nothing in front";
         anything else — including fire — is reported, so a script can inspect
         what it is about to walk into.
+
+        Beware the difference from :meth:`get_block`: there ``None`` means the
+        point isn't loaded and open air comes back as ``"air"``, while here
+        ``None`` means "nothing solid ahead" — the cell may be air, water or
+        lava. No coordinate is returned because it is always one step along the
+        facing axis; use :meth:`find_block` or :meth:`look_block` when the
+        position matters.
         Ref: mineflayer lib/plugins/ray_trace.js getViewDirection.
         """
-        block = self._block_in_front()
+        block = self._front_block()
         if block is None:
             return None
-        p = block.position
-        return ((int(p.x), int(p.y), int(p.z)), str(block.name))
+        return str(block.name)
 
     def find_block(self, name: str) -> tuple[int, int, int] | None:
         """Nearest block named ``name`` as ``(x, y, z)`` or ``None``.
@@ -1020,14 +1113,14 @@ class Commands:
             math.floor(float(ent.position.z)) + step[1],
         )
 
-    def _block_in_front(self) -> Any:
+    def _front_block(self) -> Any:
         """Solid block one step ahead of the bot, or ``None`` if only air.
 
         Used as dig()'s fallback when the bot isn't aiming at anything (e.g.
         looking level over flat ground, where blockAtCursor sees only air).
         Steps along the dominant horizontal facing axis and checks the feet
         block first, then head height. The public native-type view of the same
-        probe is :meth:`get_block_in_front`.
+        probe is :meth:`get_front_block`.
         """
         bx, by, bz = self._front_cell()
         for y in (by, by + 1):  # feet level, then head level
@@ -1049,7 +1142,7 @@ class Commands:
         """
         block = self._js.blockAtCursor(_REACH_BLOCKS)
         if block is None:
-            block = self._block_in_front()
+            block = self._front_block()
         if block is None:
             return None
         p = block.position
@@ -1113,6 +1206,33 @@ class Commands:
             self._js.activateItem()
         return True
 
+    def get_player_pos(self, username: str) -> tuple[float, float, float]:
+        """Live ``(x, y, z)`` of the named player — for following or aiming.
+
+        Reads the player's current entity position immediately (the same lookup
+        :meth:`use_player` uses) and returns native floats, so a follow loop can
+        write ``bot.look_at(*bot.get_player_pos(name))`` then
+        ``bot.move_forward()`` without touching ``Vec3``. Raises
+        :class:`PlayerNotFoundError` when the player is offline, in another
+        world, or outside the bot's loaded entity range.
+
+        Ref: mineflayer/docs/api.md — bot.players[name].entity.position.
+        """
+        self._entity()
+        try:
+            player = self._js.players[username]
+        except IndexError, KeyError, TypeError:
+            player = None
+        target = getattr(player, "entity", None)
+        if target is None or not bool(getattr(target, "isValid", True)):
+            msg = (
+                f"找不到玩家 {username!r}。"
+                "請確認對方在線、與機器人在同一世界，且位於已載入範圍內。"
+            )
+            raise PlayerNotFoundError(msg)
+        position = target.position
+        return (float(position.x), float(position.y), float(position.z))
+
     @_paced
     def use_player(self, username: str) -> bool:
         """Right-click the named player's current entity.
@@ -1123,6 +1243,12 @@ class Commands:
         players at different heights. Raises
         :class:`PlayerNotFoundError` when the player is offline, in another
         world, or outside the bot's loaded entity range.
+
+        Safe to call in any state, including while the bot is already riding
+        something: the aiming and both packets are issued without ever awaiting
+        a mineflayer look — see :func:`_face` and :func:`_write_use_entity`.
+        Note that the bot does not visibly turn toward the player first; see
+        :func:`_face` for why that is not currently reachable.
 
         Ref: mineflayer index.d.ts and lib/plugins/inventory.js —
         bot.players, bot.activateEntityAt, bot.activateEntity.
@@ -1141,14 +1267,17 @@ class Commands:
             raise PlayerNotFoundError(msg)
 
         position = target.position
-        center_y = float(position.y) + float(getattr(target, "height", 1.8)) / 2
-        click_point = _make_vec3(
-            float(position.x),
-            center_y,
-            float(position.z),
+        eye_offset = float(getattr(target, "height", 1.8)) / 2
+        _face(
+            self._js,
+            _make_vec3(
+                float(position.x),
+                float(position.y) + eye_offset,
+                float(position.z),
+            ),
         )
-        self._js.activateEntityAt(target, click_point)
-        self._js.activateEntity(target)
+        _write_use_entity(self._js, target, _INTERACT_AT, (0.0, eye_offset, 0.0))
+        _write_use_entity(self._js, target, _INTERACT)
         return True
 
     def sneak(self, on: bool) -> bool:

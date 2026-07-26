@@ -12,7 +12,7 @@
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
-# Ref: src/mineflayer/js/node_modules/mineflayer-pathfinder/index.d.ts
+# Ref: .venv/.../site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
@@ -2805,6 +2805,14 @@ class Bot:
     def get_sneak(self) -> bool:
         """目前是否正在潛行（蹲下）"""
 
+    def is_riding(self) -> bool:
+        """目前是否正坐在／騎在別的實體上（船、礦車，或伺服器讓你坐到玩家身上）
+
+        等待「坐上去」生效時用它輪詢：`while not bot.is_riding(): ...`。
+        比 `bot.entity.vehicle` 可靠 —— 那個欄位在某些情況下會被整個刪掉，
+        不是變成 `None`。
+        """
+
     def get_hand(self) -> tuple[str, int] | None:
         """手上物品，回傳 `(名稱, 數量)`；空手回傳 `None`"""
 
@@ -2832,12 +2840,17 @@ class Bot:
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
 
-    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
-        """正前方一格的方塊，回傳 `((x, y, z), 名稱)`；前方沒東西回傳 `None`
+    def get_front_block(self) -> str | None:
+        """正前方一格的方塊名稱；前方沒有固體方塊時回傳 `None`
 
         沿目前朝向的主軸往前一格，先看腳的高度、再看頭的高度。
         空氣、水、岩漿等非固體視為「前方沒東西」；火焰**會**被回報，
         所以腳本可以偵測前方是否著火再決定動作。
+
+        注意跟 `get_block()` 的差別：那邊的 `None` 代表座標未載入、空氣會回
+        `"air"`；這裡的 `None` 代表前方沒有固體，該格可能是空氣、水或岩漿。
+        不回傳座標，因為它一定是朝向方向的前一格；需要位置請用 `find_block()`
+        或 `look_block()`。
         """
 
     def find_block(self, name: str) -> tuple[int, int, int] | None:
@@ -2980,6 +2993,18 @@ class Bot:
         """對準心對著的方塊互動（開門、按鈕…）；沒對到方塊則使用手上物品
 
         永遠回傳 `True`。
+        """
+
+    def get_player_pos(self, username: str) -> tuple[float, float, float]:
+        """讀取指定玩家的即時座標 `(x, y, z)`——用來跟隨或瞄準
+
+        回傳原生 float tuple（不是 Vec3），所以跟隨迴圈可以直接寫
+        `bot.look_at(*bot.get_player_pos(名字))` 再 `bot.move_forward()`。
+        若玩家不在線、不同世界，或不在機器人的已載入實體範圍內，丟出
+        `PlayerNotFoundError`。
+
+        Args:
+            username: 要讀取座標的玩家名稱
         """
 
     def use_player(self, username: str) -> bool:
