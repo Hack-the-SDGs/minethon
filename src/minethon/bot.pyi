@@ -12,7 +12,7 @@
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-chat/index.d.ts
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-windows/index.d.ts
 # Ref: .venv/.../site-packages/javascript/js/node_modules/prismarine-recipe/index.d.ts
-# Ref: src/mineflayer/js/node_modules/mineflayer-pathfinder/index.d.ts
+# Ref: .venv/.../site-packages/javascript/js/node_modules/mineflayer-pathfinder--322e342e35/index.d.ts
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
