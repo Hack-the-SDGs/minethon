@@ -6,8 +6,8 @@ bot = create_bot("g_labfire_1")
 bot.wait_spawn()
 
 while True:
-    block = bot.get_block_in_front()
-    if block is not None and str(block[1]).endswith("fire"):
+    block = bot.get_front_block()
+    if block is not None and block.endswith("fire"):
         bot.action("put out")
     elif block is not None:
         break

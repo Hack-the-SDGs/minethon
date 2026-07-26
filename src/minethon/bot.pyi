@@ -2840,12 +2840,17 @@ class Bot:
     def look_block(self) -> tuple[tuple[int, int, int], str] | None:
         """目前準心正對著的方塊，回傳 `((x, y, z), 名稱)`；沒對到回傳 `None`"""
 
-    def get_block_in_front(self) -> tuple[tuple[int, int, int], str] | None:
-        """正前方一格的方塊，回傳 `((x, y, z), 名稱)`；前方沒東西回傳 `None`
+    def get_front_block(self) -> str | None:
+        """正前方一格的方塊名稱；前方沒有固體方塊時回傳 `None`
 
         沿目前朝向的主軸往前一格，先看腳的高度、再看頭的高度。
         空氣、水、岩漿等非固體視為「前方沒東西」；火焰**會**被回報，
         所以腳本可以偵測前方是否著火再決定動作。
+
+        注意跟 `get_block()` 的差別：那邊的 `None` 代表座標未載入、空氣會回
+        `"air"`；這裡的 `None` 代表前方沒有固體，該格可能是空氣、水或岩漿。
+        不回傳座標，因為它一定是朝向方向的前一格；需要位置請用 `find_block()`
+        或 `look_block()`。
         """
 
     def find_block(self, name: str) -> tuple[int, int, int] | None:

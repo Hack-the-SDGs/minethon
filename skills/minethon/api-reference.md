@@ -47,10 +47,12 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
   does not have this property.
 - `look_block() -> tuple[tuple[int,int,int], str] | None` — the block the bot is
   aiming at as `((x, y, z), name)`, or `None` if nothing is within ~6 blocks.
-- `get_block_in_front() -> tuple[tuple[int,int,int], str] | None` — the solid
-  block one step ahead (feet level first, then head level) as
-  `((x, y, z), name)`, or `None` when only air/liquid is ahead. Fire **is**
-  reported, so a script can check `name == "fire"` before acting.
+- `get_front_block() -> str | None` — name of the solid block one step ahead
+  (feet level first, then head level), or `None` when only air/liquid is ahead.
+  Fire **is** reported, so a script can check
+  `bot.get_front_block() == "fire"` before acting. No coordinate: it is
+  always one step along the facing axis. Note `None` here means "nothing solid
+  ahead", not "read failed" as it does for `get_block`.
 - `find_block(name) -> tuple[int,int,int] | None` — nearest block matching the
   name, or `None`. Names are Minecraft ids like `"diamond_ore"`, `"oak_log"`.
 - `find_blocks(name, max=16) -> list[tuple[int,int,int]]` — up to `max` nearest
