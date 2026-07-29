@@ -31,8 +31,10 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
 - `get_sneak() -> bool` — currently sneaking?
 - `is_riding() -> bool` — currently sitting on / riding another entity (a boat,
   a minecart, or another player via the server's sit plugin). Use it to wait for
-  a mount to take effect: `while not bot.is_riding(): ...`. Prefer it over
-  `bot.entity.vehicle`, which can be missing rather than `None`.
+  a mount to take effect: `while not bot.is_riding(): ...`. Always use this
+  rather than reading `bot.entity.vehicle` or `vehicle.passengers` — mineflayer
+  doesn't clear those when the bot gets off, so they keep pointing at the old
+  vehicle until it next mounts something. `is_riding()` is the repaired accessor.
 - `get_hand() -> tuple[str, int] | None` — `(item_name, count)`, or `None` when
   empty-handed.
 
@@ -69,6 +71,18 @@ walking into a wall can't hang the script.
 - `move_left(blocks=1.0) -> (x, y, z)` — strafe left.
 - `move_right(blocks=1.0) -> (x, y, z)` — strafe right.
 - `jump() -> (x, y, z)` — one hop; returns position just after takeoff.
+
+## Vehicles
+
+- `dismount() -> None` — get off the current vehicle by tapping sneak, the key a
+  player presses to get off; your own sneak state is restored afterwards. Safe
+  to call when the bot isn't riding: it does nothing. Blocks until the server
+  actually takes the bot off (up to 2s) and raises `MinethonError` if it never
+  does — it will not silently return as though it worked. Inside an event
+  handler it sends the input and returns immediately instead of waiting, since
+  the handler occupies the thread that would deliver the confirmation. Always
+  use this rather than mineflayer's own `dismount()`, which presses jump instead
+  on 1.21.3+ and emits a fatal bot `error` when there is no vehicle.
 
 ## Orientation (write) — all angles in degrees
 

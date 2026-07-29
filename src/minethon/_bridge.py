@@ -11,10 +11,12 @@ Version pinning policy (AGENTS.md):
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import json
 from typing import Any
 
-from javascript import eval_js
+from javascript import connection, eval_js
 from javascript import require as _js_require
 
 # Pinned — bumped by humans, never `latest`.
@@ -78,6 +80,46 @@ def _suppress_via_parse_noise() -> None:
         }})();
     """)
 
+
+_BRIDGE_EXIT_TIMEOUT = 2.0
+
+
+def _stop_bridge_at_exit() -> None:
+    """Tear down the node subprocess and its pipes on interpreter exit.
+
+    Importing `javascript` spawns node, so even a bare `import minethon` leaves a
+    live child behind; without this the interpreter exits with
+    `ResourceWarning: subprocess <pid> is still running` plus unclosed
+    BufferedReader/BufferedWriter (reproducible under
+    `python -X dev -c "import minethon"`, and at pytest teardown).
+
+    `connection.stop()` only calls `proc.terminate()` — it never reaps the child
+    nor closes stdin/stderr (ref: javascript/connection.py `stop`), so we finish
+    the job here. `proc.stdout` is None unless the bridge chose `PIPE` for it
+    (notebook / redirected stdout), so closing it when set never touches
+    `sys.stdout`.
+
+    Best-effort by design: the bridge may already be gone, and a failure here
+    must never turn a clean run into a crash. `_bot_runtime._stop_with_message`
+    calls `os._exit`, which skips atexit entirely — it stops the bridge itself,
+    so the two paths don't overlap.
+    """
+    with contextlib.suppress(Exception):
+        connection.stop()
+    proc = getattr(connection, "proc", None)
+    if proc is None:
+        return
+    # Reap first: connection.com_io's read loop is gated on `proc.poll() is None`,
+    # so a reaped child lets that daemon thread fall out before the pipes vanish.
+    with contextlib.suppress(Exception):
+        proc.wait(timeout=_BRIDGE_EXIT_TIMEOUT)
+    for pipe in (proc.stdin, proc.stdout, proc.stderr):
+        if pipe is not None:
+            with contextlib.suppress(Exception):
+                pipe.close()
+
+
+atexit.register(_stop_bridge_at_exit)
 
 _suppress_mojang_auth_warning()
 _suppress_via_parse_noise()

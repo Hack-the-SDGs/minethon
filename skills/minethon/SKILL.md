@@ -64,6 +64,7 @@ bot = create_bot(
 | `find_blocks(name, max=16)` | `list[(x,y,z)]` | Nearest N blocks by name |
 | `move_forward(blocks=1)` | `(x,y,z)` | Walk forward; also `move_backward/left/right` |
 | `jump()` | `(x,y,z)` | Jump once |
+| `dismount()` | `None` | Get off the current vehicle; safe no-op when not riding, raises if the server won't |
 | `turn_left() / turn_right()` | `(yaw, pitch)` | Turn 90° |
 | `turn(degrees)` | `(yaw, pitch)` | Relative turn (+ = left) |
 | `set_turn(yaw)` | `(yaw, pitch)` | Face absolute yaw (degrees) |
@@ -81,7 +82,7 @@ bot = create_bot(
 | `sneak(on)` | `bool` | Hold/release sneak |
 | `chat(obj)` | `None` | Send `str(obj)` to public chat |
 
-Anything not listed (e.g. `bot.quit("bye")`, `bot.username`, `bot.entity`) falls through to the raw mineflayer proxy and still works.
+Anything not listed (e.g. `bot.quit("bye")`, `bot.username`, `bot.entity`) falls through to the raw mineflayer proxy and still works. The listed names are minethon's own — a few of them (`chat`, `dig`, `drop`, `dismount`) deliberately replace the mineflayer method of the same name, so prefer the table over upstream docs where they overlap.
 
 ## Example 1 — linear script that also reacts to chat
 

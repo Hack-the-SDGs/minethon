@@ -15,13 +15,13 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.14"
           allow-prereleases: true
@@ -33,34 +33,43 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.14"
           allow-prereleases: true
 
+      # Keep these two in sync with scripts/format.sh steps 2-3.
+      # CI can't just call `./scripts/format.sh --check`: its step 1 runs
+      # generate_stubs.py, which needs the mineflayer .d.ts files. Those live
+      # only in the venv's JSPyBridge node_modules (installed by setup.sh) or in
+      # the untracked src/mineflayer/js/node_modules — neither exists on a fresh
+      # checkout, so it would fail before reaching the lint steps.
       - name: Check formatting
-        run: uv run ruff format --check src/ tests/
+        run: uv run ruff format --check src/ scripts/ tests/
 
+      # --no-fix is required, not cosmetic: pyproject.toml sets `fix = true`, so a
+      # bare `ruff check` REWRITES files and reports green on anything
+      # auto-fixable — CI would never prove the commit was lint-clean.
       - name: Check lint
-        run: uv run ruff check src/
+        run: uv run ruff check --no-fix src/ scripts/ tests/
 
   type-check:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.14"
           allow-prereleases: true

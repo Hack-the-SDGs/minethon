@@ -149,7 +149,7 @@ bot.lookAt(target.entity.position)
 騎上載具實體（馬、船、礦車）。
 
 ### `bot.dismount()`
-下載具。
+下載具。**這個名字被 minethon 覆寫**（跟 `chat` / `dig` / `drop` 一樣），不是 mineflayer 原本那個：改用潛行鍵下車（upstream 在 1.21.3+ 送的是跳躍鍵），沒騎乘時是安全的 no-op 而不是丟出會終止程式的 `error` 事件。會阻塞到伺服器真的讓機器人下車（最多 2 秒），逾時丟 `MinethonError`；在 JSPyBridge 的 callback thread 上（事件處理裡）則送出輸入後直接返回，不等待。
 
 ### `bot.moveVehicle(left, forward)`
 控制已騎乘的載具移動。

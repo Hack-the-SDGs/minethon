@@ -143,6 +143,132 @@ def _on_kicked(reason: Any = None, *_a: Any) -> None:
     print(f"\n機器人被伺服器踢出：{text}", flush=True)  # noqa: T201, RUF001 — student-facing; zh-TW colon
 
 
+# Clientbound packet carrying a vehicle's current passenger list. Listened to
+# on `bot._client` (the minecraft-protocol client), not on the bot itself.
+# Ref: mineflayer lib/plugins/entities.js — bot._client.on('set_passengers').
+_SET_PASSENGERS = "set_passengers"
+# mineflayer's sentinel for "this packet detaches rather than attaches".
+# Ref: mineflayer lib/plugins/entities.js — `entityId === -1 ? null : ...`.
+_NO_VEHICLE = -1
+# Printed when the protocol client is missing, so a silently broken is_riding()
+# is at least noisy. Same escape hatch run_forever() guards against.
+_NO_CLIENT_WARNING = (
+    "bot._client 不存在，無法修正下車後的 bot.vehicle。"
+    "is_riding() 在機器人騎過任何東西之後會一直回傳 True。"
+)
+
+
+def _clear_stale_vehicle(js_bot: Any, packet: Any) -> None:
+    """Clear ``bot.vehicle`` when a `set_passengers` packet says the bot got off.
+
+    mineflayer's own handler only acts when the bot appears *in* the new
+    passenger list (`entities.js` —
+    ``passengers.includes(bot.entity.id) && entityId === -1``). A 1.9+ dismount
+    is expected to arrive as the vehicle's own id plus a list the bot has
+    already been removed from, so neither condition holds — that packet shape
+    is the load-bearing assumption here and only
+    ``tests/integration/test_vehicle_dismount.py`` checks it. The fallback
+    meant to cover the case is dead code, and that part *is* settled from
+    source: the event is emitted on ``bot`` (`entities.js:302`) while the
+    handler is registered on ``bot._client`` (`:812`) — two different
+    EventEmitters, per `loader.js`. The result is that ``bot.vehicle`` keeps
+    pointing at the old vehicle forever and :meth:`Commands.is_riding` never
+    goes back to ``False``.
+
+    Re-emits `dismount` for the same reason, so ``EventAdaptor.on_dismount``
+    fires at all. mineflayer's own `set_passengers` branch needs the bot to be
+    *in* the list, so it can never double-fire with this one.
+
+    Does **not** cover a vehicle that despawns under the bot, or a death /
+    dimension change — see :meth:`Commands.is_riding` and
+    :func:`_install_dismount_repair` for those two.
+    """
+    # `packet` is a plain dict, so reading it costs nothing: protodef builds
+    # payloads as plain JS objects and JSPyBridge inlines those by value rather
+    # than handing back a Proxy — its JSON replacer only allocates an ffid when
+    # `constructor.name` is neither 'Object' nor 'Array' (javascript/js/pyi.js).
+    # Subscripting stays correct if one ever does arrive as a Proxy, since
+    # Proxy.__getitem__ maps to the same getProp as __getattr__.
+    riders = {int(rider) for rider in packet["passengers"]}
+    entity_id = int(packet["entityId"])
+    vehicle = js_bot.vehicle
+    if vehicle is None:
+        # Not riding as far as mineflayer knows, so there is normally nothing to
+        # do. The exception is a mount that this same handler already undid:
+        # Python callbacks are drained one at a time, long after every JS
+        # handler has run, so a dismount+remount of one vehicle inside a single
+        # tick reaches us as "clear" then "the bot is aboard" — with mineflayer's
+        # JS state already settled on "aboard". Put it back rather than leave
+        # is_riding() saying False while the bot is really riding. `-1` is
+        # mineflayer's "no vehicle" sentinel (`entities.js`), never a real id.
+        # The bogus `dismount` already emitted for the first packet cannot be
+        # taken back — the state ends up right, the event stream in that one
+        # window does not.
+        if entity_id != _NO_VEHICLE and int(js_bot.entity.id) in riders:
+            js_bot.vehicle = js_bot.entities[entity_id]
+        return
+    if entity_id != int(vehicle.id):
+        return  # some other entity's passenger list changed
+    if int(js_bot.entity.id) in riders:
+        return  # the list changed, but the bot is still aboard
+    js_bot.vehicle = None
+    js_bot.emit(BotEvent.DISMOUNT.value, vehicle)
+
+
+def _install_dismount_repair(js_bot: Any) -> None:
+    """Keep ``bot.vehicle`` honest: `set_passengers` repair plus a respawn reset.
+
+    Both are registered with ``On`` rather than ``Once`` — the bot may mount and
+    dismount any number of times. That leaves permanent entries in JSPyBridge's
+    callback table, which the `end` listener in ``create_bot`` deliberately
+    avoids. It is not a new hazard: the `error` and `kicked` ``Once`` handlers
+    also stay registered for the whole session (they are only removed when they
+    fire, which in a normal run never happens) and every ``bind()``-ed student
+    handler uses ``On``, so that table is already permanently non-empty. Note
+    the atexit spin-wait's ``connection.is_alive()`` guard tracks the *node
+    subprocess*, which outlives a Minecraft disconnect — it is not a bound.
+    Ref: javascript/__init__.py — On/Once; javascript/events.py — on_exit;
+    javascript/connection.py — is_alive.
+    """
+    client = getattr(js_bot, "_client", None)
+    if client is None:
+        warnings.warn(_NO_CLIENT_WARNING, RuntimeWarning, stacklevel=2)
+        return
+
+    def repair(packet: Any, *_a: Any, **_k: Any) -> None:
+        _clear_stale_vehicle(js_bot, packet)
+
+    def reset(*_a: Any, **_k: Any) -> None:
+        vehicle = js_bot.vehicle
+        if vehicle is None:
+            return
+        js_bot.vehicle = None
+        # Same event as the packet path, so a handler waiting on `dismount`
+        # wakes whether the bot got off or died getting off.
+        js_bot.emit(BotEvent.DISMOUNT.value, vehicle)
+
+    On(client, _SET_PASSENGERS)(
+        _normalize_handler(repair, emitter=client, event_name=_SET_PASSENGERS)
+    )
+    # Nothing in mineflayer resets `bot.vehicle`: `bot.entities` is cleared only
+    # on the `login` packet, and no path assigns `bot.vehicle = null` outside
+    # the two `set_passengers` / `attach_entity` branches. So whenever the
+    # server takes the bot off a vehicle without a `set_passengers` — believed
+    # to include death and dimension change, though that is server behaviour
+    # this repo cannot verify — is_riding() would stay True forever. Resetting
+    # on `respawn` is the cheapest cover. It is not free of assumptions either —
+    # if a server ever kept a bot mounted across a dimension change, this would
+    # briefly report not-riding — but the handler above self-heals that as soon
+    # as the vehicle's next `set_passengers` arrives, and being wrong for a
+    # moment beats being wrong for the rest of the session. mineflayer emits
+    # `respawn` straight off the clientbound packet, so this fires for whatever
+    # the server uses it for.
+    # Ref: mineflayer lib/plugins/health.js — bot._client.on('respawn').
+    On(js_bot, BotEvent.RESPAWN.value)(
+        _normalize_handler(reset, emitter=js_bot, event_name=BotEvent.RESPAWN.value)
+    )
+
+
 def _install_quiet_interrupt() -> None:
     """Replace the traceback for an uncaught Ctrl-C with a friendly line.
 
@@ -569,6 +695,9 @@ def create_bot(
     Once(js_bot, BotEvent.KICKED.value)(
         _normalize_handler(_on_kicked, emitter=js_bot, event_name=BotEvent.KICKED.value)
     )
+    # mineflayer leaves bot.vehicle pointing at the old vehicle after a
+    # dismount, which pins is_riding() to True for the rest of the session.
+    _install_dismount_repair(js_bot)
     # End the script automatically when the server drops the bot, wherever the
     # main thread happens to be (mid-script or in the keep-alive below). `Once`
     # (not `On`) so the callback removes itself after firing — a lingering
