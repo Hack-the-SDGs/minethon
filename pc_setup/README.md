@@ -51,8 +51,10 @@ bash 與 PowerShell 兩份查表函式都從它生成，所以兩邊**不可能�
 密碼由組別／電腦編號推導，伺服器位址與 Drasl 驗證端點寫在
 `src/minethon/_event_login.py` 的 `_DEFAULTS`。
 
-識別檔不存在或內容壞掉時，學員會看到中文訊息叫他找工作人員重跑 setup，
-不是 traceback。
+識別檔不存在，或內容壞掉（不是 JSON、缺欄位、值是 `null`／字串／陣列、
+整份是 `[]` 或裸數字），學員都會看到中文訊息叫他找工作人員重跑 setup，
+**不是 traceback**。這些情況由 `tests/unit/test_event_login.py` 逐一覆蓋——
+學員只被教到「看懂錯誤原因」，這條路徑不能讓他們看到 Python 例外。
 
 ## 安全性
 
