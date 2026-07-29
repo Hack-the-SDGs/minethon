@@ -57,7 +57,7 @@ bot.bind(Greeter())
 
 - 實作在 `src/minethon/_commands.py` 的 `Commands` mixin；`Bot` 繼承它，所以方法直接掛在 `Bot` 上，未覆寫的名稱仍走 `__getattr__` 委託回 JS proxy
 - 全部回傳原生型別（`tuple` / `str` / `bool` / `int`），不對學員暴露 `Vec3` / `Block` / `Item` 物件
-- 不依賴 pathfinder：datapack 可用任意名稱的 trigger objective 宣告 grid-move provider，但 display title
+- **移動與轉向：不依賴 pathfinder，有 provider 時為伺服器權威**。datapack 可用任意名稱的 trigger objective 宣告 grid-move provider，但 display title
   必須精確為 `minethon:grid_move:v1`、objective 必須放進同步 display slot，且只為已授權 bot enable trigger。
   `move_*` 從 `bot.scoreboards` 自動發現唯一 provider，整數 `blocks>1` 拆成逐格 trigger；若 client 收得到
   score，使用負 payload ACK，否則用 Brigadier completion 驗證 trigger 對本 bot 已 enable，並以 datapack
@@ -72,12 +72,12 @@ bot.bind(Greeter())
 - 角度一律「度」；`get_height`/`set_height` 是大小等級 1~5，讀寫 entity `scale` 屬性（實際縮放仍需伺服器端配合）
 - `chat(obj)` 送一般公開聊天（`str(obj)`）；分組可見性由伺服器插件處理
 - 與事件 API 並存：直線動作跑主執行緒，`EventAdaptor` + `bind` 處理反應，最後 `run_forever` 保活
-- `dig` / `chat` 兩個名稱刻意覆寫 mineflayer 同名方法；generator 用 `_STUDENT_API_OVERRIDES` 在 `bot.pyi` 裡略過 upstream 版本，避免重複定義
+- `chat` / `dig` / `dismount` / `drop` 四個名稱刻意覆寫 mineflayer 同名方法；generator 用 `_STUDENT_API_OVERRIDES` 在 `bot.pyi` 裡略過 upstream 版本，避免重複定義（改動這組名字時要同步改 generator 的那個 frozenset）
 - **不新增 `bot.sleep`**：mineflayer 已用 `bot.sleep(bedBlock)`（上床睡覺）。暫停用既有的 `bot.wait(seconds)` 或直接 `time.sleep`；因為 mineflayer 的 physics tick 跑在 Node 端（`physics.js` 的 `setInterval`），Python 主執行緒 block 不會凍結遊戲內角色，控制狀態（sneak 等）也會維持
 - **具名進階動作走 `bot.action(name, value=None)`——伺服器權威**：客戶端不模擬行為，只送 vanilla `/trigger <username>_<action>`（全小寫、空格/連字號→底線；`value` 為可選整數 payload），由關卡 datapack 驗證（執行者身分、任務狀態、目標存在）後代為執行或忽略。客戶端零副作用——不動方塊、不用物品，斷線也不會損壞地圖；trigger 未被伺服器 enable 時指令安全無效。名稱含不合法字元丟 `ValueError`；關卡專屬示範放 `examples/quests/<quest_id>/`
 - `action()` 的 `<username>_<action>` 是既有公開契約；grid-move provider 則刻意採 scoreboard title 自動發現，
   兩者不共用命名推導。不要把 group／stage 或 provider objective 參數加進公開 `move_*` API
-- **玩家互動走 `bot.use_player(username)`**：每次呼叫先讀 named player 的即時 entity 位置，以碰撞箱中心為絕對點依序呼叫 mineflayer `activateEntityAt`、`activateEntity`，送出與真實客戶端右鍵相同的 INTERACT_AT → INTERACT；不同高度不需學員自行算 yaw/pitch。玩家離線、不同世界或不在已載入範圍時丟 `PlayerNotFoundError`；實際可互動距離仍由伺服器的 entity-interaction range 驗證。
+- **玩家互動走 `bot.use_player(username)`**：每次呼叫先讀 named player 的即時 entity 位置，以碰撞箱中心為絕對點送出與真實客戶端右鍵相同的 INTERACT_AT → INTERACT；不同高度不需學員自行算 yaw/pitch。玩家離線、不同世界或不在已載入範圍時丟 `PlayerNotFoundError`；實際可互動距離仍由伺服器的 entity-interaction range 驗證。
   **完全不呼叫 mineflayer 的 `activateEntity` / `activateEntityAt`**，而是 `lookAt(point, True)`
   對準碰撞箱中心，再用 `bot._client.write('use_entity', ...)` 依序送 INTERACT_AT 與 INTERACT
   （`mouse` 0／2，payload 照抄 `inventory.js`，hit vector 相對 entity 位置）。
@@ -121,23 +121,16 @@ bot.bind(Greeter())
 
 ## 公開模組分層
 
-1. `src/minethon/__init__.py`
-   - 使用者入口
-   - re-export `create_bot`、`Bot`、`BotEvent`、`EventAdaptor`、公開錯誤類
-2. `src/minethon/bot.py`
-   - 公開 module 名 — 純 re-export 自 `_bot_runtime`
-   - 維持薄殼，`from minethon.bot import Bot` 不會把 runtime 細節帶進 IDE 視野
-3. `src/minethon/_bot_runtime.py`
-   - 真正的 runtime façade — `class Bot(Commands)` 實作、`__getattr__` JS proxy 委託、`bind()` 事件分派、plugin loading、version pin guard
-   - 從 `bot.py` 拆出，避免 `.py` + `.pyi` 雙重 `class Bot` 在 IDE 解析時產生衝突源
-4. `src/minethon/_commands.py`
-   - 同步命令式學員 API 的 `Commands` mixin（見上方「同步命令式 API」段）
-5. `src/minethon/bot.pyi`
-   - 生成的型別面 — `minethon.bot` 模組的 sole `class Bot` declaration
-6. `src/minethon/models/`
-   - 可 import 的型別 shell
-7. `src/minethon/errors.py`
-   - 使用者可見的錯誤類
+| 模組 | 角色 | 為什麼這樣切 |
+| --- | --- | --- |
+| `__init__.py` | 使用者入口 | re-export `create_bot`、`Bot`、`BotEvent`、`EventAdaptor`、公開錯誤類 |
+| `bot.py` | 公開 module 名 | 純 re-export 自 `_bot_runtime`；維持薄殼，`from minethon.bot import Bot` 不會把 runtime 細節帶進 IDE 視野 |
+| `_bot_runtime.py` | 真正的 runtime façade | `class Bot(Commands)`、`__getattr__` JS proxy 委託、`bind()` 事件分派、plugin loading、version pin guard。從 `bot.py` 拆出，避免 `.py` + `.pyi` 雙重 `class Bot` 在 IDE 解析時產生衝突源 |
+| `_commands.py` | 同步命令式學員 API | `Commands` mixin（見上方「同步命令式 API」段） |
+| `_event_login.py` | `create_bot("g_swim")` 簡寫 | 讀 `~/.htsdg.json` 的組別/電腦編號 → 推導帳密＋補上賽事伺服器預設值。刻意獨立成檔：賽後要把它連同 `_DEFAULTS` 一起抽掉，minethon 本體不該綁死某一屆營隊 |
+| `bot.pyi` | 生成的型別面 | `minethon.bot` 模組的 sole `class Bot` declaration |
+| `models/` | 可 import 的型別 shell | 給使用者寫 annotation 用 |
+| `errors.py` | 使用者可見的錯誤類 | |
 
 > 補充：PyCharm 的 completion popup 對 Python class member 預設右側顯示 owner class，不顯示型別 annotation — 這是 PyCharm 對 Python 的 UI 設計（純 `class Foo: a = 10` 也是這樣），跟 stub / .pyi 結構無關。要看完整型別請按 `Ctrl+J` (Quick Documentation) 或 hover；assign 後變數型別會正確顯示。
 
@@ -165,8 +158,8 @@ bot.bind(Greeter())
   - `mineflayer`
   - `vec3`
   - `mineflayer-pathfinder`
-- 對 bundled package，可省略版本
-- 對其他 npm 套件，`bot.load_plugin(...)` / `bot.require(...)` 必須顯式版本
+- 對 bundled package，`bot.load_plugin(...)` / `bot.require(...)` 可省略版本；
+  其他 npm 套件**必須**顯式版本（`bot.load_plugin(name, "x.y.z", export_key=...)`）
 - Python 端的 `javascript` (JSPyBridge) 套件在 `pyproject.toml` 用 minor 級 ceiling 鎖（目前 `>=1!1.2.6,<1!1.3`）。理由：minethon 依賴 `On`/`Once` 在 pinned runtime **不注入 emitter**（`needsNodePatches` 只在 Node 14/15 成立）與 Promise `await`-before-return 行為，這兩件事是實作細節不是正式契約；升 minor 前要先跑 `./scripts/format.sh` 與 integration smoke。
 
 理由：
@@ -176,17 +169,15 @@ bot.bind(Greeter())
 
 ## Plugin scope
 
-- 內建 typed / documented plugin：只有 `mineflayer-pathfinder`
-- 其他 plugin 目前不提供 typed façade
-- 其他 plugin 若要使用，走：
-  - `bot.load_plugin(name, "x.y.z", export_key=...)`
-  - `bot.require(name, "x.y.z")`
+- **內建 typed / documented plugin 只有 `mineflayer-pathfinder`**（注意 bundled ≠ typed：
+  `vec3` 也是 bundled 但沒有 typed façade）
+- 其他 plugin 不提供 typed façade，走上面版本規則那條顯式版本的路
 
 ## Callback thread 規則
 
 - 所有 event handler 跑在 JSPyBridge callback thread
 - handler 內不要 blocking
-- pinned runtime（Node 22+ / javascript 1.2.x）**不會**注入 emitter（`needsNodePatches` 只在 Node 14/15 成立）；`_normalize_handler` 的 emitter 偵測僅靠 `_REAL_ARGC` 已知表與 emitter identity，多餘參數一律**從尾端截斷**（短簽名 handler 拿到的是最前面的參數）
+- pinned runtime 不注入 emitter（理由見「版本規則」的 ceiling 鎖那條）；`_normalize_handler` 的 emitter 偵測僅靠 `_REAL_ARGC` 已知表與 emitter identity，多餘參數一律**從尾端截斷**（短簽名 handler 拿到的是最前面的參數）
 - handler 內未捕捉的例外由 `_normalize_handler` 攔截：印友善訊息＋traceback 後略過該次事件，不回流 JS（避免 unhandled rejection 殺死 node 進程）
 
 ## 錯誤處理
@@ -218,6 +209,20 @@ bot.bind(Greeter())
 - `bind()` 對「拼錯的 `on_xxx`（不對應任何事件）」印提醒，不再靜默忽略。
 - `bot.pathfinder` 未載入時（真實 bridge 回 `None`）拋 `PluginNotInstalledError`
    並附下一步指引。
+
+**已知缺口——打錯名字不會丟 `AttributeError`（尚未修）。** `Bot.__getattr__`
+委託給 JS proxy，而 JSPyBridge 對 JS 端不存在的屬性**回 `None` 而不是丟
+`AttributeError`**（`bridge.js` 對 undefined 答 `'void'`）。後果：
+
+- `bot.mvoe_forward(3)` → `TypeError: 'NoneType' object is not callable`
+- `bot.usernaem` → 安靜地是 `None`，完全不報錯
+
+課程只教學員「看懂錯誤行數、錯誤原因」——行數對，原因完全沒有，而且把注意力
+導向 `None` 這個他當天可能還沒學到的概念。這是初學者最常撞到的一條路徑。
+`__getattr__` 已經為 `pathfinder` 做過同型的特例修補（`value is None` →
+丟 `PluginNotInstalledError`），推廣成拼字建議是同一個位置的事；
+合法名稱清單可以從 `bot.pyi` 取。修之前不要把「minethon 的錯誤訊息對初學者
+友善」當成既成事實。
 
 ## 檢查指令
 
@@ -259,27 +264,17 @@ mineflayer d.ts 跟現存 `bot.pyi` 的 class member 列表，缺項會 exit 1�
 
 - `[tool.ruff.lint]` 全域 `select = ["ALL"]`，只對「全案都不適用」的規則做全域忽略。
 - 針對情境的豁免一律走 `[tool.ruff.lint.per-file-ignores]`，不要擴張全域 `ignore`。
-- 已有的 per-file 區塊：
-  - `src/minethon/_bridge.py` / `src/minethon/bot.py` / `src/minethon/_bot_runtime.py` — JSPyBridge proxy 必然是 `Any`，豁免 `ANN401`
-  - `src/minethon/**/*.pyi` — 型別覆蓋層；豁免 `N`（命名）、`A`（遮 builtin）、`ANN`、`ARG`、`PLR`、`PYI`、`UP`、`TRY`、`SIM`、`TC`、`RUF001`-`003`（zh-TW 全形符號）、`ERA001`、`PIE790`、`I001`；rationale 留在 `pyproject.toml` 註解
-  - `scripts/*.py` — 產生器工具；豁免複雜度與風格類
-  - `tests/*` — 允許 magic values、私有存取、硬編 fixtures
-  - `examples/**` — 教學 demo，放寬 `ANN`、`T201`、broad-except 等
+- **現有的 per-file 區塊與逐條 rationale 直接看 `pyproject.toml`**，不在這裡複製一份。
+  之前這裡有一份摘要清單，已經漂移（漏了 `_commands.py`），而 `pyproject.toml`
+  的註解本來就寫得更完整。
 - 新增豁免時：先嘗試用更具體的規則號（`PIE790`、`RUF022`）而不是整個家族（`PYI`、`RUF`）；只在「整個家族都不適用」時才用前綴。
 - generator 輸出要符合 ruff 的規則，`format.sh` 跑完必須 idempotent（第二次跑不再變動）。
 
-## 當前狀態
+## 未完成
 
-- [x] 同步 callback façade
-- [x] `EventAdaptor` 子類別 + `bot.bind(...)` 統一事件入口（decorator API 全部移除）
-- [x] `BotEvent` 仍以 `StrEnum` 對外公開作事件名稱常數
-- [x] pathfinder event augmentation 合併進 `EventAdaptor` 的 `on_<event>` 方法
-- [x] `minethon.models` 可 import 型別 shell
-- [x] 顯式版本 guard
-- [x] 最小單元測試重建
-- [x] 同步命令式學員 API（`_commands.py`，IDEA.md 全數實作，含單元測試）
-- [x] 同步 API stub + 中文 hover 接進 `bot.pyi`（generator `_STUDENT_API_STUB`）
-- [x] AI agent skill（`skills/minethon/`）讓 AI 能替學員寫正確程式
+已完成的項目不列在這裡——本文件其餘各節描述的就是現況。
+
 - [ ] 自家 collection wrapper（`bot.players` / `bot.entities` 目前仍是 bridge proxy）
-- [ ] 更完整的 user-facing error wrapping
+- [ ] 更完整的 user-facing error wrapping（最優先的一條見「錯誤處理」段末：
+      打錯方法名字時的 `'NoneType' object is not callable`）
 - [ ] 除 pathfinder 以外的 plugin typed 支援
