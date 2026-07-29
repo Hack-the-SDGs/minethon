@@ -28,6 +28,7 @@ from functools import wraps
 from typing import TYPE_CHECKING, Any, cast
 
 from javascript import Once
+from javascript import config as js_config
 
 from minethon._bridge import get_vec3
 from minethon.errors import MinethonError, NotSpawnedError, PlayerNotFoundError
@@ -86,6 +87,17 @@ _GRID_MOVE_DIRECTIONS = {
 # cardinal — rotation becomes server-authoritative like grid moves.
 _GRID_TURN_OFFSET = 4
 _JUMP_SECONDS = 0.1  # hold 'jump' briefly to trigger a single hop
+# Hold 'sneak' long enough for the server to see it on a tick of its own before
+# the release lands — press and release inside one tick can cancel out.
+_DISMOUNT_HOLD_SECONDS = 0.1
+# Give up waiting for the server to take the bot off. Long enough for a round
+# trip plus the repair callback, short enough that an input the server ignores
+# doesn't look like a hang.
+_DISMOUNT_TIMEOUT_SECONDS = 2.0
+# mineflayer's gate for the 1.21.3+ `player_input` packet, which is also what
+# decides whether the sneak control reaches the wire as a dismount input.
+# Ref: minecraft-data common/features.json — newPlayerInputPacket.
+_NEW_INPUT_PACKET = "newPlayerInputPacket"
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
 # Size level <-> entity "scale" attribute. get_height reads the server-reported
@@ -122,6 +134,25 @@ _FACE_VECTORS = (
     (-1, 0, 0),  # 4: west (-X)
     (1, 0, 0),  # 5: east (+X)
 )
+
+
+def _on_bridge_callback_thread() -> bool:
+    """True when running on JSPyBridge's single Python-callback executor.
+
+    Every JS→Python callback is drained by one thread, one job at a time, so
+    anything that parks there waiting for *another* callback waits forever.
+
+    ``config.event_loop`` is an implementation detail, not a documented API —
+    if it ever moves, fall back to "anything but the main thread", which errs
+    the same way (skip the wait) rather than risking the deadlock.
+
+    Ref: javascript/events.py — EventExecutorThread; javascript/config.py.
+    """
+    executor = getattr(getattr(js_config, "event_loop", None), "callbackExecutor", None)
+    current = threading.current_thread()
+    if executor is None:
+        return current is not threading.main_thread()
+    return current is executor
 
 
 def _norm_deg(deg: float) -> float:
@@ -488,16 +519,40 @@ class Commands:
         """Whether the bot is currently sitting on / riding another entity.
 
         Reads mineflayer's own ``bot.vehicle`` rather than
-        ``bot.entity.vehicle``. It is the accessor the docs point at, it is
-        maintained for this bot specifically (including clearing it when the
-        vehicle despawns), and it is only ever ``null`` or an entity — the
-        per-entity field is ``delete``d on one detach path, so that one can
-        also be missing entirely.
+        ``bot.entity.vehicle``. It is the accessor the docs point at and it is
+        only ever ``null`` or an entity — the per-entity field is ``delete``d
+        on one detach path, so that one can also be missing entirely.
+
+        mineflayer sets ``bot.vehicle`` on mount but **never clears it** on a
+        1.9+ server, so three repairs are layered here:
+
+        * getting off a vehicle — ``create_bot`` installs a `set_passengers`
+          listener (``_bot_runtime._clear_stale_vehicle``) that clears it.
+        * death / dimension change — the same installer resets it on `respawn`.
+        * the vehicle despawning under the bot — there may well be no
+          `set_passengers` for that, so rather than assume either way, check the
+          entity's own ``isValid``. `entity_destroy` still flips that flag
+          (``entities.js`` — ``entity.isValid = false``) even though the
+          `entityGone` listener next to it is dead code, and prismarine-entity
+          starts every entity at ``isValid = true``.
+
+        A ``Bot`` constructed directly, without ``create_bot``, only gets the
+        last repair, so it keeps returning ``True`` after a dismount until the
+        vehicle also despawns.
 
         Ref: mineflayer/docs/api.md — "mount" event, "use bot.vehicle";
-        lib/plugins/entities.js — attach_entity / set_passengers / entityGone.
+        lib/plugins/entities.js — attach_entity / set_passengers / entityGone /
+        entity_destroy; prismarine-entity/index.js — isValid.
         """
-        return self._js.vehicle is not None
+        vehicle = self._js.vehicle
+        if vehicle is None:
+            return False
+        # Only an explicit ``false`` means the vehicle despawned. A live bridge
+        # proxy answers ``None`` for a JS attribute that isn't there rather than
+        # raising, and reading that as "not riding" would be the wrong way to
+        # fail — prismarine-entity always sets isValid, so a None here means the
+        # object isn't the entity we think it is, not that the ride ended.
+        return getattr(vehicle, "isValid", None) is not False
 
     def get_hand(self) -> tuple[str, int] | None:
         """Held item as ``(name, count)`` or ``None`` when empty-handed.
@@ -911,6 +966,91 @@ class Commands:
         time.sleep(_JUMP_SECONDS)
         self._js.setControlState("jump", False)
         return self.get_pos()
+
+    @_paced
+    def dismount(self) -> None:
+        """Get off the vehicle the bot is riding; does nothing if it isn't.
+
+        Replaces mineflayer's ``bot.dismount()`` rather than calling it, for
+        two reasons.
+
+        It presses the wrong key on 1.21.3+. Vanilla dismounts on the *sneak*
+        input, and the legacy packet said so — ``steer_vehicle`` carried a
+        ``jump`` **bitmask** whose ``0x02`` bit means "unmount"
+        (``entities.js``). The port to ``player_input`` kept the field name and
+        dropped the meaning: it sends the boolean ``jump`` flag, i.e. the jump
+        key. minecraft-data's 1.21.4 layout is
+        ``[forward, backward, left, right, jump, shift, sprint]``, and
+        ``physics.js`` maps the sneak control to ``player_input {shift: state}``
+        — so going through :meth:`sneak` sends what the server is waiting for.
+
+        And it is fatal when not riding: ``entities.js`` emits a bot-level
+        `error` (``dismount: not mounted``), which minethon turns into a
+        program exit. Never calling it removes that path entirely, rather than
+        guarding a check that a callback thread could invalidate in between —
+        the same reasoning as ``_write_use_entity``.
+
+        Before 1.21.3 the sneak control goes out as ``entity_action`` instead,
+        which is a different packet from the ``steer_vehicle`` shift bit
+        mineflayer used there. Whether a server accepts both is not something
+        this repo can check, so those versions keep mineflayer's own payload,
+        written directly rather than through its ``dismount()``.
+
+        Blocking on the main thread, like the rest of this mixin: the *server*
+        takes the bot off, so the input is followed by a poll until
+        :meth:`is_riding` goes false, and a server that ignores it raises
+        rather than returning as if it had worked.
+
+        On JSPyBridge's callback thread the poll is skipped, because it could
+        never finish. What ends the ride, as far as this SDK can see, is the
+        `set_passengers` handler in ``_bot_runtime`` — and every Python
+        callback is drained by that one thread, so a handler that called this
+        would be sitting on the only thread able to release it. Waiting there
+        would burn the whole timeout and still report the bot as riding.
+
+        Ref: mineflayer lib/plugins/entities.js — dismount / moveVehicle;
+        lib/plugins/physics.js — setControlState('sneak'); minecraft-data
+        1.21.4 protocol.json — packet_player_input; javascript/events.py —
+        EventExecutorThread.
+        """
+        if not self.is_riding():
+            return
+        self._send_dismount_input()
+        if _on_bridge_callback_thread():
+            return
+        deadline = time.monotonic() + _DISMOUNT_TIMEOUT_SECONDS
+        while self.is_riding():
+            if time.monotonic() >= deadline:
+                msg = (
+                    "伺服器沒有讓機器人下車。請確認現在騎的東西可以自己下來"
+                    "（例如任務綁定的座位可能要等伺服器放行）。"
+                )
+                raise MinethonError(msg)
+            time.sleep(_POLL_SECONDS)
+
+    def _send_dismount_input(self) -> None:
+        """Write whichever packet this server version dismounts on."""
+        if not self._js.supportFeature(_NEW_INPUT_PACKET):
+            # `jump` is a bitmask on this packet and 0x02 is the unmount bit —
+            # 0x01 would make the bot hop on its vehicle instead. Copied from
+            # mineflayer's own dismount(), whose legacy branch is correct.
+            self._js._client.write(  # noqa: SLF001 — mineflayer's protocol client
+                "steer_vehicle", {"sideways": 0.0, "forward": 0.0, "jump": 0x02}
+            )
+            return
+        # setControlState is a no-op when the control already holds that value
+        # (physics.js), so a bot that is already sneaking would send nothing but
+        # the release and never the press the server acts on. Drop it first, and
+        # put it back afterwards so the student's own sneak survives the call.
+        was_sneaking = self.get_sneak()
+        if was_sneaking:
+            self.sneak(False)
+            time.sleep(_DISMOUNT_HOLD_SECONDS)
+        self.sneak(True)
+        time.sleep(_DISMOUNT_HOLD_SECONDS)
+        self.sneak(False)
+        if was_sneaking:
+            self.sneak(True)
 
     # ── orientation (write) ───────────────────────────────────────────
     @_paced  # turn / turn_left / turn_right delegate here, so they pace once

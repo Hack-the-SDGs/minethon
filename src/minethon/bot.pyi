@@ -536,9 +536,16 @@ class Entity:
     effects: list[Effect]
     """實體身上的狀態效果陣列，每個元素是 `Effect`"""
     vehicle: Entity
-    """實體目前所騎的載具 `Entity`，沒有則為 `None`"""
+    """實體目前所騎的載具 `Entity`，沒有則為 `None`。
+
+    ⚠️ 下車後不會被清掉——mineflayer 只更新「新乘客名單裡的實體」，離開的那個不在名單內。
+    要判斷機器人自己有沒有在騎，請用 `bot.is_riding()`（它另外做了修正）。
+    """
     passengers: list[Entity]
-    """騎在這個實體身上的乘員 `Entity` 陣列"""
+    """騎在這個實體身上的乘員 `Entity` 陣列。
+
+    ⚠️ 同上，乘客下車後不會從這個陣列移除。
+    """
 
     def setEquipment(self, index: int, item: Item) -> None:
         """更新實體指定裝備槽的顯示物品
@@ -2431,9 +2438,6 @@ class Bot:
             entity: 載具 `Entity`（馬、船、礦車等）
         """
 
-    def dismount(self) -> None:
-        """下目前所騎載具"""
-
     def moveVehicle(self, left: float, forward: float) -> None:
         """控制目前所騎載具的移動
 
@@ -2809,8 +2813,10 @@ class Bot:
         """目前是否正坐在／騎在別的實體上（船、礦車，或伺服器讓你坐到玩家身上）
 
         等待「坐上去」生效時用它輪詢：`while not bot.is_riding(): ...`。
-        比 `bot.entity.vehicle` 可靠 —— 那個欄位在某些情況下會被整個刪掉，
-        不是變成 `None`。
+
+        一定要用這個，不要自己讀 `bot.entity.vehicle` 或 `vehicle.passengers` ——
+        mineflayer 在你下車時不會清掉那些欄位，它們會一直指著舊的載具，直到你下次
+        坐上別的東西為止。`is_riding()` 是已經修好的那個。
         """
 
     def get_hand(self) -> tuple[str, int] | None:
@@ -2909,6 +2915,19 @@ class Bot:
 
     def jump(self) -> tuple[float, float, float]:
         """原地跳一下，回傳跳起瞬間的位置"""
+
+    def dismount(self) -> None:
+        """下目前所騎載具；**沒在騎的話什麼都不做**（不會出錯、不會中斷程式）
+
+        做法是幫你按一下潛行鍵，也就是玩家自己下車的操作；按完會把你原本的潛行
+        狀態放回去。mineflayer 原本的 `dismount()` 在 1.21.3 以後按到的是跳躍鍵，
+        而且沒騎乘時會發出錯誤事件讓整個程式結束——minethon 兩個問題都處理掉了，
+        所以不確定現在有沒有在騎的時候可以直接呼叫。
+
+        會等到伺服器真的讓你下車才返回（最多 2 秒）；等不到會丟出 `MinethonError`，
+        不會安靜地假裝成功。寫在事件處理裡（例如 `on_chat`）時不會等——那條執行緒
+        正是負責通知「已下車」的那條，等下去只會卡住。
+        """
 
     def turn_left(self) -> tuple[float, float]:
         """向左轉 90 度，回傳新的 `(yaw, pitch)`（度數）"""
