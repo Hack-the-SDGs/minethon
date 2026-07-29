@@ -1,14 +1,51 @@
 version: 2
 
-# Workflow actions are pinned to full commit SHAs so a moved tag can't change
-# what CI executes — publish.yml in particular holds PyPI release rights. A pin
-# only trades one risk for another unless something keeps it current, which is
-# what this file is for: Dependabot rewrites the SHA and the trailing `# v4`
-# comment together, so the pins stay both immutable and patched.
 updates:
+  # Workflow actions are pinned to full commit SHAs so a moved tag can't change
+  # what CI executes — publish.yml in particular holds PyPI release rights. A
+  # pin only trades one risk for another unless something keeps it current,
+  # which is what this entry is for: Dependabot rewrites the SHA and the
+  # trailing `# v4` comment together, so the pins stay both immutable and
+  # patched.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
     commit-message:
       prefix: ci
+    groups:
+      # Patch and minor land together — they're routine. Majors stay one PR
+      # each, because that's where the Node runtime bumps and renamed inputs
+      # live, and each needs its changelog read before merging.
+      actions-routine:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      dev-tooling:
+        patterns: ["pytest*", "ruff", "pyright"]
+        update-types: [minor, patch]
+    ignore:
+      # Pinned deliberately — see AGENTS.md 版本規則. minethon relies on On/Once
+      # *not* injecting an emitter on the pinned runtime, and on Promises being
+      # awaited before return. Both are JSPyBridge implementation details, not
+      # a contract, so a minor bump has to be preceded by ./scripts/format.sh
+      # and the integration smoke. Patches still come through; anything wider
+      # is a human decision, not a PR that looks routine.
+      - dependency-name: javascript
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+# Not covered, on purpose:
+#   - src/mineflayer/js/package.json is the legacy/scratch area (AGENTS.md), so
+#     an npm entry there would only produce noise.
+#   - The npm versions that actually ship — mineflayer, vec3,
+#     mineflayer-pathfinder — live in BUNDLED_VERSIONS in src/minethon/_bridge.py
+#     as a Python dict, which no dependency bot can read. Bumping those stays
+#     manual, and per AGENTS.md must be followed by the integration smoke.
