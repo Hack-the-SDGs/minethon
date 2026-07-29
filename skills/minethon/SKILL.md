@@ -1,6 +1,6 @@
 ---
 name: minethon
-description: Use when writing, reviewing, or debugging Python code that uses the minethon Minecraft bot SDK — connecting a bot with create_bot, the synchronous student API (bot.wait_spawn / move_forward / dig / look_block / get_pos / chat …), the EventAdaptor event API, or pathfinder — or when a student describes Minecraft bot behavior to turn into minethon code.
+description: Use when writing, reviewing, or debugging Python code that uses the minethon Minecraft bot SDK — connecting a bot with create_bot, the synchronous student API (bot.wait_spawn / move_forward / dig / look_block / get_pos / chat …), the EventAdaptor event API, or pathfinder — or when a student describes Minecraft bot behavior to turn into minethon code. Also triggers on Chinese requests about 機器人 / 挖方塊 / 往前走 / 關卡 / 任務 in a Minecraft context.
 ---
 
 # minethon
@@ -18,31 +18,44 @@ There are **two ways** to drive the bot, and real scripts often combine them:
 
 - **Movement uses the student API, never pathfinder or yaw math.** To walk forward 5 blocks: `bot.move_forward(5)`. Do NOT write `bot.pathfinder.goto(...)`, `bot.entity.position` math, or `import math`. Pathfinder exists but is an advanced opt-in, not for basic movement.
 - **Method names are minethon's own snake_case** — use the Quick Reference below. Do NOT invent names or use mineflayer camelCase. It is `bot.dig()` (no arguments — digs the block you're aiming at), `bot.look_block()`, `bot.find_block("oak_log")` — NOT `bot.blockAtCursor()` / `bot.dig(block)` / `block_at_cursor()`.
-- **A linear task that must also react to chat** = bind an `EventAdaptor` for the reaction, run the linear actions, then `bot.run_forever()` to stay online.
+- **A linear task that must also react to chat** = bind an `EventAdaptor` for the reaction, then run the linear actions. The process stays alive on its own (see Connecting) — a trailing `bot.run_forever()` is harmless but not required.
 - **Angles are in degrees**; `get_height`/`set_height` are size **levels 1–5**.
 
 ## Connecting
 
+Two forms, and **which one you use changes whether you need `wait_spawn()`**.
+
+**Camp shorthand — the default for student scripts.** Host and credentials come
+from the PC's identity file (`~/.htsdg.json`, written once by staff):
+
 ```python
-import os
 from minethon import create_bot
 
-# Simple local server:
-bot = create_bot(host="localhost", username="student_bot")
-
-# The NTUST competition server (custom Drasl auth) — values from env vars:
-bot = create_bot(
-    host=os.environ["MC_HOST"],
-    port=int(os.environ.get("MC_PORT", "25565")),
-    username=os.environ["MC_USERNAME"],
-    password=os.environ["MC_PASSWORD"],
-    auth="mojang",
-    auth_server=os.environ["MC_AUTH_SERVER"],      # snake_case kwargs
-    session_server=os.environ["MC_SESSION_SERVER"],
-)
+bot = create_bot("g_swim")     # group account:    G<group>_swim
+bot = create_bot("swim")       # personal account: U<computer>_swim
 ```
 
-`create_bot` returns immediately and connects in the background. **Always `bot.wait_spawn()` before doing anything in the world.**
+This form **blocks until the bot has spawned and settled**, so the next line can
+act immediately. Do **NOT** add `bot.wait_spawn()` after it — the repo's own
+quest examples don't. The shorthand is the task name; `g_` / `g-` prefix picks
+the group account.
+
+**Explicit options** — for a local server or anything outside the camp:
+
+```python
+bot = create_bot(host="localhost", username="student_bot")
+bot.wait_spawn()               # REQUIRED for this form — returns immediately otherwise
+```
+
+This form returns as soon as the connection starts, so world reads/actions
+before `wait_spawn()` raise `NotSpawnedError`.
+
+Both forms accept `instruction_sleep=0.1` (shorten the 0.2s pause after each
+action) or `bypass_instruction_sleep=True` (remove it).
+
+**The script does not need to end with `bot.run_forever()`.** `create_bot`
+registers an `atexit` keep-alive, so the bot stays connected and events keep
+firing after the last line runs.
 
 ## Quick Reference — synchronous student API
 
@@ -56,6 +69,7 @@ bot = create_bot(
 | `get_sneak()` | `bool` | Is sneaking? |
 | `is_riding()` | `bool` | Am I sitting on / riding another entity? |
 | `get_hand()` | `(name, count)` or `None` | Held item |
+| `get_player_pos(username)` | `(x, y, z)` | Live position of a named player; raises `PlayerNotFoundError` |
 | `get_block(x, y, z)` | `str` or `None` | Block name at coords |
 | `get_block_property(x, y, z, property_name)` | `str/int/bool` or `None` | Get block state property (e.g. "lit", "facing", "powered") |
 | `look_block()` | `((x,y,z), name)` or `None` | Block I'm aiming at |
@@ -86,13 +100,12 @@ Anything not listed (e.g. `bot.quit("bye")`, `bot.username`, `bot.entity`) falls
 
 ## Example 1 — linear script that also reacts to chat
 
-This is the canonical shape: bind events for reactions, run linear actions, stay alive.
+This is the canonical shape: bind events for reactions, then run linear actions.
 
 ```python
-import os
 from minethon import EventAdaptor, create_bot
 
-bot = create_bot(host="localhost", username="student_bot")
+bot = create_bot("g_swim")      # shorthand: already spawned when this returns
 
 
 class Commands(EventAdaptor):
@@ -102,12 +115,11 @@ class Commands(EventAdaptor):
 
 
 bot.bind(Commands())            # wire reactions first
-bot.wait_spawn()                # block until in-world
 bot.move_forward(5)             # walk forward 5 blocks (no pathfinder!)
 dug = bot.dig()                 # break the block I'm aiming at -> ((x,y,z), name) or None
 x, y, z = bot.get_pos()
 bot.chat(f"我在 ({x:.1f}, {y:.1f}, {z:.1f})")
-bot.run_forever()               # keep the process alive so on_chat keeps firing
+# no run_forever() needed — atexit keeps the bot online so on_chat keeps firing
 ```
 
 ## Example 2 — purely event-driven
@@ -141,10 +153,18 @@ bot.run_forever()
 | `bot.pathfinder.goto(...)` / yaw math to move | `bot.move_forward(5)` |
 | `bot.blockAtCursor()` / `block_at_cursor()` | `bot.look_block()` |
 | `bot.dig(block)` (with an argument) | `bot.dig()` (no arg; digs the aimed block) |
-| Doing world actions before spawn | `bot.wait_spawn()` first (else `NotSpawnedError`) |
-| Linear script ends instantly, events never fire | end with `bot.run_forever()` |
+| `bot.wait_spawn()` after `create_bot("g_swim")` | the shorthand already waited — drop the line |
+| World actions before spawn, **explicit-options form only** | `bot.wait_spawn()` first (else `NotSpawnedError`) |
 | Treating angles as radians | student API is **degrees** |
 | `bot.chat` only sends to one person | it's normal public chat; group visibility is a server plugin |
+
+**Debugging a student's error message.** A misspelled method does *not* raise
+`AttributeError` — `Bot.__getattr__` forwards to the JS proxy, which answers
+`None` for anything it doesn't have. So `bot.mvoe_forward(3)` fails as
+`TypeError: 'NoneType' object is not callable`, and a misspelled *attribute*
+(`bot.usernaem`) silently evaluates to `None` with no error at all. When a
+student reports either symptom, check the spelling against the table above
+first.
 
 ## Going deeper
 

@@ -53,7 +53,10 @@ def _read_identity() -> tuple[int, int]:
         # one) so a stray BOM doesn't break json.loads on already-set-up PCs.
         data = json.loads(IDENTITY_FILE.read_text(encoding="utf-8-sig"))
         return int(data["group"]), int(data["computer"])
-    except (ValueError, KeyError, OSError) as exc:
+    # TypeError matters as much as the rest: a file holding `[]` or
+    # `{"group": null}` is valid JSON of the wrong shape, and without it the
+    # student gets a raw traceback instead of the "go find staff" line.
+    except (ValueError, KeyError, TypeError, OSError) as exc:
         msg = f"本機識別檔 {IDENTITY_FILE} 內容無效，請重跑 setup.sh / setup.ps1。"
         raise MinethonError(msg) from exc
 

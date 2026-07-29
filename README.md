@@ -16,10 +16,8 @@ minethon 是**教學導向**的 Python mineflayer SDK。
 ### 特色
 
 - **同步命令式 API** — `bot.wait_spawn()` → `bot.move_forward(3)` → `bot.dig()`，全部阻塞、回傳原生型別，學員寫一行看懂一行
-- **同步 callback API** — 繼承 `EventAdaptor`、覆寫 `on_<event>`、用 `bot.bind(...)` 一次綁完，沒有 `await` 也沒有 event loop
+- **單一事件入口** — 事件統一走 `EventAdaptor` 子類別 + `bot.bind(...)`：沒有 `await`、沒有 event loop，也沒有第二套 API 要學。基底類別附完整型別簽名，IDE 的「Override methods」可一鍵填入正確參數
 - **完整型別層** — `bot.pyi` 由 mineflayer 官方 `index.d.ts` 自動生成，IDE hover 顯示中文說明
-- **單一事件入口** — 所有事件統一走 `EventAdaptor` 子類別 + `bot.bind(...)`，避免多套 API 並存造成學習負擔
-- **Class-based handler** — `EventAdaptor` 內附完整型別簽名，IDE 的「Override methods」可一鍵填入正確參數
 - **Pathfinding** — 內建 typed 支援的 `mineflayer-pathfinder`，`bot.pathfinder.goto(...)` 直接可用
 - **顯式版本釘選** — 非內建 plugin 必須傳版本字串，避免 JSPyBridge 在 runtime 偷裝 latest
 
@@ -47,27 +45,56 @@ minethon 是**教學導向**的 Python mineflayer SDK。
 
 ## 快速開始
 
-### 同步寫法（推薦初學者）
+### 連線
 
-直線腳本，一行做一件事，沒有 callback 也沒有 `await`：
+兩種寫法。營隊學員用**簡寫**，一般使用者用明確參數：
 
 ```python
 from minethon import create_bot
 
-bot = create_bot(host="localhost", username="pybot")
+bot = create_bot("g_swim")      # 組別帳號：G<組別>_swim
+bot = create_bot("swim")        # 個人帳號：U<電腦編號>_swim
+```
 
+簡寫會從本機的識別檔（`~/.htsdg.json`，由工作人員用 [`pc_setup/`](pc_setup/) 標記一次）
+補上伺服器位址與帳密，**並且自動等到機器人進入世界才返回**——所以下一行就能直接動作，
+不需要自己呼叫 `wait_spawn()`。細節見 [`pc_setup/README.md`](pc_setup/README.md)。
+
+明確參數的寫法則**要**自己等 spawn：
+
+```python
+bot = create_bot(host="localhost", username="pybot")
 bot.wait_spawn()                 # 卡住直到進入世界
+```
+
+### 直線腳本（推薦初學者）
+
+一行做一件事，沒有 callback 也沒有 `await`：
+
+```python
+from minethon import create_bot
+
+bot = create_bot("g_swim")
+
 bot.move_forward(3)              # 往前走 3 格（不用 pathfinder）
 bot.dig()                        # 挖掉正在看的方塊
 x, y, z = bot.get_pos()
 bot.chat(f"我在 ({x:.0f}, {y:.0f}, {z:.0f})")
 ```
 
+每個動作結束後會停頓 0.2 秒，讓學員逐行看出機器人在做什麼。
+用 `create_bot(..., instruction_sleep=0.1)` 調整，或 `bypass_instruction_sleep=True` 關閉。
+
+腳本跑完後機器人**會自動保持連線**，不需要在結尾補 `bot.run_forever()`。
+
 完整方法表見 [`skills/minethon/`](skills/minethon/)（也是給 AI 看的接口說明）。
 
-### 事件寫法
+## 事件 API
 
-要「反應」聊天、被打、玩家進出等事件時，繼承 `EventAdaptor`：
+要「反應」聊天、被打、玩家進出等事件時，繼承 `EventAdaptor`、覆寫想要的
+`on_<event>` 方法、用 `bot.bind(instance)` 綁定。這是**唯一**的公開事件寫法——
+歷史上的 decorator 形式（`@bot.on(...)` / `@bot.once(...)` / `@bot.on_<event>`）
+已全部移除，只留一條路，避免初學者在多套 API 之間迷失方向。
 
 ```python
 from minethon import EventAdaptor, create_bot
@@ -101,35 +128,8 @@ bot.bind(Greeter())
 bot.run_forever()
 ```
 
-## 事件 API
-
-唯一公開寫法：繼承 `EventAdaptor`、覆寫想要的 `on_<event>` 方法、用 `bot.bind(instance)` 綁定。
-
-```python
-from minethon import EventAdaptor, create_bot
-
-
-class My(EventAdaptor):
-    def on_spawn(self) -> None:
-        print(f"Spawned as {bot.username}")
-
-    def on_chat(self, username, message, *_):
-        if message == "quit":
-            bot.quit("bye")
-
-
-bot = create_bot(host="localhost", username="pybot")
-bot.bind(My())
-bot.run_forever()
-```
-
-歷史寫法已**全部移除**，不再是公開 API：
-
-- `@bot.on("chat")`（字串）
-- `@bot.on(BotEvent.CHAT)` / `@bot.once(BotEvent.CHAT)`（enum decorator）
-- `@bot.on_<event>` / `@bot.once_<event>`（屬性 shortcut）
-
-統一只剩 `EventAdaptor` 一條路，避免初學者在多套 API 之間迷失方向。
+參數可以用 `*_` 吃掉不需要的尾巴（`def on_chat(self, username, message, *_)`）。
+handler 跑在 JSPyBridge 的 callback thread，**不要在裡面做耗時或會阻塞的事**。
 
 ## 型別與匯入
 
@@ -156,22 +156,24 @@ tool = bot.load_plugin("mineflayer-tool", "1.5.0", export_key="plugin")
 
 ## 範例
 
-| 範例                                                                  | 說明                                  |
-| --------------------------------------------------------------------- | ------------------------------------- |
-| [linear_actions](examples/demos/linear_actions/main.py)               | 同步命令式 API：走路、轉向、挖方塊、回報座標 |
-| [drasl_auth](examples/demos/drasl_auth/main.py)                       | 透過自建 Drasl 驗證伺服器連線並回應聊天 |
+| 範例                                                    | 說明                                          |
+| ------------------------------------------------------- | --------------------------------------------- |
+| [quests/](examples/quests/)                             | 營隊關卡解法：游泳、堆疊、鑽掘、迷宮滅火（用簡寫連線） |
+| [demos/drasl_auth](examples/demos/drasl_auth/main.py)   | 透過自建 Drasl 驗證伺服器連線並回應聊天        |
 
 ## 專案結構
 
 ```
 src/minethon/
 ├── __init__.py         # 使用者入口（re-export create_bot / Bot / BotEvent / EventAdaptor / 錯誤類）
-├── bot.py              # runtime façade：event decorator、plugin loading、版本 guard
+├── bot.py              # 公開 module 名 —— 純 re-export 自 _bot_runtime
+├── _bot_runtime.py     # runtime façade：__getattr__ JS proxy 委託、bind()、plugin loading、版本 guard
+├── _commands.py        # 同步命令式學員 API（Commands mixin）
+├── _event_login.py     # create_bot("g_swim") 簡寫 → 帳密/伺服器解析
 ├── bot.pyi             # 生成的 IDE 型別層（由 scripts/generate_stubs.py 產出）
 ├── _events.py          # 生成的 BotEvent StrEnum
 ├── _handlers.py        # 生成的 EventAdaptor 基底類別
-├── _bridge.py          # JSPyBridge 封裝：callback thread、emitter 注入、handler 正規化
-├── _type_shells.py     # 內部型別 shell 實作
+├── _bridge.py          # JSPyBridge 封裝：bundled npm 版本 pin、bridge 生命週期
 ├── errors.py           # 公開錯誤類（MinethonError、NotSpawnedError、VersionPinRequiredError 等）
 ├── py.typed            # PEP 561 型別支援標記
 └── models/             # 可匯入的公開型別 shell
@@ -180,7 +182,11 @@ src/minethon/
 
 scripts/
 ├── generate_stubs.py   # 從 mineflayer / pathfinder d.ts 生成 bot.pyi / _events.py / _handlers.py
-└── format.sh           # 一鍵 regen → ruff → pyright → pytest
+├── parse_dts.py        # TS d.ts 解析器的 stable public surface
+├── check_stubs.py      # d.ts ↔ bot.pyi 漂移檢查（缺項時 exit 1）
+└── format.sh           # 一鍵 regen → ruff → pyright → pytest → check_stubs
+
+pc_setup/               # 工作人員用：標記學生 PC 的組別與電腦編號
 ```
 
 > hover 說明的中文 docstring 直接住在 `src/minethon/bot.pyi` 內；`generate_stubs.py` regen 時會從現有 `.pyi` 讀回 docstring 再注入新生成的 stub，所以人工編輯不會被沖掉。
@@ -194,7 +200,7 @@ scripts/
 ./scripts/format.sh --check    # 只檢查不寫入（CI 模式）
 ```
 
-對應的個別指令：
+對應的個別指令（與 `format.sh` 內部順序相同）：
 
 ```bash
 uv run python scripts/generate_stubs.py
@@ -202,7 +208,11 @@ uv run ruff format src scripts tests
 uv run ruff check src scripts tests
 uv run pyright src/
 uv run pytest -m "not integration" --tb=short -q
+uv run python scripts/check_stubs.py        # d.ts ↔ bot.pyi 漂移檢查
 ```
+
+需要實連伺服器的 integration smoke（升 JSPyBridge / bundled npm 前必跑）見
+[`AGENTS.md`](AGENTS.md) 的「檢查指令」段。
 
 ### IntelliJ / PyCharm 使用者注意
 
