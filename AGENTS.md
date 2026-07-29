@@ -12,8 +12,10 @@ minethon 是教學導向的 Python mineflayer SDK。
 
 - 學生不需要先懂 Node.js、EventEmitter、asyncio
 - 公開 API 以同步 callback 為主
-- `bot.py` 保持薄，盡量直接委託 mineflayer
 - 補全與 hover 體驗由生成的 `bot.pyi` 承擔
+- **已否決的方向**：早期的 async facade / registry 設計（`bot.raw.plugin()`、
+  `wait_until_spawned()`、大量 plugin bridge）已放棄，因為它要求學生先懂 asyncio，
+  違反上面第一條。不要再提案
 
 第一驗收標準：
 
