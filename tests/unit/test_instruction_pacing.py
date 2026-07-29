@@ -61,6 +61,14 @@ def test_reads_are_not_paced(paces: list[float]) -> None:
     assert paces == []
 
 
+def test_dismount_is_paced_even_when_it_no_ops(paces: list[float]) -> None:
+    # dismount writes a packet, so it is a leaf action and paces like jump —
+    # including on the guarded path where the bot isn't riding, so a loop around
+    # it can't spin.
+    Bot(SimpleNamespace(vehicle=None), instruction_sleep=0.2).dismount()
+    assert paces == [0.2]
+
+
 def test_bridge_safe_sleep_skips_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     waited: list[float] = []
 
