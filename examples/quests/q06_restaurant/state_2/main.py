@@ -43,16 +43,16 @@ class Stage1Handler(EventAdaptor):
         # 執行硬幣丟棄
         if dp[target_money][0] != 257:
             if dp[target_money][1] != 0:
-                print("丟出",dp[target_money][1], "個 金粒")
+                print("丟出",dp[target_money][1], "個金粒")
                 bot.drop("gold_nugget", dp[target_money][1])
             if dp[target_money][2] != 0:
-                print("丟出",dp[target_money][2], "個 鐵錠")
+                print("丟出",dp[target_money][2], "個鐵錠")
                 bot.drop("iron_ingot", dp[target_money][2])
             if dp[target_money][3] != 0:
-                print("丟出", dp[target_money][3], "個 銅粒")
+                print("丟出", dp[target_money][3], "個銅粒")
                 bot.drop("raw_copper", dp[target_money][3])
             if dp[target_money][4] != 0:
-                print("丟出", dp[target_money][4], "個 鐵粒")
+                print("丟出", dp[target_money][4], "個鐵粒")
                 bot.drop("iron_nugget", dp[target_money][4])
 bot = create_bot("g_restaurant")
 bot.bind(Stage1Handler())

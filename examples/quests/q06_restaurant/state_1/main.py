@@ -32,16 +32,16 @@ class Stage1Handler(EventAdaptor):
         nugget = target_money
         # 執行硬幣丟棄
         if gold != 0:
-            print("丟出",gold, "個 金錠")
+            print("丟出",gold, "個金錠")
             bot.drop("gold_ingot", gold)
         if iron != 0:
-            print("丟出",iron, "個 鐵錠")
+            print("丟出",iron, "個鐵錠")
             bot.drop("iron_ingot", iron)
         if copper != 0:
-            print("丟出", copper, "個 銅錠")
+            print("丟出", copper, "個銅錠")
             bot.drop("copper_ingot", copper)
         if nugget != 0:
-            print("丟出", nugget, "個 鐵粒")
+            print("丟出", nugget, "個鐵粒")
             bot.drop("iron_nugget", nugget)
 
 
