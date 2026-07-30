@@ -341,6 +341,10 @@ def test_create_bot_installs_the_repair(monkeypatch: pytest.MonkeyPatch) -> None
         rt, "get_mineflayer", lambda: SimpleNamespace(createBot=lambda _opts: js_bot)
     )
     monkeypatch.setattr(rt, "_install_quiet_interrupt", lambda: None)
+    # create_bot probes the server's TCP port before handing off to mineflayer,
+    # and a failed probe calls os._exit — which would take the test runner with
+    # it. `example.invalid` never resolves, so this has to be stubbed.
+    monkeypatch.setattr(rt, "_require_reachable", lambda *_a: None)
     # Patch the module reference, not `atexit.register` itself — the latter is
     # the real stdlib module and would swallow every registration process-wide
     # for the duration of the test.

@@ -26,11 +26,13 @@ class ActJs:
         block_at: object | None = None,
         held: object | None = SimpleNamespace(name="stone", count=1),
         dig_ms: float | None = 1000.0,
+        server_allows_digging: bool = True,
     ) -> None:
         self._cursor = cursor
         self._block_at = block_at
         self.heldItem = held
         self.dig_ms = dig_ms
+        self.server_allows_digging = server_allows_digging
         self.calls: list[tuple] = []
         self.dig_timeouts: list[float] = []
         self.controls: dict[str, bool] = {}
@@ -51,6 +53,12 @@ class ActJs:
     def dig(self, the_block: object, timeout: float = 10.0) -> None:
         self.calls.append(("dig", the_block))
         self.dig_timeouts.append(timeout)
+        # mineflayer's dig() resolves off a client-side timer and never checks
+        # whether the server accepted the break, so dig() re-reads the cell to
+        # tell a real break from a refused one. Model both: an accepted break
+        # empties the cell, a refused one leaves it exactly as it was.
+        if self.server_allows_digging:
+            self._block_at = None
 
     def placeBlock(self, ref: object, face_vector: object) -> None:  # noqa: N802
         self.calls.append(("placeBlock", ref, face_vector))
@@ -94,6 +102,63 @@ def test_dig_falls_back_to_front_block(
 
     assert Bot(fake).dig() == ((0, 64, 1), "dirt")
     assert ("dig", ahead) in fake.calls
+
+
+def test_dig_reports_failure_when_the_server_refuses_the_break(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refused break used to come back as a success tuple.
+
+    mineflayer resolves dig() off `setTimeout(finishDigging, digTime)` without
+    waiting for the server, so a protected region / adventure mode / inactive
+    quest looked exactly like a real dig. Measured on the competition server:
+    dig() returned ((341, 62, -473), 'grass_block') and the block was still
+    there a second later.
+    """
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    monkeypatch.setattr(cmd, "_DIG_VERIFY_SECONDS", 0.0)
+    aimed = block("grass_block", 341, 62, -473)
+    fake = ActJs(cursor=aimed, block_at=aimed, server_allows_digging=False)
+
+    assert Bot(fake).dig() is None
+    assert ("dig", aimed) in fake.calls  # it really did try
+    assert "沒有被破壞" in capsys.readouterr().out
+
+
+def test_place_reports_a_refused_placement_instead_of_the_js_stack(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The blockUpdate timeout means "the server refused", not "internal error".
+
+    Unhandled it reached the student as ~12 lines of Node stack ending in
+    "Event blockUpdate:(x, y, z) did not fire within timeout of 5000ms".
+    """
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    fake = ActJs(cursor=block("stone", 1, 64, 1))
+
+    def refuse(_ref: object, _face: object) -> None:
+        msg = "Event blockUpdate:(1, 65, 1) did not fire within timeout of 5000ms"
+        raise RuntimeError(msg)
+
+    fake.placeBlock = refuse  # type: ignore[method-assign]
+
+    assert Bot(fake).place() is None
+    assert "不能放方塊" in capsys.readouterr().out
+
+
+def test_place_still_raises_unexpected_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cmd, "get_vec3", lambda: lambda x, y, z: (x, y, z))
+    fake = ActJs(cursor=block("stone", 1, 64, 1))
+
+    def explode(_ref: object, _face: object) -> None:
+        raise RuntimeError("something else entirely")
+
+    fake.placeBlock = explode  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="something else entirely"):
+        Bot(fake).place()
 
 
 def test_place_places_against_aimed_top_face(monkeypatch: pytest.MonkeyPatch) -> None:
