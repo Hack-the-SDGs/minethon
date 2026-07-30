@@ -50,12 +50,10 @@ class Stage1Handler(EventAdaptor):
                 bot.drop("iron_ingot", dp[target_money][2])
             if dp[target_money][3] != 0:
                 print("丟出", dp[target_money][3], "個 銅粒")
-                bot.drop("raw_nugget", dp[target_money][3])
+                bot.drop("raw_copper", dp[target_money][3])
             if dp[target_money][4] != 0:
                 print("丟出", dp[target_money][4], "個 鐵粒")
                 bot.drop("iron_nugget", dp[target_money][4])
-        else:
-            print(dp[target_money])
 bot = create_bot("g_restaurant")
 bot.bind(Stage1Handler())
 bot.run_forever()
