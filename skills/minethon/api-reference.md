@@ -103,8 +103,10 @@ walking into a wall can't hang the script.
 - `get_height() -> int` — size **level 1–5**, read from the server-reported
   `scale` attribute (`1` when the server hasn't sent one).
 - `set_height(level) -> None` — request a size level; `level` outside `1..5`
-  raises `ValueError`. Note: an entity's real scale is server-authoritative, so
-  the in-world change depends on the competition server's plugin honouring it.
+  raises `ValueError`, and so does a fractional one (`set_height(3.9)` is an
+  error, **not** a silent truncation to `3`). Note: an entity's real scale is
+  server-authoritative, so the in-world change depends on the competition
+  server's plugin honouring it.
 
 ## Items
 
@@ -296,7 +298,8 @@ All inherit from `MinethonError` (import from `minethon`):
   before `load_plugin`.
 - `VersionPinRequiredError` — a non-bundled package was loaded without a version.
 
-`set_height` raises the built-in `ValueError` for a level outside 1–5.
+`set_height` raises the built-in `ValueError` for a level outside 1–5 or a
+fractional one; a non-number raises `TypeError`.
 
 ---
 

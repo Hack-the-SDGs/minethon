@@ -2991,6 +2991,9 @@ class Bot:
     def set_height(self, level: int) -> None:
         """請伺服器把大小改成等級 `1`~`5`，其餘丟出 `ValueError`
 
+        小數（例如 `set_height(3.9)`）也會丟 `ValueError`，不會偷偷無條件捨去
+        變成 `3` —— 送出一個你沒要求的等級卻不講，比直接報錯難查得多。
+
         和其他會改變世界的指令一樣是「伺服器說了算」：實際送出
         `/trigger <帳號>_set_height set <等級>`，由關卡 datapack 決定要不要執行。
         客戶端不會偷改任何東西，所以 `get_height()` 讀到的一直是**伺服器回報**的

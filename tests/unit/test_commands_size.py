@@ -91,6 +91,29 @@ def test_set_height_rejects_non_numbers() -> None:
         Bot(FakeJs(entity_with_scale(1.0))).set_height("3")  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("bad", [3.9, 1.5, 2.0000001])
+def test_set_height_rejects_fractional_levels(bad: float) -> None:
+    """int(3.9) is 3, which passes the range check — so validate before narrowing.
+
+    Truncating would send a level the student never asked for and report
+    nothing, which is the silent-wrong-result failure this module exists to
+    remove. `set_height(7/2)` is a mistake, not a request for level 3.
+    """
+    js = FakeJs(entity_with_scale(1.0))
+    with pytest.raises(ValueError, match="整數"):
+        Bot(js).set_height(bad)  # type: ignore[arg-type]
+    assert js.sent == []  # nothing reached the server
+
+
+def test_set_height_accepts_integral_floats() -> None:
+    # 4.0 is unambiguous — only genuinely fractional input is rejected.
+    js = FakeJs(entity_with_scale(1.0))
+
+    Bot(js).set_height(4.0)  # type: ignore[arg-type]
+
+    assert js.sent == ["/trigger u1_bot_set_height set 4"]
+
+
 def test_set_height_before_spawn_raises() -> None:
     with pytest.raises(NotSpawnedError):
         Bot(FakeJs(None)).set_height(3)

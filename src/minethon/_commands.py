@@ -1296,7 +1296,18 @@ class Commands:
         unimplemented one is a harmless no-op (see :meth:`action`), and
         :meth:`get_height` will keep returning the old level.
         """
-        level = int(_require_number(level, "大小等級"))
+        # Validate before narrowing, not after: int(3.9) is 3, which passes the
+        # range check and quietly sends a level the student never asked for.
+        # Silently doing something else is the failure mode this module exists
+        # to remove — say what is wrong instead.
+        requested = _require_number(level, "大小等級")
+        if not requested.is_integer():
+            msg = (
+                f"大小等級要用整數，收到 {requested}。"
+                f"請直接寫 {_MIN_HEIGHT}~{_MAX_HEIGHT} 其中一個整數。"
+            )
+            raise ValueError(msg)
+        level = int(requested)
         if not _MIN_HEIGHT <= level <= _MAX_HEIGHT:
             msg = f"大小等級只能是 {_MIN_HEIGHT}~{_MAX_HEIGHT}，收到 {level}。"
             raise ValueError(msg)

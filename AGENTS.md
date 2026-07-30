@@ -74,7 +74,10 @@ bot.bind(Greeter())
   理由：舊版把 scale 寫進本機 proxy，而 `get_height` 讀同一個欄位，所以
   `set_height(4)` → `get_height()` 回 4，遊戲裡卻沒變大——學員用最自然的方式驗證，
   得到確認他是對的的答案。現在請求沒生效時 `get_height()` 會照實回傳舊等級。
-  需要 datapack 實作 `<帳號>_set_height` trigger；沒實作就是無害 no-op
+  需要 datapack 實作 `<帳號>_set_height` trigger；沒實作就是無害 no-op。
+  **驗證要在收窄之前做**：`int(3.9)` 是 `3`，會通過範圍檢查然後送出學員沒要求的
+  等級。小數丟 `ValueError`，不無條件捨去——這與上面那條同一個道理，靜默送出
+  別的結果比報錯難查
 - **`bot.look_level()`**：把 pitch 歸零、保留 yaw。`dig`/`place`/`use`/`look_block` 全部
   作用在 `blockAtCursor`，而機器人出生時不是平視（實測 -52°～-68°，看著自己腳邊），
   這時 `dig()` 挖的是腳下地板。`create_bot` 在 spawn settle 之後自動呼叫一次；
