@@ -19,6 +19,7 @@ below cites the api.md / lib section it relies on.
 from __future__ import annotations
 
 import contextlib
+import difflib
 import json
 import math
 import threading
@@ -57,6 +58,25 @@ _MAX_DIG_SECONDS = 60.0
 # short digs keep JSPyBridge's default 10s budget.
 _DIG_TIMEOUT_MARGIN_SECONDS = 5.0
 _DIG_TIMEOUT_FLOOR_SECONDS = 10.0
+# dig(): how long to keep re-reading the cell before calling the break a failure.
+# mineflayer resolves dig() off a client-side `setTimeout(finishDigging, digTime)`
+# (digging.js) and never waits for the server, so a refused break — protected
+# region, adventure mode, quest not started — resolves exactly like a real one.
+# The server's block update may still be in flight when it does, hence the grace
+# window rather than a single read.
+# Ref: mineflayer lib/plugins/digging.js — dig / finishDigging.
+_DIG_VERIFY_SECONDS = 1.0
+# place(): mineflayer's placeBlock rejects with this when the server never sends
+# the resulting block update — in practice "the server refused the placement".
+# Ref: mineflayer lib/plugins/place_block.js + promise_utils.js onceWithCleanup.
+_PLACE_REJECTED_MARKER = "did not fire within timeout"
+# How many suggestions to offer when a student misspells a block name.
+_SUGGEST_COUNT = 3
+_SUGGEST_CUTOFF = 0.6
+# Ceiling on how many candidate names a suggestion will scan. Real pools are
+# ~1166 block names and ~150 bot properties; anything far past that is a sign the
+# object being iterated is not what we think it is.
+_SUGGEST_SCAN_LIMIT = 5000
 
 # Movement: a datapack can advertise an exact-grid provider with any trigger
 # objective whose display title is `minethon:grid_move:v1`. The objective must
@@ -101,12 +121,12 @@ _NEW_INPUT_PACKET = "newPlayerInputPacket"
 _DEGREES_PER_TURN = 90.0  # turn_left / turn_right default quarter turn
 
 # Size level <-> entity "scale" attribute. get_height reads the server-reported
-# scale; set_height writes it locally (best-effort) and validates the 1..5 range.
+# scale and nothing writes it client-side, so the reading always reflects what
+# the server actually did — see Commands.set_height for why that matters.
 # Ref: mineflayer lib/plugins/entities.js (entity.attributes[key] = {value,
 # modifiers}) + explosion.js getAttributeValue (base + operation 0/1/2 modifiers).
 _MIN_HEIGHT = 1
 _MAX_HEIGHT = 5
-_DEFAULT_SCALE_KEY = "minecraft:generic.scale"
 # Attribute modifier operations. Ref: mineflayer lib/plugins/explosion.js.
 _OP_ADD = 0  # add amount to the base value
 _OP_ADD_FRACTION_OF_BASE = 1  # add base * amount
@@ -287,7 +307,7 @@ def _mapping_keys(mapping: Any) -> list[str]:
         return []
 
 
-def _component_plaintext(component: Any) -> str:  # noqa: PLR0911
+def component_plaintext(component: Any) -> str:  # noqa: PLR0911
     """Flatten the text/extra subset of a JSON text component.
 
     Pinned mineflayer already turns a scoreboard title into ``str``. Accepting
@@ -306,22 +326,88 @@ def _component_plaintext(component: Any) -> str:  # noqa: PLR0911
         if not isinstance(component, str | list | dict):
             return original
     if isinstance(component, list | tuple):
-        return "".join(_component_plaintext(part) for part in component)
+        return "".join(component_plaintext(part) for part in component)
 
     component_type = _mapping_item(component, "type")
     component_value = _mapping_item(component, "value")
-    if str(component_type) == "string" and component_value is not None:
+    if str(component_type) in {"string", "compound"} and component_value is not None:
         # minecraft-protocol 1.21.11 exposes anonymous-NBT strings through
-        # JSPyBridge as ``{type: "string", value: "..."}``.
-        return _component_plaintext(component_value)
+        # JSPyBridge as ``{type: "string", value: "..."}``; a nested component
+        # (a kick reason, say) arrives as ``{type: "compound", value: {...}}``.
+        return component_plaintext(component_value)
 
     text = _mapping_item(component, "text")
     extra = _mapping_item(component, "extra")
-    if text is None and extra is None:
+    # `translate` carries vanilla message keys such as
+    # ``multiplayer.disconnect.duplicate_login``. There is no lang table here to
+    # expand it against, but the key alone beats a dict repr.
+    translate = _mapping_item(component, "translate")
+    if text is None and extra is None and translate is None:
         return str(component)
-    prefix = "" if text is None else str(text)
-    suffix = "" if extra is None else _component_plaintext(extra)
+    prefix = component_plaintext(translate) if text is None else str(text)
+    suffix = "" if extra is None else component_plaintext(extra)
     return prefix + suffix
+
+
+def _require_number(value: Any, label: str) -> float:
+    """Return ``value`` as a float, or raise a TypeError a beginner can act on.
+
+    Without this the comparison a few frames deeper raises
+    ``TypeError: '<=' not supported between instances of 'str' and 'int'``,
+    which names neither the argument nor the method the student called.
+    ``bool`` is rejected on purpose: ``move_forward(True)`` is a mistake, not a
+    request to walk one block.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        got = type(value).__name__
+        msg = (
+            f"{label}要用數字，收到的是{got}：{value!r}。"  # noqa: RUF001 — zh-TW fullwidth colon
+            "如果它本來是文字，要先用 int() 或 float() 轉換。"
+        )
+        raise TypeError(msg)
+    return float(value)
+
+
+def bounded_keys(candidates: Any) -> list[str]:
+    """List ``candidates``' keys, refusing anything not properly iterable.
+
+    ``__iter__`` is required rather than just tried: an object that implements
+    only ``__getitem__`` — which is exactly how one mimics a JS proxy, where a
+    missing key yields ``None`` instead of raising — satisfies Python's legacy
+    iteration protocol, and iterating it asks for index 0, 1, 2… forever without
+    ever raising ``IndexError``. The cap is a second belt for anything else that
+    turns out to be unbounded.
+
+    Ref: javascript/proxy.py — Proxy.__iter__ (the real bridge does define it).
+    """
+    if not hasattr(type(candidates), "__iter__"):
+        return []
+    keys: list[str] = []
+    try:
+        for key in candidates:
+            keys.append(str(key))
+            if len(keys) >= _SUGGEST_SCAN_LIMIT:
+                break
+    except Exception:  # noqa: BLE001 — a hint must never break the caller
+        return keys
+    return keys
+
+
+def suggest(name: str, candidates: Any) -> str:
+    """Return a ``「你是不是要找 x、y」`` hint for ``name``, or ``""``.
+
+    Matching is case-insensitive so a capitalisation slip (``Chat`` for
+    ``chat``) still scores above the cutoff.
+    """
+    pool = candidates if isinstance(candidates, list) else bounded_keys(candidates)
+    lowered = {candidate.lower(): candidate for candidate in pool}
+    matches = difflib.get_close_matches(
+        name.lower(), list(lowered), n=_SUGGEST_COUNT, cutoff=_SUGGEST_CUTOFF
+    )
+    if not matches:
+        return ""
+    named = "、".join(lowered[match] for match in matches)
+    return f"你是不是要找 {named}？"  # noqa: RUF001 — zh-TW fullwidth question mark
 
 
 def _attribute_value(prop: Any) -> float:
@@ -475,7 +561,7 @@ class Commands:
         (``sleep`` is not added as a method name: mineflayer already uses
         ``bot.sleep`` for sleeping in a bed.)
         """
-        _bridge_safe_sleep(seconds)
+        _bridge_safe_sleep(_require_number(seconds, "等待的秒數"))
 
     # ── position & orientation (read) ─────────────────────────────────
     def get_x(self) -> float:
@@ -568,10 +654,20 @@ class Commands:
     def _block_id(self, name: str) -> int | None:
         """Resolve a block name to its numeric id via the bot's registry.
 
+        An unknown name and a name that simply isn't nearby both used to come
+        back as ``None`` from :meth:`find_block`, which is the same value and so
+        the same non-answer. There are ~1166 block names and no way for a
+        student to list them, so say so here instead.
+
         Ref: mineflayer/docs/api.md — bot.registry (minecraft-data) blocksByName.
         """
-        entry = self._js.registry.blocksByName[name]
+        by_name = self._js.registry.blocksByName
+        entry = by_name[name]
         if entry is None:
+            hint = suggest(name, by_name)
+            print(  # noqa: T201 — student-facing, intentional
+                f"沒有叫做「{name}」的方塊。{hint}".rstrip(), flush=True
+            )
             return None
         return int(entry.id)
 
@@ -701,7 +797,7 @@ class Commands:
         scoreboard = _mapping_item(scoreboards, objective)
         if scoreboard is None:
             return False
-        title = _component_plaintext(getattr(scoreboard, "title", None))
+        title = component_plaintext(getattr(scoreboard, "title", None))
         return title == _GRID_MOVE_PROVIDER_TITLE
 
     def _enabled_trigger_objectives(self) -> set[str]:
@@ -735,7 +831,7 @@ class Commands:
         for item in matches:
             match = _mapping_item(item, "match")
             value = item if match is None else match
-            candidate = _component_plaintext(value).strip()
+            candidate = component_plaintext(value).strip()
             if candidate.startswith("/trigger "):
                 candidate = candidate.removeprefix("/trigger ").split(maxsplit=1)[0]
             if candidate:
@@ -901,7 +997,13 @@ class Commands:
         one-cell move. The fallback is relative to the facing when the call
         starts and polls directional progress with a stall timeout.
         """
+        blocks = _require_number(blocks, "移動的格數")
         if blocks <= 0:
+            # Returning the current position for a zero or negative distance is
+            # indistinguishable from a move that worked, so say it out loud.
+            print(  # noqa: T201 — student-facing, intentional
+                f"移動的格數要大於 0，收到 {blocks:g}，所以沒有移動。", flush=True
+            )
             return self.get_pos()
         # The score or enabled-trigger state is one per-player request/ACK slot.
         # Discovery, sequence derivation and ACK waiting must be one transaction;
@@ -930,6 +1032,14 @@ class Commands:
                     best_progress = progress
                     last_progress_at = now
                 elif now - last_progress_at >= _WALK_STALL_TIMEOUT:
+                    # Walking into a wall used to return the current position
+                    # with no exception and no output, so the rest of a
+                    # straight-line script ran on from the wrong place.
+                    print(  # noqa: T201 — student-facing, intentional
+                        f"前面有東西擋住，只走了 {progress:.1f} 格就走不動了"
+                        f"（本來要走 {blocks:g} 格）。",
+                        flush=True,
+                    )
                     break
                 time.sleep(_POLL_SECONDS)
         finally:
@@ -1068,6 +1178,7 @@ class Commands:
         falls back to the plain client-side look.
         Ref: mineflayer/docs/api.md — bot.look(yaw, pitch, force).
         """
+        yaw = _require_number(yaw, "朝向角度")
         entity = self._entity()
         # Same transaction discipline as _walk: discovery, sequence derivation
         # and ACK waiting must happen under the per-Bot lock.
@@ -1083,7 +1194,39 @@ class Commands:
 
         Returns the new ``(yaw, pitch)`` in degrees.
         """
-        return self.set_turn(self.get_yaw() + degrees)
+        return self.set_turn(self.get_yaw() + _require_number(degrees, "轉的角度"))
+
+    @_paced
+    def look_level(self) -> tuple[float, float]:
+        """Level the view — look straight ahead instead of up or down.
+
+        Returns the new ``(yaw, pitch)``; the horizontal facing is unchanged.
+
+        Needed because every "what am I pointing at" command — :meth:`dig`,
+        :meth:`place`, :meth:`use`, :meth:`look_block` — resolves through
+        ``blockAtCursor``, and a bot does not necessarily spawn looking at the
+        horizon (measured pitch on the competition server: ``-52°`` to ``-68°``,
+        i.e. aimed at its own feet). At that angle ``dig()`` breaks the floor and
+        ``look_block()`` reports the floor, while :meth:`get_front_block` — which
+        steps along the facing axis rather than raycasting — correctly says there
+        is nothing ahead. :meth:`set_turn` deliberately preserves pitch, so
+        turning does not clear it either, and the only other way out was
+        :meth:`look_at` with coordinates the caller has to work out.
+
+        ``create_bot`` calls this once after spawning, so a straight-line script
+        starts level. Call it again after anything that aims the view for you
+        (:meth:`dig` and :meth:`look_at` both do).
+
+        Only the client's own yaw/pitch is what ``blockAtCursor`` reads, so this
+        fixes targeting whether or not the ``look`` packet reaches the server —
+        see :func:`_face` for why a visible turn is a separate, unsolved problem.
+
+        Ref: mineflayer/docs/api.md — bot.look(yaw, pitch, force);
+        lib/plugins/ray_trace.js — blockAtCursor uses bot.entity.yaw/pitch.
+        """
+        entity = self._entity()
+        self._js.look(float(entity.yaw), 0.0, True)
+        return (self.get_yaw(), self.get_pitch())
 
     def turn_left(self) -> tuple[float, float]:
         """Turn 90° to the left; returns the new ``(yaw, pitch)``."""
@@ -1094,12 +1237,23 @@ class Commands:
         return self.turn(-_DEGREES_PER_TURN)
 
     @_paced
-    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
+    def look_at(self, x: float, y: float, z: float) -> tuple[float, float]:
         """Face the exact point ``(x, y, z)``; returns the new ``(yaw, pitch)``.
+
+        Takes floats so the output of :meth:`get_player_pos` can be passed
+        straight through (``bot.look_at(*bot.get_player_pos(name))``).
 
         Ref: mineflayer/docs/api.md — bot.lookAt(point, force).
         """
-        self._js.lookAt(_make_vec3(x, y, z), True)
+        # Validate before touching the proxy: Python resolves `self._js.lookAt`
+        # before evaluating the arguments, so inlining the checks would report a
+        # missing bridge method ahead of the bad argument.
+        target = (
+            _require_number(x, "X 座標"),
+            _require_number(y, "Y 座標"),
+            _require_number(z, "Z 座標"),
+        )
+        self._js.lookAt(_make_vec3(*target), True)
         return (self.get_yaw(), self.get_pitch())
 
     # ── size ──────────────────────────────────────────────────────────
@@ -1111,26 +1265,31 @@ class Commands:
         """
         return _scale_to_level(_read_scale(self._entity()))
 
-    @_paced
     def set_height(self, level: int) -> None:
-        """Request a size ``level`` in ``1..5``; raises ``ValueError`` otherwise.
+        """Ask the server for size ``level`` in ``1..5``; ``ValueError`` otherwise.
 
-        Writes the scale attribute locally so :meth:`get_height` round-trips.
-        Note: an entity's scale is server-authoritative — the competition
-        server's plugin is what actually resizes the model in-world.
+        Delegates to :meth:`action`, so this is server-authoritative like every
+        other in-world change: it sends ``/trigger <username>_set_height set
+        <level>`` and the quest datapack decides. Nothing is written client-side,
+        which means :meth:`get_height` keeps reporting the scale the *server* has
+        sent — if the request was ignored, the reading says so.
+
+        It used to write ``entity.attributes[scale]`` locally instead, and since
+        :meth:`get_height` reads that same field, ``set_height(4)`` followed by
+        ``get_height()`` returned ``4`` while the bot's size in-world never
+        changed. Verifying the call the obvious way confirmed a result that was
+        not true, which is the worst way for this to be wrong.
+
+        Requires the datapack to implement the ``set_height`` trigger; an
+        unimplemented one is a harmless no-op (see :meth:`action`), and
+        :meth:`get_height` will keep returning the old level.
         """
+        level = int(_require_number(level, "大小等級"))
         if not _MIN_HEIGHT <= level <= _MAX_HEIGHT:
             msg = f"大小等級只能是 {_MIN_HEIGHT}~{_MAX_HEIGHT}，收到 {level}。"
             raise ValueError(msg)
-        entity = self._entity()
-        prop = {"value": float(level), "modifiers": []}
-        attributes = getattr(entity, "attributes", None)
-        if attributes is None:
-            # ponytail: create the whole attributes object in one assignment so
-            # the bridge never has to mutate a nested proxy in place.
-            entity.attributes = {_DEFAULT_SCALE_KEY: prop}
-            return
-        attributes[_scale_key(attributes) or _DEFAULT_SCALE_KEY] = prop
+        self._entity()  # same "have we spawned yet" error as before
+        self.action("set height", level)
 
     # ── items ─────────────────────────────────────────────────────────
     def _find_inventory_item(self, name: str) -> Any:
@@ -1309,7 +1468,39 @@ class Commands:
         )
         # mineflayer looks at the block itself (forceLook)
         self._js.dig(block, timeout=timeout)
+        if not self._block_broke(result[0], result[1]):
+            print(  # noqa: T201 — student-facing, intentional
+                f"「{result[1]}」沒有被破壞。這裡可能不允許挖方塊，或是任務還沒開始。",
+                flush=True,
+            )
+            return None
         return result
+
+    def _block_broke(self, position: tuple[int, int, int], name: str) -> bool:
+        """Whether the block at ``position`` stopped being ``name``.
+
+        ``bot.dig()`` resolves off a client-side ``setTimeout`` sized from
+        ``bot.digTime`` and never waits for the server (``digging.js``), so a
+        refused break — protected region, adventure mode, quest not started —
+        resolves exactly like a real one and used to be reported as success.
+        Re-read the cell to find out which happened, allowing a short grace
+        window because the server's block update can still be in flight.
+
+        Unreadable cells (a fake bot with no ``blockAt``, an unloaded chunk)
+        count as broken: reporting a successful dig as failed would be the worse
+        way to be wrong.
+        """
+        deadline = time.monotonic() + _DIG_VERIFY_SECONDS
+        while True:
+            try:
+                block = self._js.blockAt(_make_vec3(*position))
+            except Exception:  # noqa: BLE001 — verification must never mask the dig
+                return True
+            if block is None or str(block.name) != name:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(_POLL_SECONDS)
 
     @_paced
     def place(self) -> tuple[tuple[int, int, int], str] | None:
@@ -1326,7 +1517,24 @@ class Commands:
         if ref is None:
             return None
         offset = _FACE_VECTORS[int(ref.face)]
-        self._js.placeBlock(ref, _make_vec3(*offset))
+        try:
+            self._js.placeBlock(ref, _make_vec3(*offset))
+        except Exception as exc:
+            # mineflayer waits for the resulting `blockUpdate` and rejects with a
+            # bare timeout Error when it never arrives, i.e. when the server
+            # refused the placement. Unhandled, that reached the student as a
+            # dozen lines of Node stack whose closing line
+            # ("Event blockUpdate:(x, y, z) did not fire within timeout of
+            # 5000ms") never mentions the server at all. The two guards above
+            # already cover empty-handed and nothing-in-reach; this is the third
+            # and most common way place() fails on a competition map.
+            # Ref: mineflayer lib/plugins/place_block.js.
+            if _PLACE_REJECTED_MARKER not in str(exc).lower():
+                raise
+            print(  # noqa: T201 — student-facing, intentional
+                "這裡不能放方塊。可能是保護區，或是任務還沒開始。", flush=True
+            )
+            return None
         rp = ref.position
         pos = (int(rp.x) + offset[0], int(rp.y) + offset[1], int(rp.z) + offset[2])
         placed = self._js.blockAt(_make_vec3(*pos))
@@ -1394,6 +1602,13 @@ class Commands:
         bot.players, bot.activateEntityAt, bot.activateEntity.
         """
         self._entity()
+        if username == getattr(self._js, "username", None):
+            # The server answers a self-interact by disconnecting the bot
+            # ("Cannot interact with self!"), and this method used to return
+            # True on the way out — reporting success for the call that ended
+            # the session. Refuse before writing any packet.
+            msg = f"不能對自己（{username}）按右鍵。use_player() 要傳別的玩家的名字。"
+            raise ValueError(msg)
         try:
             player = self._js.players[username]
         except IndexError, KeyError, TypeError:
@@ -1447,7 +1662,14 @@ class Commands:
         is harmless. Ref: mineflayer/docs/api.md — bot.chat(message);
         vanilla /trigger.
         """
-        key = "_".join(str(name).strip().lower().replace("-", " ").split())
+        if not isinstance(name, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+            # Runtime guard, not a type-checker one: students run without a type
+            # checker. str(123) normalises to "123", which passes the charset
+            # check below and sends a trigger nobody implements — a silent no-op
+            # for what is plainly a mistake.
+            msg = f"動作名稱要是文字，收到的是{type(name).__name__}：{name!r}。"  # noqa: RUF001 — zh-TW fullwidth colon
+            raise TypeError(msg)
+        key = "_".join(name.strip().lower().replace("-", " ").split())
         if not key or not all(c in _ACTION_NAME_CHARS for c in key):
             msg = f"動作名稱只能包含英文字母、數字、空格、連字號或底線，收到 {name!r}。"
             raise ValueError(msg)
@@ -1455,10 +1677,53 @@ class Commands:
         if username is None:
             msg = "機器人還沒登入伺服器。請先呼叫 bot.wait_spawn()。"
             raise NotSpawnedError(msg)
-        command = f"/trigger {str(username).lower()}_{key}"
+        prefix = f"{str(username).lower()}_"
+        objective = f"{prefix}{key}"
+        self._warn_if_action_unavailable(name, prefix, objective)
+        command = f"/trigger {objective}"
         if value is not None:
             command += f" set {int(value)}"
         self._js.chat(command)
+
+    def _warn_if_action_unavailable(
+        self, name: str, prefix: str, objective: str
+    ) -> None:
+        """Print a hint when the server has not enabled ``objective`` for us.
+
+        Vanilla ``/trigger`` is silently inert for an objective the server has
+        not enabled for the caller, which is deliberate — the client must not be
+        able to force a quest action. The cost is that a misspelled action, a
+        quest that has not started, and a correct call that the datapack chose to
+        ignore are all the same non-event. Brigadier only suggests objectives
+        ``/trigger`` will accept from *this* player, so the answer is already
+        available; this just reports it.
+
+        Warn-and-send rather than refuse: an empty or unavailable suggestion list
+        means we could not tell, and skipping a valid action would be worse than
+        a spurious line of output.
+
+        Ref: mineflayer bot.tabComplete; vanilla /trigger.
+        """
+        try:
+            enabled = self._enabled_trigger_objectives()
+        except Exception:  # noqa: BLE001 — a hint must never break the action
+            return
+        if not enabled or objective in enabled:
+            return
+        # Only this bot's own actions are worth listing — the suggestion set also
+        # carries every other group's quest triggers.
+        mine = sorted(
+            candidate.removeprefix(prefix).replace("_", " ")
+            for candidate in enabled
+            if candidate.startswith(prefix)
+        )
+        available = "、".join(mine) if mine else "（目前一個都沒有）"
+        print(  # noqa: T201 — student-facing, intentional
+            f"伺服器現在不接受動作「{name}」，所以這一步可能沒有效果。"
+            f"這個機器人目前可用的動作：{available}。"  # noqa: RUF001 — zh-TW fullwidth colon
+            "如果任務還沒開始，等開始後再試。",
+            flush=True,
+        )
 
     # ── chat ──────────────────────────────────────────────────────────
     @_paced
