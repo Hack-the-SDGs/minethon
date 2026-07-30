@@ -25,6 +25,14 @@ jobs:
             exit 1
           fi
 
+      - name: Verify tag matches pyproject version
+        run: |
+          pkg=$(python3 -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          if [ "${GITHUB_REF_NAME#v}" != "$pkg" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match pyproject version $pkg — bump pyproject.toml and re-tag"
+            exit 1
+          fi
+
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
