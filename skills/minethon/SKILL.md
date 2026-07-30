@@ -14,6 +14,19 @@ There are **two ways** to drive the bot, and real scripts often combine them:
 1. **Synchronous student API** — blocking commands for linear "do A, then B, then C" scripts: `bot.wait_spawn()`, `bot.move_forward(3)`, `bot.dig()`, `bot.get_pos()`. **This is the default.**
 2. **EventAdaptor** — subclass it, override `on_<event>` methods, wire with `bot.bind(...)`, keep the process alive with `bot.run_forever()`. Use it to *react* (chat commands, taking damage, players joining).
 
+## Audience check — do this first
+
+If the user connects with the shorthand (`create_bot("g_swim")` / `create_bot("swim")`),
+they are a **zero-experience camp student**. They know only: variables, arithmetic,
+`print`, type conversion, reading a traceback, comparisons, `if`/`elif`/`else`,
+`for ... in range(...)`, `for item in list`, lists, attribute/method calls, `import`.
+
+For them, write **straight-line scripts only**. Do NOT produce `def`, `class`,
+`while`, `input()`, dicts, comprehensions, `try`/`except`, decorators, or
+`EventAdaptor` — they cannot read those yet, and the goal is code they can
+understand and modify. Use `for i in range(1000):` where a loop is needed.
+The EventAdaptor sections below are for everyone else.
+
 ## CRITICAL rules (these are where AI gets it wrong)
 
 - **Movement uses the student API, never pathfinder or yaw math.** To walk forward 5 blocks: `bot.move_forward(5)`. Do NOT write `bot.pathfinder.goto(...)`, `bot.entity.position` math, or `import math`. Pathfinder exists but is an advanced opt-in, not for basic movement.
@@ -83,12 +96,13 @@ firing after the last line runs.
 | `turn(degrees)` | `(yaw, pitch)` | Relative turn (+ = left) |
 | `set_turn(yaw)` | `(yaw, pitch)` | Face absolute yaw (degrees) |
 | `look_at(x, y, z)` | `(yaw, pitch)` | Aim at a point |
+| `look_level()` | `(yaw, pitch)` | Look straight ahead (pitch 0), keeping the facing |
 | `get_height()` | `int` | Size level 1–5 |
-| `set_height(level)` | `None` | Set size 1–5 (else `ValueError`) |
+| `set_height(level)` | `None` | Ask the server for size 1–5 (else `ValueError`); `get_height()` stays server-sourced |
 | `hold(name)` | `bool` | Equip item by name to hand |
 | `unhold()` | `bool` | Put held item away |
 | `drop(name=None, count=None)` | `bool` | Toss held stack, or item by name/ID (all or count) |
-| `dig()` | `((x,y,z), name)` or `None` | Break the block I'm aiming at |
+| `dig()` | `((x,y,z), name)` or `None` | Break the block I'm aiming at; `None` also means the server refused |
 | `place()` | `((x,y,z), name)` or `None` | Place held block on the aimed face |
 | `use()` | `bool` | Right-click aimed block, else use item |
 | `use_player(username)` | `bool` | Aim at and right-click a named player at their current height |

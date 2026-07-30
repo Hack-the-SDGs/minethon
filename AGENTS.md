@@ -69,7 +69,24 @@ bot.bind(Greeter())
   與 SDK 認知永久分歧。無 provider 時 `set_turn` 維持原本 client-side `look` fallback。SDK 不解析 group、帳號格式或關卡命名；快取只保存 objective 名，每次使用仍驗證 marker
   及本 bot 的 score／trigger 授權。同一 Bot 的 provider discovery／sequence／ACK 交易必須由 per-instance
   lock 序列化，避免 main 與 callback 共用 ACK channel
-- 角度一律「度」；`get_height`/`set_height` 是大小等級 1~5，讀寫 entity `scale` 屬性（實際縮放仍需伺服器端配合）
+- 角度一律「度」；`get_height`/`set_height` 是大小等級 1~5。`get_height` 讀 entity `scale`
+  屬性（伺服器回報），`set_height` **只委派給 `action("set height", level)`**、不寫本機。
+  理由：舊版把 scale 寫進本機 proxy，而 `get_height` 讀同一個欄位，所以
+  `set_height(4)` → `get_height()` 回 4，遊戲裡卻沒變大——學員用最自然的方式驗證，
+  得到確認他是對的的答案。現在請求沒生效時 `get_height()` 會照實回傳舊等級。
+  需要 datapack 實作 `<帳號>_set_height` trigger；沒實作就是無害 no-op
+- **`bot.look_level()`**：把 pitch 歸零、保留 yaw。`dig`/`place`/`use`/`look_block` 全部
+  作用在 `blockAtCursor`，而機器人出生時不是平視（實測 -52°～-68°，看著自己腳邊），
+  這時 `dig()` 挖的是腳下地板。`create_bot` 在 spawn settle 之後自動呼叫一次；
+  `set_turn` 刻意保留 pitch，所以轉向不會清掉低頭狀態。`dig()` 與 `look_at()` 會自己轉視線，
+  之後需要平視就再叫一次
+- **動作要能被檢查，不能靜默**：`dig()` 事後重讀方塊確認真的破了（mineflayer 的 `dig()`
+  是 client 端 `setTimeout` 結束、從不等伺服器確認，所以保護區／任務未開始會回報成功）；
+  `place()` 攔 `blockUpdate ... did not fire` 改印中文（那句英文的真正意思是「伺服器拒絕」）；
+  `action()` 送出前用 `_enabled_trigger_objectives()` 比對，沒被啟用就印出目前可用的動作名
+  （warn-and-send，不阻止送出——偵測不到不該擋掉有效動作）；`_walk` 撞牆的 stall timeout
+  與非正數格數都改成印一行，不再靜默返回；`find_block` 遇到 registry 沒有的名字會印
+  did-you-mean（`difflib`）
 - `chat(obj)` 送一般公開聊天（`str(obj)`）；分組可見性由伺服器插件處理
 - 與事件 API 並存：直線動作跑主執行緒，`EventAdaptor` + `bind` 處理反應，最後 `run_forever` 保活
 - `chat` / `dig` / `dismount` / `drop` 四個名稱刻意覆寫 mineflayer 同名方法；generator 用 `_STUDENT_API_OVERRIDES` 在 `bot.pyi` 裡略過 upstream 版本，避免重複定義（改動這組名字時要同步改 generator 的那個 frozenset）
@@ -203,26 +220,58 @@ bot.bind(Greeter())
 - exit code：正常結束（quit / 伺服器關閉 session）為 0；失敗（登入錯誤、bridge 逾時/斷線）
   為 1，讓 shell / CI 能分辨。`_stop_with_message(code=...)` 統一處理並先 flush 輸出。
 - `create_bot` 另註冊 `Once(bot, 'kicked')` 印出被踢原因（版本不合、白名單、任務踢線），
-  否則 `logErrors=False` 下原因會被整條吞掉。
+  否則 `logErrors=False` 下原因會被整條吞掉。`reason` 是 protodef NBT 不是字串，
+  一定要走 `component_plaintext()` 攤平（`str()` 會印出 Python dict repr，真正的訊息
+  埋在 `{'type': 'compound', 'value': {'translate': ...}}` 裡）；`Connection throttled`
+  另外特判——vanilla 對每個 IP 有重連節流，整間教室共用一個 NAT 出口會一直撞到，
+  而「被伺服器踢出」這句讀起來像學員自己的程式壞了。
+- **學員自己的例外要結束程式，不要保活。** excepthook 對 Ctrl-C／per-call timeout／
+  bridge failure 都 `os._exit`，唯獨「學員寫錯」這個最常發生的情況以前會落到
+  `atexit` 的 `run_forever()`，變成「印完一份漂亮的 traceback 之後畫面永遠不動」
+  （實測 100 秒仍未結束）。學員沒學過 Ctrl-C，那個畫面等於當機。現在 `previous()`
+  印完 traceback 後接 `_stop_with_message(_SCRIPT_FAILED, code=1)`。
+  事件驅動腳本要保活就自己呼叫 `run_forever()`，那本來就是它的用途。
+- **正常跑完也要說一句。** `atexit` 註冊的是 `_announce_then_keep_alive`（不是
+  `bot.run_forever` 本身），先印「程式已經跑完了，機器人還在線上，按 Ctrl-C 結束」。
+  沒有這行時「跑完」和「卡住」在畫面上完全一樣（都是什麼都沒有），而所有 quests
+  範例都沒寫 `quit()` / `run_forever()`。只有隱式路徑會印。
+- **`createBot` 之前先探測 TCP 埠**（`_require_reachable`）。mineflayer 一回傳就 ping
+  伺服器，ping 失敗會在 `loader.js` 轉發成 bot `error`，而我們的 listener 要等下一個
+  bridge round-trip 才裝上——連線被拒剛好落在那個空隙，Node 的 EventEmitter 直接
+  throw，node 進程死掉，學員看到 77 行 `AggregateError [ECONNREFUSED]`，最後那行
+  「連線發生錯誤:」冒號後面還是空的（bridge 已死，讀不到 error 物件）。實測 10.5 秒。
+  與其去贏那個 race，不如直接回答「有沒有人在聽」——改完是 1 行、0.3 秒。
+  TCP 之後的失敗（帳密、版本、白名單）照舊走 `error` / `kicked`。
 - JSPyBridge 的 per-call 逾時（`Call to 'X' timed out.`）由 excepthook 轉成友善訊息後
   結束（逾時後的遲到回應會毒化 bridge IO loop，不硬撐）。
 - `bind()` 對「拼錯的 `on_xxx`（不對應任何事件）」印提醒，不再靜默忽略。
 - `bot.pathfinder` 未載入時（真實 bridge 回 `None`）拋 `PluginNotInstalledError`
    並附下一步指引。
 
-**已知缺口——打錯名字不會丟 `AttributeError`（尚未修）。** `Bot.__getattr__`
-委託給 JS proxy，而 JSPyBridge 對 JS 端不存在的屬性**回 `None` 而不是丟
-`AttributeError`**（`bridge.js` 對 undefined 答 `'void'`）。後果：
+**打錯名字的拼字建議（`Bot._reject_misspelling`）。** JSPyBridge 對 JS 端不存在的
+屬性**回 `None` 而不是丟 `AttributeError`**（`bridge.js` 對 undefined 答 `'void'`），
+所以 `bot.mvoe_forward(3)` 以前是 `TypeError: 'NoneType' object is not callable`
+（沒說是哪個名字打錯），`bot.usernaem` 更是安靜地變成 `None`。課程只教「看懂錯誤
+行數、錯誤原因」——行數對，原因完全沒有。現在 `__getattr__` 讀到 `None` 時比對合法
+名稱，close match 就丟 `AttributeError` 附 did-you-mean（`difflib`，大小寫不敏感）。
 
-- `bot.mvoe_forward(3)` → `TypeError: 'NoneType' object is not callable`
-- `bot.usernaem` → 安靜地是 `None`，完全不報錯
+兩個關鍵約束，改這塊時不要退回去：
 
-課程只教學員「看懂錯誤行數、錯誤原因」——行數對，原因完全沒有，而且把注意力
-導向 `None` 這個他當天可能還沒學到的概念。這是初學者最常撞到的一條路徑。
-`__getattr__` 已經為 `pathfinder` 做過同型的特例修補（`value is None` →
-丟 `PluginNotInstalledError`），推廣成拼字建議是同一個位置的事；
-合法名稱清單可以從 `bot.pyi` 取。修之前不要把「minethon 的錯誤訊息對初學者
-友善」當成既成事實。
+- **合法名稱要用生成的 `_members.py`（`BOT_MEMBERS`），不能只用 live proxy 的 key。**
+  `list(bot_proxy)` 只給 JavaScript 的 *own enumerable* key，所以「文件有、但 JS 還沒
+  賦值」的屬性不在裡面——`bot.vehicle` 在第一次上車前就是 `undefined`。第一版用 proxy
+  key 當清單，結果沒騎過車的機器人讀 `bot.vehicle` 會被判定成 `moveVehicle` 的錯字。
+  `_members.py` 由 `generate_stubs.py` 從最終的 `bot.pyi` AST 產生（涵蓋 mineflayer
+  面 ＋ 學員 API），proxy key 仍然 union 進來以涵蓋 plugin 執行期加的東西。
+  順帶：`bot.vehicle` 是 runtime 真實存在但 mineflayer `index.d.ts` **從未宣告**的屬性，
+  所以它由 `_STUDENT_API_STUB` 手動補進 `bot.pyi`。
+- **只在有 close match 時才丟。** 找不到相近名稱就照舊回 `None`：誤判會弄壞本來能跑的
+  程式，比少一個提示糟。合法但確實是 `None` 的屬性（`bot.entity` spawn 前、
+  `bot.heldItem` 空手、`bot.vehicle` 沒騎車、`bot.targetDigBlock` 沒在挖）都必須安靜通過。
+- **走訪外部物件一律用 `bounded_keys()`。** 只實作 `__getitem__` 的物件（正是模擬
+  JS proxy 的方式：不存在的 key 回 `None` 而不是丟 `IndexError`）滿足 Python 的舊式
+  迭代協定，直接 `for x in obj` 會無限要 index 0、1、2……。這不是假設性問題：它曾經
+  讓整個 test suite 卡死。`bounded_keys` 要求 `__iter__` 並加上數量上限。
 
 ## 檢查指令
 
