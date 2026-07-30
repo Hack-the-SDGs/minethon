@@ -64,8 +64,14 @@ _DIG_TIMEOUT_FLOOR_SECONDS = 10.0
 # region, adventure mode, quest not started — resolves exactly like a real one.
 # The server's block update may still be in flight when it does, hence the grace
 # window rather than a single read.
+#
+# ponytail: fixed window, not a `blockUpdate` subscription. Sized against the
+# same worst case _WALK_STALL_TIMEOUT is (a server near 2 TPS, so ~4 ticks) and
+# biased so the remaining failure is a false alarm on a very laggy server — a
+# visible, hedged message — rather than back to reporting a refused dig as done.
+# Listen for the packet instead if that alarm ever fires in practice.
 # Ref: mineflayer lib/plugins/digging.js — dig / finishDigging.
-_DIG_VERIFY_SECONDS = 1.0
+_DIG_VERIFY_SECONDS = 2.0
 # place(): mineflayer's placeBlock rejects with this when the server never sends
 # the resulting block update — in practice "the server refused the placement".
 # Ref: mineflayer lib/plugins/place_block.js + promise_utils.js onceWithCleanup.
@@ -1470,7 +1476,8 @@ class Commands:
         self._js.dig(block, timeout=timeout)
         if not self._block_broke(result[0], result[1]):
             print(  # noqa: T201 — student-facing, intentional
-                f"「{result[1]}」沒有被破壞。這裡可能不允許挖方塊，或是任務還沒開始。",
+                f"「{result[1]}」看起來沒有被破壞。"
+                "這裡可能不允許挖方塊、任務還沒開始，或是伺服器現在很慢。",
                 flush=True,
             )
             return None

@@ -122,7 +122,7 @@ def test_dig_reports_failure_when_the_server_refuses_the_break(
 
     assert Bot(fake).dig() is None
     assert ("dig", aimed) in fake.calls  # it really did try
-    assert "沒有被破壞" in capsys.readouterr().out
+    assert "看起來沒有被破壞" in capsys.readouterr().out
 
 
 def test_place_reports_a_refused_placement_instead_of_the_js_stack(
