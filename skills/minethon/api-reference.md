@@ -13,8 +13,9 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
 ## Lifecycle
 
 - `wait_spawn() -> None` — Block until the bot has spawned. Returns instantly if
-  already spawned. **Call this once before any world action**; otherwise reads
-  raise `NotSpawnedError`.
+  already spawned. Needed once before any world action **on the explicit-options
+  form of `create_bot` only** — the camp shorthand already waited. Otherwise
+  reads raise `NotSpawnedError`.
 - `wait(seconds: float) -> None` — Sleep `seconds` while the connection stays
   alive. Use between actions (`bot.wait(0.5)`).
 
@@ -31,10 +32,17 @@ no `Vec3`/`Block`/`Item` objects, no `await`.
 - `get_sneak() -> bool` — currently sneaking?
 - `is_riding() -> bool` — currently sitting on / riding another entity (a boat,
   a minecart, or another player via the server's sit plugin). Use it to wait for
-  a mount to take effect: `while not bot.is_riding(): ...`. Prefer it over
-  `bot.entity.vehicle`, which can be missing rather than `None`.
+  a mount to take effect: `while not bot.is_riding(): ...`. Always use this
+  rather than reading `bot.entity.vehicle` or `vehicle.passengers` — mineflayer
+  doesn't clear those when the bot gets off, so they keep pointing at the old
+  vehicle until it next mounts something. `is_riding()` is the repaired accessor.
 - `get_hand() -> tuple[str, int] | None` — `(item_name, count)`, or `None` when
   empty-handed.
+- `get_player_pos(username) -> tuple[float, float, float]` — the named player's
+  live `(x, y, z)`, read at call time. Lets a follow loop do
+  `bot.look_at(*bot.get_player_pos(name))` then `bot.move_forward()` without
+  touching `Vec3`. Raises `PlayerNotFoundError` when the player is offline, in
+  another world, or outside the bot's loaded entity range.
 
 ## World sensing (read)
 
@@ -70,6 +78,18 @@ walking into a wall can't hang the script.
 - `move_right(blocks=1.0) -> (x, y, z)` — strafe right.
 - `jump() -> (x, y, z)` — one hop; returns position just after takeoff.
 
+## Vehicles
+
+- `dismount() -> None` — get off the current vehicle by tapping sneak, the key a
+  player presses to get off; your own sneak state is restored afterwards. Safe
+  to call when the bot isn't riding: it does nothing. Blocks until the server
+  actually takes the bot off (up to 2s) and raises `MinethonError` if it never
+  does — it will not silently return as though it worked. Inside an event
+  handler it sends the input and returns immediately instead of waiting, since
+  the handler occupies the thread that would deliver the confirmation. Always
+  use this rather than mineflayer's own `dismount()`, which presses jump instead
+  on 1.21.3+ and emits a fatal bot `error` when there is no vehicle.
+
 ## Orientation (write) — all angles in degrees
 
 - `turn_left() -> (yaw, pitch)` — turn 90° left.
@@ -83,8 +103,10 @@ walking into a wall can't hang the script.
 - `get_height() -> int` — size **level 1–5**, read from the server-reported
   `scale` attribute (`1` when the server hasn't sent one).
 - `set_height(level) -> None` — request a size level; `level` outside `1..5`
-  raises `ValueError`. Note: an entity's real scale is server-authoritative, so
-  the in-world change depends on the competition server's plugin honouring it.
+  raises `ValueError`, and so does a fractional one (`set_height(3.9)` is an
+  error, **not** a silent truncation to `3`). Note: an entity's real scale is
+  server-authoritative, so the in-world change depends on the competition
+  server's plugin honouring it.
 
 ## Items
 
@@ -141,8 +163,8 @@ Anything not on this list falls through to the raw mineflayer proxy, so
 ## Event API — `EventAdaptor`
 
 Subclass `EventAdaptor`, override the `on_<event>` methods you care about, and
-wire the instance with `bot.bind(instance)`. End the script with
-`bot.run_forever()` so the process stays alive while events fire.
+wire the instance with `bot.bind(instance)`. Ending with `bot.run_forever()` is
+optional (see `create_bot` above) but states the intent for an event-only script.
 
 ```python
 from minethon import EventAdaptor, create_bot
@@ -197,7 +219,25 @@ methods you actually overrode.
 
 ---
 
-## `create_bot(**options)` — connection options
+## `create_bot(...)` — connection
+
+### Form 1: camp shorthand (default for student scripts)
+
+`create_bot("g_swim")` / `create_bot("swim")`. The first positional argument is
+a task shorthand; host and credentials are resolved from this PC's identity file
+(`~/.htsdg.json`, written once per machine by staff — see `pc_setup/README.md`).
+
+| Shorthand | Username | Account |
+|-----------|----------|---------|
+| `"g_swim"` / `"g-swim"` | `G<group>_swim` | shared by the group |
+| `"swim"` | `U<computer>_swim` | that PC only |
+
+**This form blocks until the bot has spawned and settled**, then returns — so
+the caller must NOT add `bot.wait_spawn()`. Explicit keyword options still
+override the resolved ones. Raises `MinethonError` (with a Chinese
+"go find staff" message) when the identity file is missing or corrupt.
+
+### Form 2: explicit options
 
 snake_case keyword args, converted to mineflayer's camelCase internally.
 
@@ -212,7 +252,20 @@ snake_case keyword args, converted to mineflayer's camelCase internally.
 | `auth_server` | custom auth server URL (Drasl / Yggdrasil-compatible) |
 | `session_server` | custom session server URL |
 
-Returns a `Bot` immediately; connection happens in the background.
+Returns a `Bot` immediately; connection happens in the background, so this form
+**does** need `bot.wait_spawn()` before world reads/actions.
+
+### Both forms
+
+| Option | Meaning |
+|--------|---------|
+| `instruction_sleep` | seconds to pause after each action command (default `0.2`, so students can watch each step) |
+| `bypass_instruction_sleep` | `True` sets that pause to 0 |
+
+`create_bot` also registers an `atexit` keep-alive: after the last line of a
+straight-line script runs, the bot stays connected and events keep firing. A
+trailing `bot.run_forever()` is therefore optional — it makes the intent
+explicit for a purely event-driven script, but nothing breaks without it.
 
 ---
 
@@ -245,21 +298,24 @@ All inherit from `MinethonError` (import from `minethon`):
   before `load_plugin`.
 - `VersionPinRequiredError` — a non-bundled package was loaded without a version.
 
-`set_height` raises the built-in `ValueError` for a level outside 1–5.
+`set_height` raises the built-in `ValueError` for a level outside 1–5 or a
+fractional one; a non-number raises `TypeError`.
 
 ---
 
 ## Runtime gotchas
 
-- **Spawn first.** World reads/actions before `wait_spawn()` raise
-  `NotSpawnedError`.
-- **Don't block in event handlers** — they run on the bridge callback thread.
+- **Spawn first — explicit-options form only.** The shorthand already waited;
+  see `create_bot` above.
 - **Degrees, not radians**, throughout the student API.
 - **Movement is approximate** (control-state + polling) and times out if stuck;
   it won't path around obstacles.
-- **Version pinning**: bundled `mineflayer` / `vec3` / `mineflayer-pathfinder`
-  auto-pin; any other npm package needs an explicit version in
-  `load_plugin`/`require`.
+- **A misspelled name doesn't raise `AttributeError`.** `Bot.__getattr__`
+  forwards to the JS proxy, which answers `None` for anything it doesn't have —
+  so `bot.mvoe_forward(3)` surfaces as
+  `TypeError: 'NoneType' object is not callable`, and a misspelled attribute
+  (`bot.usernaem`) silently evaluates to `None`. Check spelling first when
+  debugging either symptom.
 - **Setup**: run `./setup.sh` once (installs Python deps + pinned npm packages).
   Needs Python 3.14+ and Node.js 22+.
 
@@ -267,11 +323,11 @@ All inherit from `MinethonError` (import from `minethon`):
 
 ## Recipes (student request → correct code)
 
-Each assumes `bot = create_bot(...)` and (for linear tasks) `bot.wait_spawn()`.
+Each assumes `bot = create_bot("g_<task>")` (already spawned). With the
+explicit-options form, add `bot.wait_spawn()` as the first line of each.
 
 **"Walk forward to a tree, chop the log, come back."**
 ```python
-bot.wait_spawn()
 spot = bot.find_block("oak_log")          # (x, y, z) or None
 if spot:
     bot.look_at(*spot)                    # face it
@@ -282,7 +338,6 @@ if spot:
 
 **"Patrol: walk a 5×5 square forever."**
 ```python
-bot.wait_spawn()
 while True:
     for _ in range(4):
         bot.move_forward(5)
@@ -303,7 +358,6 @@ bot.run_forever()
 
 **"Dig straight down 3 blocks."**
 ```python
-bot.wait_spawn()
 for _ in range(3):
     x, y, z = bot.get_pos()
     bot.look_at(int(x), int(y) - 1, int(z))   # aim at the block under my feet
@@ -314,7 +368,6 @@ for _ in range(3):
 
 **"Grow to size 5, sneak, and announce it."**
 ```python
-bot.wait_spawn()
 bot.set_height(5)                         # 1..5 only, else ValueError
 bot.sneak(True)
 bot.chat(f"size={bot.get_height()}, sneaking={bot.get_sneak()}")

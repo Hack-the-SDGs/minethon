@@ -17,6 +17,7 @@ import atexit
 import contextlib
 import inspect
 import os
+import socket
 import sys
 import threading
 import time
@@ -28,10 +29,16 @@ from typing import TYPE_CHECKING, Any
 from javascript import On, Once, connection, require
 
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
-from minethon._commands import Commands
+from minethon._commands import (
+    Commands,
+    bounded_keys,
+    component_plaintext,
+    suggest,
+)
 from minethon._event_login import resolve_account
 from minethon._events import EVENT_ATTRIBUTE_MAP, BotEvent
 from minethon._handlers import EventAdaptor
+from minethon._members import BOT_MEMBERS
 from minethon.errors import PluginNotInstalledError, VersionPinRequiredError
 
 if TYPE_CHECKING:
@@ -65,6 +72,25 @@ _BRIDGE_FAILURE_MARKERS = (
     "process has crashed",
     _CALL_TIMEOUT_MARKER,
 )
+# Shown after a student's own uncaught exception, right below the traceback.
+_SCRIPT_FAILED = "程式因為上面的錯誤停止了。"
+# Shown when a straight-line script runs off the end and the bot is kept alive.
+# Without it the terminal simply stops producing output — indistinguishable from
+# a hang — because `atexit` blocks in run_forever() until the server drops the
+# bot, which for a healthy connection is never.
+_SCRIPT_DONE = "\n（你的程式已經跑完了。機器人還在線上，按 Ctrl-C 結束。）"
+# Shown when the server's TCP port cannot be reached at all.
+_UNREACHABLE = "\n連不到伺服器 {host}:{port}。請確認網路連線正常，以及伺服器已經開啟。"
+# Seconds to spend on the pre-flight reachability probe. Long enough for a slow
+# link, short enough not to feel like a hang if the host is simply down.
+_REACHABILITY_TIMEOUT = 6.0
+# mineflayer's default port, so the probe checks the same endpoint createBot will.
+# Ref: mineflayer lib/loader.js — options.port ?? 25565.
+_DEFAULT_PORT = 25565
+# Vanilla's per-IP reconnect throttle. A whole classroom behind one NAT address
+# trips it constantly, and the raw kick text reads like the script's fault.
+_THROTTLE_MARKER = "connection throttled"
+_THROTTLE_HINT = "連線太密集了（伺服器限制每個 IP 的重連間隔）。等幾秒再跑一次就好。"
 # Default per-instruction pause (seconds) so a straight-line script's steps are
 # individually visible. Tunable via create_bot(instruction_sleep=...).
 _DEFAULT_INSTRUCTION_SLEEP = 0.2
@@ -139,8 +165,143 @@ def _on_kicked(reason: Any = None, *_a: Any) -> None:
     """
     text = ""
     with contextlib.suppress(Exception):
-        text = str(reason)
+        # `reason` is a protodef NBT structure, not a string: str() on it prints
+        # a Python dict repr with the actual message buried inside
+        # ({'type': 'compound', 'value': {'translate': {...}}}).
+        text = component_plaintext(reason) or str(reason)
+    if _THROTTLE_MARKER in text.lower():
+        # Vanilla's per-IP reconnect throttle. Worth naming: a classroom sharing
+        # one NAT address hits this constantly, and "被踢出" alone reads as a bug
+        # in the student's script.
+        print(f"\n{_THROTTLE_HINT}", flush=True)  # noqa: T201 — student-facing
+        return
     print(f"\n機器人被伺服器踢出：{text}", flush=True)  # noqa: T201, RUF001 — student-facing; zh-TW colon
+
+
+# Clientbound packet carrying a vehicle's current passenger list. Listened to
+# on `bot._client` (the minecraft-protocol client), not on the bot itself.
+# Ref: mineflayer lib/plugins/entities.js — bot._client.on('set_passengers').
+_SET_PASSENGERS = "set_passengers"
+# mineflayer's sentinel for "this packet detaches rather than attaches".
+# Ref: mineflayer lib/plugins/entities.js — `entityId === -1 ? null : ...`.
+_NO_VEHICLE = -1
+# Printed when the protocol client is missing, so a silently broken is_riding()
+# is at least noisy. Same escape hatch run_forever() guards against.
+_NO_CLIENT_WARNING = (
+    "bot._client 不存在，無法修正下車後的 bot.vehicle。"
+    "is_riding() 在機器人騎過任何東西之後會一直回傳 True。"
+)
+
+
+def _clear_stale_vehicle(js_bot: Any, packet: Any) -> None:
+    """Clear ``bot.vehicle`` when a `set_passengers` packet says the bot got off.
+
+    mineflayer's own handler only acts when the bot appears *in* the new
+    passenger list (`entities.js` —
+    ``passengers.includes(bot.entity.id) && entityId === -1``). A 1.9+ dismount
+    is expected to arrive as the vehicle's own id plus a list the bot has
+    already been removed from, so neither condition holds — that packet shape
+    is the load-bearing assumption here and only
+    ``tests/integration/test_vehicle_dismount.py`` checks it. The fallback
+    meant to cover the case is dead code, and that part *is* settled from
+    source: the event is emitted on ``bot`` (`entities.js:302`) while the
+    handler is registered on ``bot._client`` (`:812`) — two different
+    EventEmitters, per `loader.js`. The result is that ``bot.vehicle`` keeps
+    pointing at the old vehicle forever and :meth:`Commands.is_riding` never
+    goes back to ``False``.
+
+    Re-emits `dismount` for the same reason, so ``EventAdaptor.on_dismount``
+    fires at all. mineflayer's own `set_passengers` branch needs the bot to be
+    *in* the list, so it can never double-fire with this one.
+
+    Does **not** cover a vehicle that despawns under the bot, or a death /
+    dimension change — see :meth:`Commands.is_riding` and
+    :func:`_install_dismount_repair` for those two.
+    """
+    # `packet` is a plain dict, so reading it costs nothing: protodef builds
+    # payloads as plain JS objects and JSPyBridge inlines those by value rather
+    # than handing back a Proxy — its JSON replacer only allocates an ffid when
+    # `constructor.name` is neither 'Object' nor 'Array' (javascript/js/pyi.js).
+    # Subscripting stays correct if one ever does arrive as a Proxy, since
+    # Proxy.__getitem__ maps to the same getProp as __getattr__.
+    riders = {int(rider) for rider in packet["passengers"]}
+    entity_id = int(packet["entityId"])
+    vehicle = js_bot.vehicle
+    if vehicle is None:
+        # Not riding as far as mineflayer knows, so there is normally nothing to
+        # do. The exception is a mount that this same handler already undid:
+        # Python callbacks are drained one at a time, long after every JS
+        # handler has run, so a dismount+remount of one vehicle inside a single
+        # tick reaches us as "clear" then "the bot is aboard" — with mineflayer's
+        # JS state already settled on "aboard". Put it back rather than leave
+        # is_riding() saying False while the bot is really riding. `-1` is
+        # mineflayer's "no vehicle" sentinel (`entities.js`), never a real id.
+        # The bogus `dismount` already emitted for the first packet cannot be
+        # taken back — the state ends up right, the event stream in that one
+        # window does not.
+        if entity_id != _NO_VEHICLE and int(js_bot.entity.id) in riders:
+            js_bot.vehicle = js_bot.entities[entity_id]
+        return
+    if entity_id != int(vehicle.id):
+        return  # some other entity's passenger list changed
+    if int(js_bot.entity.id) in riders:
+        return  # the list changed, but the bot is still aboard
+    js_bot.vehicle = None
+    js_bot.emit(BotEvent.DISMOUNT.value, vehicle)
+
+
+def _install_dismount_repair(js_bot: Any) -> None:
+    """Keep ``bot.vehicle`` honest: `set_passengers` repair plus a respawn reset.
+
+    Both are registered with ``On`` rather than ``Once`` — the bot may mount and
+    dismount any number of times. That leaves permanent entries in JSPyBridge's
+    callback table, which the `end` listener in ``create_bot`` deliberately
+    avoids. It is not a new hazard: the `error` and `kicked` ``Once`` handlers
+    also stay registered for the whole session (they are only removed when they
+    fire, which in a normal run never happens) and every ``bind()``-ed student
+    handler uses ``On``, so that table is already permanently non-empty. Note
+    the atexit spin-wait's ``connection.is_alive()`` guard tracks the *node
+    subprocess*, which outlives a Minecraft disconnect — it is not a bound.
+    Ref: javascript/__init__.py — On/Once; javascript/events.py — on_exit;
+    javascript/connection.py — is_alive.
+    """
+    client = getattr(js_bot, "_client", None)
+    if client is None:
+        warnings.warn(_NO_CLIENT_WARNING, RuntimeWarning, stacklevel=2)
+        return
+
+    def repair(packet: Any, *_a: Any, **_k: Any) -> None:
+        _clear_stale_vehicle(js_bot, packet)
+
+    def reset(*_a: Any, **_k: Any) -> None:
+        vehicle = js_bot.vehicle
+        if vehicle is None:
+            return
+        js_bot.vehicle = None
+        # Same event as the packet path, so a handler waiting on `dismount`
+        # wakes whether the bot got off or died getting off.
+        js_bot.emit(BotEvent.DISMOUNT.value, vehicle)
+
+    On(client, _SET_PASSENGERS)(
+        _normalize_handler(repair, emitter=client, event_name=_SET_PASSENGERS)
+    )
+    # Nothing in mineflayer resets `bot.vehicle`: `bot.entities` is cleared only
+    # on the `login` packet, and no path assigns `bot.vehicle = null` outside
+    # the two `set_passengers` / `attach_entity` branches. So whenever the
+    # server takes the bot off a vehicle without a `set_passengers` — believed
+    # to include death and dimension change, though that is server behaviour
+    # this repo cannot verify — is_riding() would stay True forever. Resetting
+    # on `respawn` is the cheapest cover. It is not free of assumptions either —
+    # if a server ever kept a bot mounted across a dimension change, this would
+    # briefly report not-riding — but the handler above self-heals that as soon
+    # as the vehicle's next `set_passengers` arrives, and being wrong for a
+    # moment beats being wrong for the rest of the session. mineflayer emits
+    # `respawn` straight off the clientbound packet, so this fires for whatever
+    # the server uses it for.
+    # Ref: mineflayer lib/plugins/health.js — bot._client.on('respawn').
+    On(js_bot, BotEvent.RESPAWN.value)(
+        _normalize_handler(reset, emitter=js_bot, event_name=BotEvent.RESPAWN.value)
+    )
 
 
 def _install_quiet_interrupt() -> None:
@@ -170,7 +331,16 @@ def _install_quiet_interrupt() -> None:
             # which would otherwise time out again on the dead bridge.
             _stop_with_message(_CONNECTION_LOST, code=1)
             return
+        # The student's own bug (TypeError, IndexError…). Print the real traceback
+        # — reading it is the point — then stop, because the atexit keep-alive
+        # below would otherwise block in run_forever() until the server drops the
+        # bot. That left a correct, well-formatted traceback followed by a
+        # terminal that never returns, which reads as "the computer froze" to
+        # someone who has not met Ctrl-C yet. A script that has crashed has no
+        # business holding the bot online; event-driven scripts keep it alive by
+        # calling run_forever() themselves, which is what that method is for.
         previous(exc_type, exc, tb)
+        _stop_with_message(_SCRIPT_FAILED, code=1)
 
     sys.excepthook = _hook
 
@@ -310,6 +480,10 @@ class Bot(Commands):
         # calls cannot derive and wait on the same sequence number.
         object.__setattr__(self, "_grid_move_lock", threading.Lock())
         object.__setattr__(self, "_grid_move_sequence", 0)
+        # Diagnostics that must not repeat inside a loop — see
+        # Commands._warn_if_action_unavailable and Commands._block_id.
+        object.__setattr__(self, "_checked_actions", set())
+        object.__setattr__(self, "_reported_unknown_blocks", set())
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute reads to the underlying JS bot.
@@ -332,9 +506,49 @@ class Bot(Commands):
         # undefined), so the except-branch above never fires against a live
         # bridge — check the value too, or students get a bare
         # "'NoneType' object has no attribute 'goto'" instead of this hint.
-        if value is None and name == "pathfinder":
-            raise PluginNotInstalledError(_PATHFINDER_MISSING)
+        if value is None:
+            if name == "pathfinder":
+                raise PluginNotInstalledError(_PATHFINDER_MISSING)
+            self._reject_misspelling(name)
         return value
+
+    def _reject_misspelling(self, name: str) -> None:
+        """Raise ``AttributeError`` when ``name`` looks like a typo of a real one.
+
+        Because the bridge answers ``None`` rather than raising, a misspelling
+        used to be indistinguishable from an attribute that is legitimately
+        ``None`` (``bot.entity`` before spawn, ``bot.heldItem`` empty-handed):
+        ``bot.usernam`` evaluated to ``None`` silently, and
+        ``bot.move_foward(3)`` reported ``'NoneType' object is not callable``
+        without naming what was misspelled. Both are the paths a beginner hits
+        most, and the course only teaches reading the error *reason*.
+
+        Deliberately conservative — it only fires on a close match to a name that
+        really exists, so an attribute that is simply absent still returns
+        ``None`` as before. Being wrong here would break working scripts, which is
+        worse than staying quiet.
+
+        The name set must come from ``BOT_MEMBERS`` (generated from ``bot.pyi``),
+        not from the live proxy: ``list(bot_proxy)`` yields only JavaScript's
+        *own* enumerable keys, so a documented property JS has not assigned yet is
+        absent from it. ``bot.vehicle`` is exactly that — ``undefined`` until the
+        first mount — and an earlier version of this method, keyed on proxy keys,
+        rejected it as a typo of ``moveVehicle``. The proxy keys are still unioned
+        in, to cover anything a plugin adds at runtime.
+
+        Ref: javascript/js/bridge.js — 'void' reply for undefined properties;
+        javascript/proxy.py — Proxy.__iter__ lists the JS object's own keys.
+        """
+        known = set(BOT_MEMBERS)
+        known.update(dir(type(self)))
+        known.update(bounded_keys(self._js))
+        if name in known:
+            return  # a real attribute that happens to be None
+        hint = suggest(name, sorted(known))
+        if not hint:
+            return
+        msg = f"機器人沒有「{name}」這個東西。{hint}"
+        raise AttributeError(msg)
 
     def load_plugin(
         self,
@@ -518,6 +732,50 @@ class Bot(Commands):
 _SPAWN_SETTLE_SECONDS = 3.5
 
 
+def _announce_then_keep_alive(bot: Bot) -> None:
+    """Say the script finished, then hold the bot online (the atexit path).
+
+    ``run_forever`` blocks until the server drops the bot, which for a healthy
+    connection never happens — so a straight-line script that simply runs off the
+    end produced no further output and never returned. "Finished" and "hung" look
+    identical when both are a blank terminal, and every quest example has exactly
+    that shape (no ``quit()``, no ``run_forever()``). Even with an explicit
+    ``bot.quit()`` there is a measured ~30s wait for the server's `end` before the
+    process goes away.
+
+    Only the implicit path announces: a script that calls ``run_forever()``
+    itself is event-driven and staying online on purpose.
+    """
+    if _INTERRUPT["seen"]:
+        return
+    print(_SCRIPT_DONE, flush=True)  # noqa: T201 — student-facing, intentional
+    bot.run_forever()
+
+
+def _require_reachable(host: str, port: int) -> None:
+    """Stop with one friendly line when the server's port cannot be reached.
+
+    mineflayer pings the server as soon as ``createBot`` returns, and forwards a
+    failed ping as a bot-level `error` (``loader.js``). Our `error` listener is
+    registered on the next bridge round-trip, so a connection refusal lands in
+    the gap where the bot has no listener at all — Node's EventEmitter then
+    throws, killing the node process with ~77 lines of ``AggregateError
+    [ECONNREFUSED]`` stack, after which the friendly handler can no longer read
+    the error object and prints "連線發生錯誤:" with nothing after the colon.
+    Measured: 10.5 seconds of that, for the single most likely failure at an
+    event (server down, wrong host, no network).
+
+    Winning that race is not worth attempting when the question — "is anything
+    listening?" — is answerable directly and more precisely. Anything past the
+    TCP handshake (bad credentials, version mismatch, whitelist) still flows
+    through the existing `error` / `kicked` handlers, which by then are attached.
+    """
+    try:
+        socket.create_connection((host, port), timeout=_REACHABILITY_TIMEOUT).close()
+    except OSError:
+        _stop_with_message(_UNREACHABLE.format(host=host, port=port), code=1)
+
+
 def create_bot(
     account: str | None = None,
     *,
@@ -552,6 +810,10 @@ def create_bot(
     js_options.setdefault("logErrors", False)
     mineflayer = get_mineflayer()
     _install_quiet_interrupt()
+    _require_reachable(
+        str(js_options.get("host") or "localhost"),
+        int(js_options.get("port") or _DEFAULT_PORT),
+    )
     js_bot = mineflayer.createBot(js_options)
     pace = 0.0 if bypass_instruction_sleep else instruction_sleep
     bot = Bot(js_bot, instruction_sleep=pace)
@@ -569,6 +831,9 @@ def create_bot(
     Once(js_bot, BotEvent.KICKED.value)(
         _normalize_handler(_on_kicked, emitter=js_bot, event_name=BotEvent.KICKED.value)
     )
+    # mineflayer leaves bot.vehicle pointing at the old vehicle after a
+    # dismount, which pins is_riding() to True for the rest of the session.
+    _install_dismount_repair(js_bot)
     # End the script automatically when the server drops the bot, wherever the
     # main thread happens to be (mid-script or in the keep-alive below). `Once`
     # (not `On`) so the callback removes itself after firing — a lingering
@@ -583,13 +848,20 @@ def create_bot(
     # don't have to remember a trailing bot.run_forever(). Fires on normal exit;
     # returns immediately if the bot already disconnected (e.g. bot.quit()) or
     # the student pressed Ctrl-C.
-    atexit.register(bot.run_forever)
+    atexit.register(_announce_then_keep_alive, bot)
     if account is not None:
         bot.wait_spawn()
         # Post-spawn invulnerability window: the server may still teleport /
         # settle the player for a moment. Wait it out before the student's
         # straight-line script starts acting, to avoid unexpected behaviour.
         time.sleep(_SPAWN_SETTLE_SECONDS)
+        # Level the view. A bot does not spawn looking at the horizon (measured
+        # -52° to -68° on the competition server), and dig / place / use /
+        # look_block all resolve through blockAtCursor — at that pitch they target
+        # the floor, so `bot.dig()` breaks the ground instead of what is in front.
+        # Do it after the settle wait, so a server teleport during it cannot undo
+        # the aim. See Commands.look_level.
+        bot.look_level()
     return bot
 
 

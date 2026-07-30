@@ -14,9 +14,9 @@ class NotSpawnedError(MinethonError):
 class PlayerNotFoundError(MinethonError):
     """Raised when a named player cannot be found.
 
-    Reserved: no current student command looks up players by name, so nothing
-    raises this yet — it exists so future named-player commands (look at /
-    go to a player…) have their error type ready without an API break.
+    Raised by ``Commands.get_player_pos`` and ``Commands.use_player`` when the
+    player is offline, in another world, or outside the bot's loaded entity
+    range.
     """
 
 

@@ -88,8 +88,12 @@ def test_get_sneak_reflects_control_state() -> None:
 
 
 def test_is_riding_reflects_bot_vehicle() -> None:
+    riding = SimpleNamespace(name="minecart", isValid=True)
+    despawned = SimpleNamespace(name="minecart", isValid=False)
     assert Bot(FakeJs()).is_riding() is False
-    assert Bot(FakeJs(vehicle=SimpleNamespace(name="minecart"))).is_riding() is True
+    assert Bot(FakeJs(vehicle=riding)).is_riding() is True
+    # mineflayer leaves bot.vehicle set when the vehicle is destroyed.
+    assert Bot(FakeJs(vehicle=despawned)).is_riding() is False
 
 
 def test_get_hand_returns_name_count_or_none() -> None:

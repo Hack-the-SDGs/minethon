@@ -21,8 +21,13 @@ def entity_with_scale(
 
 
 class FakeJs:
-    def __init__(self, entity: object | None) -> None:
+    def __init__(self, entity: object | None, username: str = "U1_bot") -> None:
         self.entity = entity
+        self.username = username
+        self.sent: list[str] = []
+
+    def chat(self, message: str) -> None:
+        self.sent.append(message)
 
 
 def test_get_height_maps_scale_to_level() -> None:
@@ -59,20 +64,54 @@ def test_set_height_rejects_out_of_range(bad: int) -> None:
         Bot(FakeJs(entity_with_scale(1.0))).set_height(bad)
 
 
-def test_set_height_round_trips_with_get_height() -> None:
-    bot = Bot(FakeJs(entity_with_scale(1.0)))
+def test_set_height_asks_the_server_via_trigger() -> None:
+    js = FakeJs(entity_with_scale(1.0))
+
+    Bot(js).set_height(4)
+
+    assert js.sent == ["/trigger u1_bot_set_height set 4"]
+
+
+def test_set_height_does_not_fake_the_reading() -> None:
+    """The old version wrote the scale locally, so get_height echoed the request.
+
+    That made the obvious way to check — set it, then read it back — confirm a
+    resize that never happened in-world. The reading must stay server-sourced.
+    """
+    js = FakeJs(entity_with_scale(1.0))
+    bot = Bot(js)
 
     bot.set_height(4)
 
-    assert bot.get_height() == 4
+    assert bot.get_height() == 1
 
 
-def test_set_height_creates_attributes_when_missing() -> None:
-    bot = Bot(FakeJs(SimpleNamespace(attributes=None)))
+def test_set_height_rejects_non_numbers() -> None:
+    with pytest.raises(TypeError, match="大小等級"):
+        Bot(FakeJs(entity_with_scale(1.0))).set_height("3")  # type: ignore[arg-type]
 
-    bot.set_height(2)
 
-    assert bot.get_height() == 2
+@pytest.mark.parametrize("bad", [3.9, 1.5, 2.0000001])
+def test_set_height_rejects_fractional_levels(bad: float) -> None:
+    """int(3.9) is 3, which passes the range check — so validate before narrowing.
+
+    Truncating would send a level the student never asked for and report
+    nothing, which is the silent-wrong-result failure this module exists to
+    remove. `set_height(7/2)` is a mistake, not a request for level 3.
+    """
+    js = FakeJs(entity_with_scale(1.0))
+    with pytest.raises(ValueError, match="整數"):
+        Bot(js).set_height(bad)  # type: ignore[arg-type]
+    assert js.sent == []  # nothing reached the server
+
+
+def test_set_height_accepts_integral_floats() -> None:
+    # 4.0 is unambiguous — only genuinely fractional input is rejected.
+    js = FakeJs(entity_with_scale(1.0))
+
+    Bot(js).set_height(4.0)  # type: ignore[arg-type]
+
+    assert js.sent == ["/trigger u1_bot_set_height set 4"]
 
 
 def test_set_height_before_spawn_raises() -> None:

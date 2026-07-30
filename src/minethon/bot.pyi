@@ -536,9 +536,16 @@ class Entity:
     effects: list[Effect]
     """實體身上的狀態效果陣列，每個元素是 `Effect`"""
     vehicle: Entity
-    """實體目前所騎的載具 `Entity`，沒有則為 `None`"""
+    """實體目前所騎的載具 `Entity`，沒有則為 `None`。
+
+    ⚠️ 下車後不會被清掉——mineflayer 只更新「新乘客名單裡的實體」，離開的那個不在名單內。
+    要判斷機器人自己有沒有在騎，請用 `bot.is_riding()`（它另外做了修正）。
+    """
     passengers: list[Entity]
-    """騎在這個實體身上的乘員 `Entity` 陣列"""
+    """騎在這個實體身上的乘員 `Entity` 陣列。
+
+    ⚠️ 同上，乘客下車後不會從這個陣列移除。
+    """
 
     def setEquipment(self, index: int, item: Item) -> None:
         """更新實體指定裝備槽的顯示物品
@@ -2431,9 +2438,6 @@ class Bot:
             entity: 載具 `Entity`（馬、船、礦車等）
         """
 
-    def dismount(self) -> None:
-        """下目前所騎載具"""
-
     def moveVehicle(self, left: float, forward: float) -> None:
         """控制目前所騎載具的移動
 
@@ -2766,6 +2770,11 @@ class Bot:
             傳入的 `handlers` 實例，方便 fluent chain
         """
 
+    # `bot.vehicle` is real at runtime (entities.js sets it on mount, and
+    # Commands.is_riding reads it) but mineflayer's index.d.ts never declares it,
+    # so it cannot come from the parsed interface. Declaring it here also keeps
+    # Bot._reject_misspelling from mistaking it for a typo when it is null.
+    vehicle: Entity | None
     # --- Synchronous student API (implemented in _commands.py) ---
     def wait_spawn(self) -> None:
         """卡住直到機器人進入世界（spawn）後才往下執行
@@ -2809,8 +2818,10 @@ class Bot:
         """目前是否正坐在／騎在別的實體上（船、礦車，或伺服器讓你坐到玩家身上）
 
         等待「坐上去」生效時用它輪詢：`while not bot.is_riding(): ...`。
-        比 `bot.entity.vehicle` 可靠 —— 那個欄位在某些情況下會被整個刪掉，
-        不是變成 `None`。
+
+        一定要用這個，不要自己讀 `bot.entity.vehicle` 或 `vehicle.passengers` ——
+        mineflayer 在你下車時不會清掉那些欄位，它們會一直指著舊的載具，直到你下次
+        坐上別的東西為止。`is_riding()` 是已經修好的那個。
         """
 
     def get_hand(self) -> tuple[str, int] | None:
@@ -2910,6 +2921,19 @@ class Bot:
     def jump(self) -> tuple[float, float, float]:
         """原地跳一下，回傳跳起瞬間的位置"""
 
+    def dismount(self) -> None:
+        """下目前所騎載具；**沒在騎的話什麼都不做**（不會出錯、不會中斷程式）
+
+        做法是幫你按一下潛行鍵，也就是玩家自己下車的操作；按完會把你原本的潛行
+        狀態放回去。mineflayer 原本的 `dismount()` 在 1.21.3 以後按到的是跳躍鍵，
+        而且沒騎乘時會發出錯誤事件讓整個程式結束——minethon 兩個問題都處理掉了，
+        所以不確定現在有沒有在騎的時候可以直接呼叫。
+
+        會等到伺服器真的讓你下車才返回（最多 2 秒）；等不到會丟出 `MinethonError`，
+        不會安靜地假裝成功。寫在事件處理裡（例如 `on_chat`）時不會等——那條執行緒
+        正是負責通知「已下車」的那條，等下去只會卡住。
+        """
+
     def turn_left(self) -> tuple[float, float]:
         """向左轉 90 度，回傳新的 `(yaw, pitch)`（度數）"""
 
@@ -2936,13 +2960,26 @@ class Bot:
             yaw: 目標水平朝向（度數）
         """
 
-    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
+    def look_at(self, x: float, y: float, z: float) -> tuple[float, float]:
         """把視線對準座標 `(x, y, z)`，回傳新的 `(yaw, pitch)`
 
         Args:
             x: 目標 X 座標
             y: 目標 Y 座標
             z: 目標 Z 座標
+        """
+
+    def look_level(self) -> tuple[float, float]:
+        """把視線拉平（不再往上或往下看），回傳新的 `(yaw, pitch)`；左右朝向不變
+
+        `dig()`、`place()`、`use()`、`look_block()` 都是作用在「準心對到的方塊」，
+        而機器人出生時不一定是平視（實測是低頭 52~68 度，也就是看著自己腳邊），
+        這時 `dig()` 會挖到腳下的地板而不是前面的東西。
+        `create_bot()` 出生後會自動呼叫一次，所以直線腳本一開始就是平視的；
+        如果中途用過 `dig()` 或 `look_at()`（兩個都會自己轉視線），要再叫一次。
+
+        注意 `set_turn()` / `turn_left()` / `turn_right()` 只改左右朝向，
+        會保留上下角度，所以「轉個方向」不會把低頭的狀態清掉。
         """
 
     def get_height(self) -> int:
@@ -2952,9 +2989,15 @@ class Bot:
         """
 
     def set_height(self, level: int) -> None:
-        """設定大小等級，只接受 `1`~`5`，其餘丟出 `ValueError`
+        """請伺服器把大小改成等級 `1`~`5`，其餘丟出 `ValueError`
 
-        注意：實體大小由伺服器決定，實際縮放要靠競賽伺服器的插件配合。
+        小數（例如 `set_height(3.9)`）也會丟 `ValueError`，不會偷偷無條件捨去
+        變成 `3` —— 送出一個你沒要求的等級卻不講，比直接報錯難查得多。
+
+        和其他會改變世界的指令一樣是「伺服器說了算」：實際送出
+        `/trigger <帳號>_set_height set <等級>`，由關卡 datapack 決定要不要執行。
+        客戶端不會偷改任何東西，所以 `get_height()` 讀到的一直是**伺服器回報**的
+        大小 —— 如果請求沒有生效，`get_height()` 會照實回傳原本的等級。
 
         Args:
             level: 目標大小等級（1~5）

@@ -43,6 +43,22 @@ HOST = os.environ.get("MINETHON_IT_HOST", "localhost")
 PORT = int(os.environ.get("MINETHON_IT_PORT", "25565"))
 USERNAME = os.environ.get("MINETHON_IT_USERNAME", "it_smoke")
 
+
+def finish(code):
+    # os._exit alone leaks the node subprocess, which inherited this process's
+    # stdout — the parent's communicate() would then block on a pipe that never
+    # closes, turning every failure into a timeout with the diagnostics
+    # discarded. Ref: javascript/connection.py — the node Popen inherits
+    # sys.stdout. Imported here so a bridge that fails to import still reaches
+    # the marker print in the caller rather than dying bare.
+    try:
+        from javascript import connection
+        connection.stop()
+    except BaseException:
+        pass
+    os._exit(code)
+
+
 try:
     from minethon import create_bot
 
@@ -61,11 +77,11 @@ try:
     print("SMOKE_OK", flush=True)
 except BaseException as exc:
     print(f"SMOKE_FAIL {type(exc).__name__}: {exc}", flush=True)
-    os._exit(1)
+    finish(1)
 # quit() fires minethon's end-handler, which hard-exits this process — fine
 # here, the SMOKE_OK marker is already out.
 bot.quit()
-os._exit(0)
+finish(0)
 """
 
 
