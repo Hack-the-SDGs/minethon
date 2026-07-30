@@ -505,6 +505,8 @@ class Commands:
     _js: Any  # the mineflayer JS bot proxy, set by Bot.__init__
     _grid_move_lock: threading.Lock  # per-Bot grid request/ACK serialization
     _grid_move_sequence: int  # last locally issued scoreless-provider sequence
+    _checked_actions: set[str]  # action triggers already looked up (warn once)
+    _reported_unknown_blocks: set[str]  # block names already reported as unknown
 
     # ── internal helpers ──────────────────────────────────────────────
     def _entity(self) -> Any:
@@ -670,10 +672,14 @@ class Commands:
         by_name = self._js.registry.blocksByName
         entry = by_name[name]
         if entry is None:
-            hint = suggest(name, by_name)
-            print(  # noqa: T201 — student-facing, intentional
-                f"沒有叫做「{name}」的方塊。{hint}".rstrip(), flush=True
-            )
+            # Once per name: find_block can sit inside a search loop, and the
+            # same line every iteration buries the student's own output.
+            if name not in self._reported_unknown_blocks:
+                self._reported_unknown_blocks.add(name)
+                hint = suggest(name, by_name)
+                print(  # noqa: T201 — student-facing, intentional
+                    f"沒有叫做「{name}」的方塊。{hint}".rstrip(), flush=True
+                )
             return None
         return int(entry.id)
 
@@ -1709,13 +1715,28 @@ class Commands:
         means we could not tell, and skipping a valid action would be worse than
         a spurious line of output.
 
+        Checked at most once per action name per bot, because quest scripts call
+        this inside a loop — ``q10_labfire`` stage one is
+        ``while True: ... action("put out")``. Per-call it would reprint the same
+        paragraph on every iteration and spend a ``tabComplete`` round trip each
+        time, on the hot path of the most-used quest API. Once per name is also
+        all this diagnostic is worth: it answers "is the name right / has the
+        quest started", not "did this particular call land".
+
         Ref: mineflayer bot.tabComplete; vanilla /trigger.
         """
+        if objective in self._checked_actions:
+            return
         try:
             enabled = self._enabled_trigger_objectives()
         except Exception:  # noqa: BLE001 — a hint must never break the action
             return
-        if not enabled or objective in enabled:
+        # Only mark it checked once the lookup actually answered — a failed or
+        # empty round trip must not burn the single chance to warn.
+        if not enabled:
+            return
+        self._checked_actions.add(objective)
+        if objective in enabled:
             return
         # Only this bot's own actions are worth listing — the suggestion set also
         # carries every other group's quest triggers.

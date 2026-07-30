@@ -167,6 +167,61 @@ def test_action_stays_quiet_when_the_server_tells_us_nothing(
     assert capsys.readouterr().out == ""
 
 
+def test_action_warns_once_not_once_per_loop_iteration(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Quest scripts call action() inside a loop.
+
+    q10_labfire stage one is literally `while True: ... action("put out")`, so a
+    per-call warning would reprint the paragraph every iteration and spend a
+    tabComplete round trip each time, on the hot path of the most-used quest API.
+    """
+    js = Js()
+    bot = Bot(js)
+    lookups = {"n": 0}
+
+    def count() -> set[str]:
+        lookups["n"] += 1
+        return {"u100_bot_open_door"}
+
+    bot._enabled_trigger_objectives = count  # type: ignore[method-assign]
+
+    for _ in range(20):
+        bot.action("put out")
+
+    assert lookups["n"] == 1  # one server round trip, not twenty
+    assert capsys.readouterr().out.count("不接受動作") == 1
+    assert len(js.sent) == 20  # every call still sent
+
+
+def test_action_checks_each_distinct_name(capsys: pytest.CaptureFixture[str]) -> None:
+    bot = Bot(Js())
+    bot._enabled_trigger_objectives = lambda: {"u100_bot_open_door"}  # type: ignore[method-assign]
+
+    bot.action("put out")
+    bot.action("pick up")
+
+    assert capsys.readouterr().out.count("不接受動作") == 2
+
+
+def test_action_retries_the_lookup_when_it_answered_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An empty answer must not burn the single chance to warn.
+
+    The bot may call action() before the scoreboard/command tree has arrived.
+    """
+    bot = Bot(Js())
+    answers: list[set[str]] = [set(), {"u100_bot_open_door"}]
+    bot._enabled_trigger_objectives = lambda: answers.pop(0)  # type: ignore[method-assign]
+
+    bot.action("put out")  # server said nothing -> stay quiet, stay unmarked
+    assert capsys.readouterr().out == ""
+
+    bot.action("put out")  # now it answered -> warn
+    assert "不接受動作" in capsys.readouterr().out
+
+
 # ── use_player(): the call that ends the session ──
 
 
@@ -206,6 +261,21 @@ def test_unknown_block_name_says_so_and_suggests(
     out = capsys.readouterr().out
     assert "沒有叫做「stonee」的方塊" in out
     assert "stone" in out
+
+
+def test_unknown_block_name_is_reported_once(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    js = Js()
+    js.registry = SimpleNamespace(  # type: ignore[attr-defined]
+        blocksByName=Registry({"stone": 1})
+    )
+    bot = Bot(js)
+
+    for _ in range(10):
+        bot.find_block("stonee")
+
+    assert capsys.readouterr().out.count("沒有叫做") == 1
 
 
 # ── bounded_keys: the guard on iterating a foreign object ──

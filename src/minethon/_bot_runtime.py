@@ -480,6 +480,10 @@ class Bot(Commands):
         # calls cannot derive and wait on the same sequence number.
         object.__setattr__(self, "_grid_move_lock", threading.Lock())
         object.__setattr__(self, "_grid_move_sequence", 0)
+        # Diagnostics that must not repeat inside a loop — see
+        # Commands._warn_if_action_unavailable and Commands._block_id.
+        object.__setattr__(self, "_checked_actions", set())
+        object.__setattr__(self, "_reported_unknown_blocks", set())
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute reads to the underlying JS bot.
