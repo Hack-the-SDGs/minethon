@@ -2,7 +2,7 @@ from minethon import EventAdaptor, create_bot
 
 seen = []  # 記錄已處理過的廣播訊息，避免重複觸發
 
-class Stage1Handler(EventAdaptor):
+class Stage2Handler(EventAdaptor):
     def on_messagestr(self, message, *_):
         msg_str = str(message)
         print(msg_str)
@@ -21,7 +21,7 @@ class Stage1Handler(EventAdaptor):
 
         # 初始化 dp 格子分別為：總幣數、金粒、鐵錠、銅粒、鐵粒
         dp = []
-        for i in range(target_money+1):
+        for i in range(target_money + 1):
             dp.append([257, 0, 0, 0, 0])
         dp[0] = [0, 0, 0, 0, 0]
 
@@ -55,5 +55,5 @@ class Stage1Handler(EventAdaptor):
                 print("丟出", dp[target_money][4], "個鐵粒")
                 bot.drop("iron_nugget", dp[target_money][4])
 bot = create_bot("g_restaurant")
-bot.bind(Stage1Handler())
+bot.bind(Stage2Handler())
 bot.run_forever()
