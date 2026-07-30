@@ -33,6 +33,7 @@ VENDORED_DTS_ROOT = REPO_ROOT / "src/mineflayer/js/node_modules"
 OUT_PATH = REPO_ROOT / "src/minethon/bot.pyi"
 OUT_EVENTS_PATH = REPO_ROOT / "src/minethon/_events.py"
 OUT_HANDLERS_PATH = REPO_ROOT / "src/minethon/_handlers.py"
+OUT_MEMBERS_PATH = REPO_ROOT / "src/minethon/_members.py"
 
 
 def _find_runtime_node_modules() -> Path | None:
@@ -1777,6 +1778,11 @@ _STUDENT_API_OVERRIDES = frozenset({"chat", "dig", "dismount", "drop"})
 # Bot). Listed here so IDE completion surfaces them; the zh-TW hover docstrings
 # live in bot.pyi and survive regen via the docstring round-trip.
 _STUDENT_API_STUB = """\
+    # `bot.vehicle` is real at runtime (entities.js sets it on mount, and
+    # Commands.is_riding reads it) but mineflayer's index.d.ts never declares it,
+    # so it cannot come from the parsed interface. Declaring it here also keeps
+    # Bot._reject_misspelling from mistaking it for a typo when it is null.
+    vehicle: Entity | None
     # --- Synchronous student API (implemented in _commands.py) ---
     def wait_spawn(self) -> None: ...
     def wait(self, seconds: float) -> None: ...
@@ -1805,7 +1811,8 @@ _STUDENT_API_STUB = """\
     def turn_right(self) -> tuple[float, float]: ...
     def turn(self, degrees: float) -> tuple[float, float]: ...
     def set_turn(self, yaw: float) -> tuple[float, float]: ...
-    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]: ...
+    def look_at(self, x: float, y: float, z: float) -> tuple[float, float]: ...
+    def look_level(self) -> tuple[float, float]: ...
     def get_height(self) -> int: ...
     def set_height(self, level: int) -> None: ...
     def hold(self, name: str) -> bool: ...
@@ -2408,6 +2415,56 @@ def format_generated_files(*paths: Path) -> None:
     )
 
 
+_MEMBERS_HEADER = '''\
+# GENERATED FROM bot.pyi — DO NOT EDIT MANUALLY.
+# Regenerate via: uv run python scripts/generate_stubs.py
+"""Every attribute name `Bot` really has, for did-you-mean on a typo.
+
+`Bot.__getattr__` forwards unknown names to the JS proxy, and JSPyBridge answers
+`None` for a property JavaScript does not have rather than raising — so a
+misspelling used to evaluate to `None` in silence (`bot.usernam`) or fail as
+`'NoneType' object is not callable` (`bot.move_foward(3)`), naming nothing.
+
+Deciding "is this a typo?" needs the set of real names, and the runtime cannot
+supply it: `list(bot_proxy)` returns only JavaScript's *own* enumerable keys, so
+a documented property that has not been assigned yet is missing from it —
+`bot.vehicle` is `undefined` until the first mount, and treating it as a typo
+would break working scripts. `bot.pyi` is generated from mineflayer's own
+`index.d.ts` and does have the full surface, so it is the source of truth here.
+"""
+
+from __future__ import annotations
+
+BOT_MEMBERS: frozenset[str] = frozenset(
+    {{
+{names}
+    }}
+)
+
+__all__ = ["BOT_MEMBERS"]
+'''
+
+
+def render_members_module(pyi_text: str) -> str:
+    """Emit `_members.py` from the finished stub's ``class Bot`` body."""
+    tree = ast.parse(pyi_text)
+    names: set[str] = set()
+    for node in tree.body:
+        if not (isinstance(node, ast.ClassDef) and node.name == "Bot"):
+            continue
+        for member in node.body:
+            if isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef):
+                names.add(member.name)
+            elif isinstance(member, ast.AnnAssign) and isinstance(
+                member.target, ast.Name
+            ):
+                names.add(member.target.id)
+    if not names:
+        raise SystemExit("Cannot find any class Bot members in the generated .pyi")
+    body = "\n".join(f'        "{name}",' for name in sorted(names))
+    return _MEMBERS_HEADER.format(names=body)
+
+
 def main() -> None:
     if PATHFINDER_INDEX is None:
         raise SystemExit(
@@ -2562,7 +2619,13 @@ def main() -> None:
         event_callbacks, inline_aliases=runtime_inline_aliases
     )
     OUT_HANDLERS_PATH.write_text(handlers_text, encoding="utf-8")
-    format_generated_files(OUT_PATH, OUT_EVENTS_PATH, OUT_HANDLERS_PATH)
+    # Derived from the finished stub, so it covers the mineflayer surface and the
+    # student API together — see the module docstring for why the runtime proxy
+    # cannot answer this itself.
+    OUT_MEMBERS_PATH.write_text(render_members_module(final_text), encoding="utf-8")
+    format_generated_files(
+        OUT_PATH, OUT_EVENTS_PATH, OUT_HANDLERS_PATH, OUT_MEMBERS_PATH
+    )
     final_text = OUT_PATH.read_text(encoding="utf-8")
     events_text = OUT_EVENTS_PATH.read_text(encoding="utf-8")
     handlers_text = OUT_HANDLERS_PATH.read_text(encoding="utf-8")

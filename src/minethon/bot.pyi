@@ -2770,6 +2770,11 @@ class Bot:
             傳入的 `handlers` 實例，方便 fluent chain
         """
 
+    # `bot.vehicle` is real at runtime (entities.js sets it on mount, and
+    # Commands.is_riding reads it) but mineflayer's index.d.ts never declares it,
+    # so it cannot come from the parsed interface. Declaring it here also keeps
+    # Bot._reject_misspelling from mistaking it for a typo when it is null.
+    vehicle: Entity | None
     # --- Synchronous student API (implemented in _commands.py) ---
     def wait_spawn(self) -> None:
         """卡住直到機器人進入世界（spawn）後才往下執行
@@ -2955,13 +2960,26 @@ class Bot:
             yaw: 目標水平朝向（度數）
         """
 
-    def look_at(self, x: int, y: int, z: int) -> tuple[float, float]:
+    def look_at(self, x: float, y: float, z: float) -> tuple[float, float]:
         """把視線對準座標 `(x, y, z)`，回傳新的 `(yaw, pitch)`
 
         Args:
             x: 目標 X 座標
             y: 目標 Y 座標
             z: 目標 Z 座標
+        """
+
+    def look_level(self) -> tuple[float, float]:
+        """把視線拉平（不再往上或往下看），回傳新的 `(yaw, pitch)`；左右朝向不變
+
+        `dig()`、`place()`、`use()`、`look_block()` 都是作用在「準心對到的方塊」，
+        而機器人出生時不一定是平視（實測是低頭 52~68 度，也就是看著自己腳邊），
+        這時 `dig()` 會挖到腳下的地板而不是前面的東西。
+        `create_bot()` 出生後會自動呼叫一次，所以直線腳本一開始就是平視的；
+        如果中途用過 `dig()` 或 `look_at()`（兩個都會自己轉視線），要再叫一次。
+
+        注意 `set_turn()` / `turn_left()` / `turn_right()` 只改左右朝向，
+        會保留上下角度，所以「轉個方向」不會把低頭的狀態清掉。
         """
 
     def get_height(self) -> int:
@@ -2971,9 +2989,12 @@ class Bot:
         """
 
     def set_height(self, level: int) -> None:
-        """設定大小等級，只接受 `1`~`5`，其餘丟出 `ValueError`
+        """請伺服器把大小改成等級 `1`~`5`，其餘丟出 `ValueError`
 
-        注意：實體大小由伺服器決定，實際縮放要靠競賽伺服器的插件配合。
+        和其他會改變世界的指令一樣是「伺服器說了算」：實際送出
+        `/trigger <帳號>_set_height set <等級>`，由關卡 datapack 決定要不要執行。
+        客戶端不會偷改任何東西，所以 `get_height()` 讀到的一直是**伺服器回報**的
+        大小 —— 如果請求沒有生效，`get_height()` 會照實回傳原本的等級。
 
         Args:
             level: 目標大小等級（1~5）
