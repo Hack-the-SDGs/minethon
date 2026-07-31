@@ -341,6 +341,10 @@ def test_create_bot_installs_the_repair(monkeypatch: pytest.MonkeyPatch) -> None
         rt, "get_mineflayer", lambda: SimpleNamespace(createBot=lambda _opts: js_bot)
     )
     monkeypatch.setattr(rt, "_install_quiet_interrupt", lambda: None)
+    # _install_velocity_repair would otherwise evaluate real JS — that spawns a
+    # node process inside a unit test. Its own wiring is asserted in
+    # test_velocity_repair.py; here it just has to stay inert.
+    monkeypatch.setattr(rt, "eval_js", lambda _code: lambda _bot: None)
     # create_bot probes the server's TCP port before handing off to mineflayer,
     # and a failed probe calls os._exit — which would take the test runner with
     # it. `example.invalid` never resolves, so this has to be stubbed.
