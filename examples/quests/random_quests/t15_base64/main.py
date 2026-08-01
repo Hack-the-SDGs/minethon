@@ -4,7 +4,7 @@ from minethon import create_bot
 
 bot = create_bot("bonus")
 
-cipher = "SSBsb3ZlIE5UVVNU"
+cipher = "密文"
 
 plain = base64.b64decode(cipher).decode()
 print(plain)
