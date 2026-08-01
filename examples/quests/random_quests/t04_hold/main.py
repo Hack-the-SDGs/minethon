@@ -2,4 +2,5 @@ from minethon import create_bot
 
 bot = create_bot("bonus")
 
-bot.hold("torch")
+while True:
+    bot.hold("torch")
