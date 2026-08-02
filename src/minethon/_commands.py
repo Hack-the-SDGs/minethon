@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from javascript import Once
 from javascript import config as js_config
+from javascript.errors import JavaScriptError
 
 from minethon._bridge import get_vec3
 from minethon.errors import MinethonError, NotSpawnedError, PlayerNotFoundError
@@ -98,7 +99,18 @@ _GRID_MOVE_PROVIDER_TITLE = "minethon:grid_move:v1"
 _GRID_MOVE_PROVIDER_CACHE_ATTR = "_grid_move_provider_objective"
 _GRID_MOVE_SEQUENCE_ATTR = "_grid_move_sequence"
 _GRID_MOVE_TIMEOUT = 5.0
-_GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS = 1000
+# Match the transaction budget: mineflayer resolves tabComplete with the *next*
+# tab_complete packet (no transaction id), so a request abandoned early is still
+# answered later and that late answer satisfies the following request — a stale
+# "trigger enabled" read from before our /trigger looks exactly like its ack.
+# Never give up while the transaction still cares about the answer.
+_GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS = int(_GRID_MOVE_TIMEOUT * 1000)
+# Raised when the completion round trip itself never came back — the transaction
+# neither succeeded nor was refused, so say that instead of blaming the datapack.
+_NO_TRIGGER_ANSWER = (
+    "伺服器沒有回應指令補全（/trigger 的建議清單），無法確認{action}是否完成。"
+    "通常是伺服器延遲太嚴重，請稍後再試一次。"
+)
 _GRID_MOVE_SEQUENCE_BASE = 10
 _GRID_MOVE_MAX_SEQUENCE = 200_000_000
 _GRID_MOVE_DIRECTIONS = {
@@ -812,7 +824,7 @@ class Commands:
         title = component_plaintext(getattr(scoreboard, "title", None))
         return title == _GRID_MOVE_PROVIDER_TITLE
 
-    def _enabled_trigger_objectives(self) -> set[str]:
+    def _enabled_trigger_objectives(self) -> set[str] | None:
         """Return trigger objectives currently enabled for this player.
 
         Vanilla Brigadier only suggests objectives accepted by ``/trigger`` for
@@ -820,18 +832,30 @@ class Commands:
         objective disappearing after a request and becoming suggestible again
         is a usable ACK when the server does not broadcast its score packets.
 
+        Returns ``None`` when the server did not answer in time. That is *not*
+        the same as an empty set: "nothing is enabled" means this bot is not
+        authorised (fall back to client-side movement), while an unanswered
+        lookup only means the server is lagging. Conflating them let one slow
+        round trip kill a student's script with a raw JS stack trace.
+
         Ref: mineflayer ``bot.tabComplete`` and minecraft-protocol 1.21.11
         ``packet_tab_complete.matches[].match``.
         """
         tab_complete = getattr(self._js, "tabComplete", None)
         if not callable(tab_complete):
             return set()
-        raw_matches = tab_complete(
-            "/trigger ",
-            True,
-            False,
-            _GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS,
-        )
+        try:
+            raw_matches = tab_complete(
+                "/trigger ",
+                True,
+                False,
+                _GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS,
+            )
+        except JavaScriptError:
+            # mineflayer rejects the promise when no tab_complete packet arrives
+            # in time; onceWithCleanup removes its listener either way, so the
+            # caller's poll loop can simply ask again.
+            return None
         if raw_matches is None:
             return set()
         try:
@@ -864,7 +888,13 @@ class Commands:
                 score = self._scoreboard_value(cached, username)
                 if score is not None:
                     return cached, username, score
-                if cached in self._enabled_trigger_objectives():
+                enabled = self._enabled_trigger_objectives()
+                # An unanswered lookup is not "no longer authorised". Dropping a
+                # provider we already proved would silently downgrade the move to
+                # client-side physics on a grid-authoritative server — the worst
+                # outcome, because it looks like it worked. The transaction's own
+                # deadline re-checks this with a real answer before sending.
+                if enabled is None or cached in enabled:
                     return cached, username, None
             object.__setattr__(self, _GRID_MOVE_PROVIDER_CACHE_ATTR, None)
 
@@ -876,14 +906,18 @@ class Commands:
 
         providers: list[tuple[str, int | None]] = []
         enabled: set[str] | None = None
+        asked = False
         for objective in marked:
             score = self._scoreboard_value(objective, username)
             if score is not None:
                 providers.append((objective, score))
                 continue
-            if enabled is None:
+            if not asked:
                 enabled = self._enabled_trigger_objectives()
-            if objective in enabled:
+                asked = True
+            # Unlike the cached path there is no prior proof this bot may drive
+            # the provider, so an unanswered lookup (``None``) cannot invent one.
+            if enabled and objective in enabled:
                 providers.append((objective, None))
 
         if len(providers) > 1:
@@ -931,25 +965,32 @@ class Commands:
             # earlier request has been fully processed. Every enabled state
             # seen after our send can then only come from our own request
             # (the provider re-enables in the same tick it processes).
-            while objective not in self._enabled_trigger_objectives():
+            while True:
+                enabled = self._enabled_trigger_objectives()
+                if enabled is not None and objective in enabled:
+                    break
                 if time.monotonic() >= deadline:
                     msg = (
-                        f"伺服器未完成{action}: 前一筆 provider 請求仍未被伺服器"
-                        "處理（trigger 尚未重新啟用），已放棄送出新請求。"
-                        "請確認任務進行中，且 datapack 與 minethon 版本一致。"
+                        _NO_TRIGGER_ANSWER.format(action=action)
+                        if enabled is None
+                        else (
+                            f"伺服器未完成{action}: 前一筆 provider 請求仍未被伺服器"
+                            "處理（trigger 尚未重新啟用），已放棄送出新請求。"
+                            "請確認任務進行中，且 datapack 與 minethon 版本一致。"
+                        )
                     )
                     raise MinethonError(msg)
                 time.sleep(_POLL_SECONDS)
         self._js.chat(f"/trigger {objective} set {payload}")
         while True:
             score_ack = self._scoreboard_value(objective, username) == -payload
-            trigger_ack = score is None and (
-                objective in self._enabled_trigger_objectives()
-            )
-            if score_ack or trigger_ack:
+            enabled = None if score is not None else self._enabled_trigger_objectives()
+            if score_ack or (enabled is not None and objective in enabled):
                 break
             if time.monotonic() >= deadline:
-                if score is None:
+                if score is None and enabled is None:
+                    msg = _NO_TRIGGER_ANSWER.format(action=action)
+                elif score is None:
                     msg = (
                         f"伺服器未完成{action}: provider trigger 未重新啟用。"
                         "請確認任務已開始，且 datapack 與 minethon 版本一致。"

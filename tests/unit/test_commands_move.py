@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+from javascript.errors import JavaScriptError
 
 import minethon._commands as cmd
 from minethon._bot_runtime import Bot
@@ -541,7 +542,37 @@ def test_server_grid_uses_trigger_reenable_ack_when_score_is_not_broadcast() -> 
         f"/trigger {fake.objective} set 21",
     ]
     assert fake.history == []
-    assert all(query == ("/trigger ", True, False, 1000) for query in fake.tab_queries)
+    assert all(
+        query == ("/trigger ", True, False, cmd._GRID_MOVE_TAB_COMPLETE_TIMEOUT_MS)
+        for query in fake.tab_queries
+    )
+
+
+def test_server_grid_survives_a_tab_complete_timeout() -> None:
+    """A laggy completion round trip retries; it never crashes or falls back."""
+    fake = ScorelessServerGridJs()
+    bot = Bot(fake)
+    bot.move_forward(1)  # discovers and caches the provider
+
+    answer = fake.tabComplete
+    lagging = iter([True, True, False])
+
+    def flaky(*args: object) -> list[dict[str, object]]:
+        if next(lagging, False):
+            msg = "Event tab_complete did not fire within timeout of 5000ms"
+            raise JavaScriptError("tabComplete", msg)
+        return answer(*args)  # pyright: ignore[reportArgumentType]
+
+    fake.tabComplete = flaky  # type: ignore[method-assign]
+
+    pos = bot.move_forward(1)
+
+    assert pos == (0.5, 64.0, -1.5)  # the grid move still happened
+    assert fake.history == []  # never downgraded to client-side walking
+    assert fake.commands == [
+        f"/trigger {fake.objective} set 11",
+        f"/trigger {fake.objective} set 21",
+    ]
 
 
 def test_server_grid_scoreless_provider_times_out_if_trigger_is_not_reenabled(

@@ -122,7 +122,7 @@ for _ in range(10):
     objective, username, ack = bot._grid_move_context()
     assert objective == "q.labfire.step", objective
     if ack is None:
-        assert objective in bot._enabled_trigger_objectives()
+        assert objective in (bot._enabled_trigger_objectives() or set())
         sequences.append(bot._grid_move_sequence)
     else:
         assert ack < 0, ack
