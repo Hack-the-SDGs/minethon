@@ -127,6 +127,22 @@ bot.bind(Greeter())
   `bot.entity.vehicle` 與 `vehicle.passengers` 仍是髒的（mineflayer 只走新乘客名單），SDK 內部沒有讀者，`bot.pyi` 的 hover 已加警告要學員改用 `is_riding()`。
   `_commands.py` 另外**完全取代**（不是包一層）mineflayer 的 `dismount()`，兩個理由：(1) 它在 1.21.3+ 按錯鍵——vanilla 是用潛行鍵下車，legacy `steer_vehicle` 的 `jump` 欄位是個 bitmask、`0x02` 位元就是 unmount，移植到 `player_input` 時把**欄位名**當成布林旗標搬過去，變成送出跳躍。minecraft-data 1.21.4 的 flags 是 `[forward, backward, left, right, jump, shift, sprint]`，而 `physics.js` 正是用 `player_input {shift: state}` 實作 sneak，所以改走 `sneak(True)` → 停 0.1s → `sneak(False)`。注意 `setControlState` 在值沒變時直接 return，所以本來就在潛行的機器人要先放開再按，事後再把學員原本的狀態放回去；1.21.3 以前 sneak 走的是 `entity_action`（不是下車輸入），那條路直接照抄 mineflayer 的 `steer_vehicle` payload。(2) 它在沒騎乘時 `bot.emit('error', 'dismount: not mounted')`，而 minethon 對任何 bot `error` 都 `os._exit(1)`——完全不呼叫它才能真的關掉這條路，只加 `if is_riding()` 守衛會留下 callback thread 可以插隊的窗口（同 `_write_use_entity` 的理由）。`_STUDENT_API_OVERRIDES` 同步加了名字。跟 mixin 其他方法一樣是 blocking：送出輸入後輪詢 `is_riding()`，2 秒沒下車就丟 `MinethonError`（不要安靜返回——「潛行鍵能下車」正是這整條最沒被驗證的假設）。但**在 callback thread 上不輪詢**：結束條件由 `_clear_stale_vehicle` 設定，而 JSPyBridge 所有 Python callback 共用一條 executor thread，handler 裡等於自己卡住唯一能放行的執行緒。**「潛行鍵能下車」是推測，要靠 integration test 驗。**
   「下車真的會送 `set_passengers`」這個大前提**只有 integration test 能驗**：`tests/integration/test_vehicle_dismount.py`（上車→下車→`is_riding()` 轉 False ＋ `on_dismount` 有觸發）。單元測試全部是照這個形狀假設寫的，改動這塊時務必連 integration 一起跑
+- **被攻擊瞬間位置變 NaN（mineflayer 4.37.0 ↔ minecraft-data 配對斷層，minethon 自己補）**：
+  entities.js 的 `entity_velocity` handler 把 1.21.2+ 的巢狀 `velocity`（vec3i16）形狀藏在
+  `supportFeature('entityVelocityIsLpVec3')` 後面，但它實際安裝到的 minecraft-data（≤3.110.x）
+  從未收錄這個 feature——查詢恆為 false，走 legacy 分支讀 `packet.velocityX`（undefined），
+  `fromNotchVelocity(Vec3(undefined))` 把 NaN 寫進 `entity.velocity`。對機器人自己，這個封包
+  正是被打的 knockback：下一個 physics tick 把 NaN 積分進 `bot.entity.position`（NaN+x=NaN），
+  JSPyBridge 的 JSON 層把 NaN 序列化成 null，之後 Python 端所有位置讀取都是 None——學員的
+  `move_forward()` 在被打的瞬間死於 `float(None)`，之後 `get_pos()` 也全壞。`create_bot` 因此裝
+  `_install_velocity_repair`：用 `eval_js` 在 node 端補一個 `entity_velocity` listener 重新解析
+  巢狀形狀（每包零 bridge 往返——理由同 `is_riding` 拒掛 `entityGone`）；EventEmitter 同步派發、
+  我們的 listener 排在 mineflayer 之後，physics interval 不可能在兩者之間觀察到 NaN。守衛是
+  「`velocityX` 缺席且 `velocity` 存在」：舊平面形狀（<1.21.2 伺服器）不動，健康配對（新
+  minecraft-data 已有 feature）只是重寫同值，冪等無害。上游已修（minecraft-data master 已加
+  feature、mineflayer master 移除 gate 直接讀巢狀），bundled mineflayer pin 升過 4.37.x 後此
+  修補可移除，留著也無害。JS 邏輯由 `tests/integration/test_velocity_repair_js.py` 驗證——該測試
+  只需要 node，不需要 Minecraft 伺服器
 - **已知洞 1：騎乘後物理可能永久關閉（尚未修，修之前必須先實測）**。`physics.js` 有 `bot.on('mount', () => { shouldUsePhysics = false })`，唯一設回 true 的地方是 clientbound `position` handler。前提未驗證：vanilla 下車時伺服器很可能本來就會 tp 玩家（`Entity#dismountTo` → `ServerPlayer` teleport），若成立則物理自己就復原，整個修都是多餘。合成 `position` 封包重新武裝是可行手段，但會偷走 `physics.js` 死亡後 2 秒內那個 one-shot 的 respawn 延遲，有 `Invalid move player packet` 踢線風險，所以先量再修
 - **已知洞 2：推動碰撞（被其他實體推開）根本沒實作**：`prismarine-physics` 只建方塊與液體的 AABB，完全沒有 entity-vs-entity collision；vanilla 這塊是 client 權威，所以伺服器也不會代勞。要有就得自己在 Node 端寫，且會與 datapack grid-move 的 server-authoritative ACK 打架——現階段刻意不做
 - 完整方法清單與中文 hover 見 `src/minethon/bot.pyi`；AI 替學員寫程式用的說明見 `skills/minethon/`

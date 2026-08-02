@@ -26,7 +26,7 @@ import warnings
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
-from javascript import On, Once, connection, require
+from javascript import On, Once, connection, eval_js, require
 
 from minethon._bridge import BUNDLED_VERSIONS, get_mineflayer
 from minethon._commands import (
@@ -302,6 +302,72 @@ def _install_dismount_repair(js_bot: Any) -> None:
     On(js_bot, BotEvent.RESPAWN.value)(
         _normalize_handler(reset, emitter=js_bot, event_name=BotEvent.RESPAWN.value)
     )
+
+
+_NO_CLIENT_VELOCITY_WARNING = (
+    "bot._client 不存在，無法修正擊退封包的速度解析。"
+    "機器人被攻擊後，位置可能從此讀不到。"
+)
+
+# Runs natively in node — the arrow this template returns closes over nothing
+# Python-side, so the per-packet cost is JS-only. The guard makes it a no-op
+# wherever mineflayer parsed correctly: flat `velocityX` packets (pre-1.21.2
+# servers) are left alone, and on a minecraft-data new enough to carry the
+# feature flag it merely rewrites the value mineflayer already stored.
+_VELOCITY_REPAIR_JS = """
+return (bot) => {
+  const FROM_NOTCH_VEL = 1 / 8000
+  bot._client.on('entity_velocity', (packet) => {
+    if (packet.velocityX !== undefined || !packet.velocity) return
+    const entity = bot.entities[packet.entityId]
+    if (!entity || !entity.velocity) return
+    entity.velocity.set(
+      packet.velocity.x * FROM_NOTCH_VEL,
+      packet.velocity.y * FROM_NOTCH_VEL,
+      packet.velocity.z * FROM_NOTCH_VEL
+    )
+  })
+}
+"""
+
+
+def _install_velocity_repair(js_bot: Any) -> None:
+    """Fix the NaN velocity mineflayer writes when the bot takes knockback.
+
+    mineflayer 4.37.0 supports the 1.21.2+ `entity_velocity` shape (a nested
+    vec3i16 `velocity` field) behind `supportFeature('entityVelocityIsLpVec3')`,
+    but the minecraft-data releases it installs against (≤ 3.110.x) never
+    shipped that feature: the query answers false, the legacy branch reads
+    `packet.velocityX` — undefined on 1.21.2+ — and `fromNotchVelocity` turns
+    `Vec3(undefined)` into NaN on `entity.velocity`.
+
+    For the bot's own entity that packet is knockback, so the first time
+    anything lands a hit, the next physics tick integrates NaN velocity into
+    `bot.entity.position` (NaN + x = NaN), JSPyBridge's JSON layer serializes
+    NaN as null, and from then on every position read in Python is None — a
+    student's `move_forward()` dies with `float() argument … not 'NoneType'`
+    the moment the bot is punched, and every later `get_pos()` stays broken.
+
+    The repair is a second `entity_velocity` listener installed *in node* via
+    `eval_js`: entity velocity changes are far too frequent for a per-packet
+    bridge callback (same reasoning as rejecting an `entityGone` listener for
+    `is_riding`). EventEmitter dispatch is synchronous and this listener
+    registers after mineflayer's, so the physics interval can never observe
+    the NaN in between. Upstream has since fixed the pairing (minecraft-data
+    master carries the feature, mineflayer master dropped the gate), so this
+    becomes removable once the bundled mineflayer pin moves past 4.37.x — and
+    it stays harmless if left in.
+
+    Ref: mineflayer lib/plugins/entities.js — `bot._client.on('entity_velocity')`;
+    mineflayer lib/conversions.js — `FROM_NOTCH_VEL = 1/8000`; minecraft-data
+    data/pc/1.21.4/protocol.json — `packet_entity_velocity` / `vec3i16`.
+    """
+    client = getattr(js_bot, "_client", None)
+    if client is None:
+        warnings.warn(_NO_CLIENT_VELOCITY_WARNING, RuntimeWarning, stacklevel=2)
+        return
+    install = eval_js(_VELOCITY_REPAIR_JS)
+    install(js_bot)
 
 
 def _install_quiet_interrupt() -> None:
@@ -834,6 +900,11 @@ def create_bot(
     # mineflayer leaves bot.vehicle pointing at the old vehicle after a
     # dismount, which pins is_riding() to True for the rest of the session.
     _install_dismount_repair(js_bot)
+    # mineflayer 4.37.0 paired with a minecraft-data that lacks
+    # 'entityVelocityIsLpVec3' mis-parses every 1.21.2+ knockback packet into
+    # NaN velocity; one punch would poison bot.entity.position (and so every
+    # position read) for the rest of the session.
+    _install_velocity_repair(js_bot)
     # End the script automatically when the server drops the bot, wherever the
     # main thread happens to be (mid-script or in the keep-alive below). `Once`
     # (not `On`) so the callback removes itself after firing — a lingering
