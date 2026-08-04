@@ -62,7 +62,12 @@ bot.bind(Greeter())
   `move_*` 從 `bot.scoreboards` 自動發現唯一 provider，整數 `blocks>1` 拆成逐格 trigger；若 client 收得到
   score，使用負 payload ACK，否則用 Brigadier completion 驗證 trigger 對本 bot 已 enable，並以 datapack
   重新 enable trigger 作 ACK。找不到 provider 時維持 `setControlState` + 位置輪詢 fallback，多個 provider
-  則明確報錯。轉向亦為伺服器權威：provider 存在時 `set_turn`（含 `turn`/`turn_left`/`turn_right` 委託路徑）
+  則明確報錯。**fallback 也落在格線上**：整數格數且面向四正向時，瞄準的是目的地格子的**中心**
+  （目前所在格 + 格數 ± 0.5），不是「從現在位置再走 N 格」。理由：放開控制鍵不會讓機器人停下，
+  地面摩擦會多滑約 0.2 格（實測 `move_forward(3)` 落在 3.19 格、小數座標），逐格累積後整個座標
+  模型會偏掉一格——`q10_labfire` 這種依賴格線的關卡就是這樣靜默算錯。每一步重新以「現在站的格子」
+  為錨點，誤差就留在該步之內、不會累積。小數格數與斜向面向沒有格子可落，維持原本的距離語意。
+  滑過頭跨到隔壁格時印一行（走不動則由既有的 stall timeout 負責，兩者互斥，同一次失敗只印一句）。轉向亦為伺服器權威：provider 存在時 `set_turn`（含 `turn`/`turn_left`/`turn_right` 委託路徑）
   把目標 yaw 量化到最近四正向，送出轉向碼 payload（方向碼＋4，即 5..8＝面向北東南西）並等相同交易的
   ACK；datapack 以帶絕對角度的 tp 執行，ACK 返回時 client/server yaw 保證一致。理由：client `look` 封包
   無送達保證（撞上伺服器 teleport confirm 窗口會被丟棄且 mineflayer 去重後不重送），會造成遊戲內朝向

@@ -44,6 +44,27 @@ class MoveJs:
         self.history.append((control, state))
 
 
+class CoastingMoveJs(MoveJs):
+    """Fake that keeps sliding after the control is released (ground friction).
+
+    Releasing a movement key does not stop a Minecraft player; horizontal
+    velocity decays over the following ticks. This is what made a raw-distance
+    walk land past its target.
+    """
+
+    def __init__(self, *, step: float, coast: float) -> None:
+        super().__init__(step=step)
+        self._coast = coast
+
+    def setControlState(self, control: str, state: bool) -> None:  # noqa: N802
+        if not state and self.controls.get(control):
+            if control == "forward":
+                self._z -= self._coast
+            elif control == "back":
+                self._z += self._coast
+        super().setControlState(control, state)
+
+
 class FakeClock:
     """Controllable monotonic clock for long-running movement tests."""
 
@@ -253,7 +274,7 @@ def _expiring_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cmd.time, "monotonic", lambda t=ticks: next(t))
 
 
-def test_move_forward_toggles_control_and_reaches_distance(
+def test_move_forward_toggles_control_and_lands_on_the_cell_centre(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _frozen_clock(monkeypatch)
@@ -263,7 +284,10 @@ def test_move_forward_toggles_control_and_reaches_distance(
 
     assert fake.history == [("forward", True), ("forward", False)]
     assert fake.controls["forward"] is False  # always released at the end
-    assert pos[2] <= -2.0
+    # Two cells north of cell 0 is cell -2; the walk aims at its centre, not at
+    # a raw 2.0 from wherever the bot happened to stand.
+    assert pos[2] == pytest.approx(-1.5)
+    assert cmd.math.floor(pos[2]) == -2
 
 
 def test_move_backward_uses_back_control(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -308,7 +332,9 @@ def test_all_move_controls_reach_the_requested_direction(
     pos = getattr(Bot(fake), method)(3.0)
 
     coordinate = pos[0] if axis == "x" else pos[2]
-    assert coordinate * sign >= 3.0
+    expected_cell = sign * 3
+    assert cmd.math.floor(coordinate) == expected_cell
+    assert coordinate == pytest.approx(expected_cell + 0.5)
 
 
 def test_unrelated_scoreboard_uses_physics_fallback(
@@ -326,7 +352,7 @@ def test_unrelated_scoreboard_uses_physics_fallback(
 
     pos = Bot(fake).move_forward(1)
 
-    assert pos[2] <= -1.0
+    assert pos[2] == pytest.approx(-0.5)  # centre of cell -1
     assert fake.history == [("forward", True), ("forward", False)]
 
 
@@ -893,9 +919,9 @@ def test_progress_refreshes_timeout_during_a_long_slow_walk(
     monkeypatch.setattr(cmd.time, "sleep", lambda _seconds: clock.sleep(1.0))
     fake = MoveJs(step=0.25)
 
-    pos = Bot(fake).move_forward(2.0)
+    pos = Bot(fake).move_forward(3.0)
 
-    assert pos[2] <= -2.0
+    assert pos[2] == pytest.approx(-2.5)  # centre of cell -3
     assert clock.now > cmd._WALK_STALL_TIMEOUT
 
 
@@ -925,6 +951,106 @@ def test_final_progress_sample_is_read_at_stall_boundary(
 
     assert pos == (0.0, 64.0, -1.0)
     assert clock.now == cmd._WALK_STALL_TIMEOUT
+
+
+def test_coasting_walks_do_not_accumulate_drift_across_cells(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Five one-cell moves land five cells away, despite overshooting each time.
+
+    Aiming at a raw distance would add the coast to every move — 5 x 1.2 = 6.0
+    blocks, i.e. one whole cell too far, which is exactly how a maze script's
+    model comes apart. Re-anchoring on the current cell keeps the error inside
+    the cell it was made in.
+    """
+    _frozen_clock(monkeypatch)
+    fake = CoastingMoveJs(step=0.25, coast=0.2)
+    fake._z = 0.5  # standing on the centre of cell 0
+    bot = Bot(fake)
+
+    for _ in range(5):
+        bot.move_forward(1)
+
+    assert cmd.math.floor(fake.entity.position.z) == -5
+    assert capsys.readouterr().out == ""  # every step landed on its cell
+
+
+def test_walk_reports_a_coast_that_crossed_into_the_next_cell(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A whole cell of error is said out loud, not returned silently."""
+    _frozen_clock(monkeypatch)
+    fake = CoastingMoveJs(step=0.25, coast=0.9)  # ice, or a very late poll
+    fake._z = 0.5
+
+    pos = Bot(fake).move_forward(1)
+
+    assert pos[2] == pytest.approx(-1.4)  # -0.5 target, coasted 0.9 past it
+    out = capsys.readouterr().out
+    assert "滑過頭了" in out
+    assert "z=-1 這一格" in out  # wanted cell -1
+    assert "z=-2 這一格" in out  # landed in cell -2
+
+
+def test_walk_that_stays_in_its_cell_says_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Coasting past the centre is normal; only crossing the boundary matters."""
+    _frozen_clock(monkeypatch)
+    fake = CoastingMoveJs(step=0.25, coast=0.3)
+    fake._z = 0.5
+
+    pos = Bot(fake).move_forward(1)
+
+    assert pos[2] == pytest.approx(-0.8)  # 0.3 past the centre, same cell
+    assert capsys.readouterr().out == ""
+
+
+def test_blocked_walk_reports_the_wall_only_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A wall is one failure, so it gets one message, not two."""
+    _expiring_clock(monkeypatch)
+    fake = MoveJs(step=0.0)
+    fake._z = 0.5
+
+    Bot(fake).move_forward(1)
+
+    out = capsys.readouterr().out
+    assert "前面有東西擋住" in out
+    assert "沒有停在格子中央" not in out
+
+
+@pytest.mark.parametrize(
+    ("blocks", "yaw"),
+    [
+        (0.5, 0.0),  # half a block has no cell to land on
+        (3.0, cmd.math.pi / 4),  # a diagonal facing has no axis to align to
+    ],
+)
+def test_walks_without_a_cell_to_land_on_keep_raw_distance(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    blocks: float,
+    yaw: float,
+) -> None:
+    _frozen_clock(monkeypatch)
+    fake = MoveJs(step=0.25)
+    fake._z = 0.5
+    fake.yaw = yaw
+
+    pos = Bot(fake).move_forward(blocks)
+
+    # The fake always slides along -z; only its component along the facing
+    # counts as progress, which is what the walk measures.
+    covered = (0.5 - pos[2]) * cmd.math.cos(yaw)
+    assert covered >= blocks  # went the requested distance...
+    assert covered < blocks + 0.5  # ...and stopped as soon as it had
+    assert capsys.readouterr().out == ""  # no cell to miss, so nothing to say
 
 
 def test_move_zero_blocks_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:

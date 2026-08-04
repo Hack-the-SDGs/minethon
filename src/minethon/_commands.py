@@ -26,7 +26,7 @@ import threading
 import time
 import warnings
 from functools import wraps
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from javascript import Once
 from javascript import config as js_config
@@ -94,6 +94,23 @@ _SUGGEST_SCAN_LIMIT = 5000
 _POLL_SECONDS = 0.05  # ~one physics tick
 _WALK_STALL_TIMEOUT = 5.0  # tolerate eight-tick grid locks even near 2 TPS
 _WALK_PROGRESS_EPSILON = 0.01  # ignore packet jitter when refreshing the stall timer
+# Fallback walks aim at the centre of the destination cell, not at a raw
+# distance from wherever the bot happens to stand. Two reasons:
+#   1. Releasing the control does not stop the bot — ground friction carries it
+#      ~0.2 further, so `move_forward(3)` landed 3.19 blocks out on fractional
+#      coordinates (measured; docs/review/design-findings.md P0-4). A distance
+#      taken from that fractional position carries the error into the next
+#      move, and a maze run ends up a whole cell from where its model says.
+#   2. Partial-width blocks make the resting place worse. An oak_fence collides
+#      at 0.375 (shape [0.375,0,0.375,0.625,1.5,0.625]) and the player half
+#      width is 0.3, so a bot walking into one stops 0.075 inside that cell —
+#      0.375 further than a full block allows, and 0.425 from the centre. The
+#      walk itself stalls (it never reaches the centre it aimed at, so the
+#      stall timeout reports it), but without re-anchoring, every later move
+#      would inherit that 0.425 as a permanent offset.
+# Ref: prismarine-physics (player half-width 0.3), minecraft-data block shapes.
+_WALK_CELL_CENTRE = 0.5
+_WALK_AXIS_ALIGNED_MIN = 0.999  # |component| of a cardinal facing, ~2.5° slack
 _GRID_MOVE_PROVIDER_TITLE = "minethon:grid_move:v1"
 _GRID_MOVE_PROVIDER_CACHE_ATTR = "_grid_move_provider_objective"
 _GRID_MOVE_SEQUENCE_ATTR = "_grid_move_sequence"
@@ -287,6 +304,45 @@ def _grid_direction(control: str, yaw: float) -> int:
         if direction_z > 0
         else _GRID_MOVE_DIRECTIONS["north"]
     )
+
+
+class _CellWalk(NamedTuple):
+    """Grid-aligned plan for one fallback walk."""
+
+    axis: str
+    """``"x"`` or ``"z"`` — the axis the bot travels along."""
+    goal_progress: float
+    """Distance to cover before releasing the control."""
+    expected_cell: int
+    """Block coordinate the bot must end up inside."""
+
+
+def _cell_walk(
+    start_x: float,
+    start_z: float,
+    direction_x: float,
+    direction_z: float,
+    blocks: float,
+) -> _CellWalk | None:
+    """Plan a whole-block walk along a cardinal facing, else ``None``.
+
+    Aiming at the centre of the destination cell — rather than at a raw
+    distance from wherever the bot happens to stand — puts the fallback on the
+    same lattice as the server-grid path, so overshoot is re-anchored every
+    move instead of accumulating. Diagonal facings and fractional distances
+    have no cell to land on, so they keep the plain distance behaviour.
+    """
+    if not float(blocks).is_integer():
+        return None
+    if abs(direction_x) >= _WALK_AXIS_ALIGNED_MIN:
+        axis, start_value, sign = "x", start_x, 1 if direction_x > 0 else -1
+    elif abs(direction_z) >= _WALK_AXIS_ALIGNED_MIN:
+        axis, start_value, sign = "z", start_z, 1 if direction_z > 0 else -1
+    else:
+        return None
+    expected_cell = math.floor(start_value) + sign * int(blocks)
+    target = expected_cell + _WALK_CELL_CENTRE
+    return _CellWalk(axis, (target - start_value) * sign, expected_cell)
 
 
 def _mapping_item(mapping: Any, key: str) -> Any:
@@ -1028,8 +1084,11 @@ class Commands:
         start = entity.position
         sx, sz = float(start.x), float(start.z)
         direction_x, direction_z = _control_vector(control, float(entity.yaw))
+        plan = _cell_walk(sx, sz, direction_x, direction_z, blocks)
+        goal = blocks if plan is None else plan.goal_progress
         best_progress = 0.0
         last_progress_at = time.monotonic()
+        blocked = False
         self._js.setControlState(control, True)
         try:
             while True:
@@ -1037,7 +1096,7 @@ class Commands:
                 progress = (float(pos.x) - sx) * direction_x + (
                     float(pos.z) - sz
                 ) * direction_z
-                if progress >= blocks:
+                if progress >= goal:
                     break
                 now = time.monotonic()
                 if progress >= best_progress + _WALK_PROGRESS_EPSILON:
@@ -1047,6 +1106,7 @@ class Commands:
                     # Walking into a wall used to return the current position
                     # with no exception and no output, so the rest of a
                     # straight-line script ran on from the wrong place.
+                    blocked = True
                     print(  # noqa: T201 — student-facing, intentional
                         f"前面有東西擋住，只走了 {progress:.1f} 格就走不動了"
                         f"（本來要走 {blocks:g} 格）。",
@@ -1056,7 +1116,44 @@ class Commands:
                 time.sleep(_POLL_SECONDS)
         finally:
             self._js.setControlState(control, False)
-        return self.get_pos()
+        final = self.get_pos()
+        if not blocked:
+            self._warn_if_off_cell(plan, final)
+        return final
+
+    def _warn_if_off_cell(
+        self,
+        plan: _CellWalk | None,
+        final: tuple[float, float, float],
+    ) -> None:
+        """Say so when a walk slid past its cell instead of stopping on it.
+
+        Releasing the control does not stop the bot; it coasts. Landing a
+        little past the centre is harmless because the next walk re-anchors on
+        whatever cell it is standing in — but once the coast carries it over a
+        cell boundary the script's model is a whole cell out, which is the
+        failure that makes a maze run report success from the wrong place.
+
+        Only reachable when the walk met its goal: a wall the bot cannot get
+        through leaves ``progress`` short of the goal and is reported by the
+        stall timeout instead. That includes fences, which stop the bot 0.075
+        inside their own cell (they collide at 0.375; the player half-width is
+        0.3) — short of the centre it was aiming at, so the walk stalls rather
+        than arriving. Two messages for one failure would read as two
+        problems, hence the caller's guard.
+        """
+        if plan is None:
+            return
+        actual = final[0] if plan.axis == "x" else final[2]
+        actual_cell = math.floor(actual)
+        if actual_cell == plan.expected_cell:
+            return
+        print(  # noqa: T201 — student-facing, intentional
+            f"滑過頭了：想停在 {plan.axis}={plan.expected_cell} 這一格，"  # noqa: RUF001 — zh-TW fullwidth colon
+            f"實際停在 {plan.axis}={actual_cell} 這一格"
+            f"（{plan.axis}={actual:.2f}）。",
+            flush=True,
+        )
 
     @_paced
     def move_forward(self, blocks: float = 1.0) -> tuple[float, float, float]:
